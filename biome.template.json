@@ -34,13 +34,11 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
       "style": {
         "useConst": "error"
       },
       "suspicious": {
         "noVar": "error",
-        "noConsole": "error",
         "noDebugger": "warn"
       },
       "correctness": {

@@ -17,7 +17,7 @@ async function loadConfig() {
       const config = JSON.parse(await fs.readFile(configPath, 'utf-8'));
       if (config.targetPath) targetPath = config.targetPath;
       if (config.jsonPath) jsonPath = config.jsonPath;
-    } catch (e) {
+    } catch (_e) {
       console.warn('Fehler beim Lesen der config.json, nutze Standardwerte.');
     }
   }
@@ -86,7 +86,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
         }
       })
     );
-  } catch (err) {
+  } catch (_err) {
     /* Fehler ignorieren */
   }
 
@@ -97,7 +97,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     try {
       const lEntries = await fs.readdir(lastDir, { withFileTypes: true });
       lastFiles = lEntries.filter((e) => e.isFile()).map((e) => path.join(lastDir, e.name));
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   return {
@@ -131,7 +131,7 @@ async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 
       subDirs.map((dir) => scanDirectory(path.join(currentDir, dir.name), cacheMap, currentDepth + 1, maxDepth))
     );
     return results.flat();
-  } catch (err) {
+  } catch (_err) {
     return [];
   }
 }
@@ -157,8 +157,10 @@ async function run() {
     if (!IS_FULL_RESCAN && existsSync(OUTPUT_FILE)) {
       try {
         const oldData = JSON.parse(await fs.readFile(OUTPUT_FILE, 'utf-8'));
-        oldData.forEach((item) => cacheMap.set(item.path, item));
-      } catch (e) {}
+        oldData.forEach((item) => {
+          cacheMap.set(item.path, item);
+        });
+      } catch (_e) {}
     }
 
     const softwareList = await scanDirectory(ROOT_DIR, cacheMap);

@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const { exec } = require('child_process');
+const path = require('node:path');
+const fs = require('node:fs');
+const { exec } = require('node:child_process');
 
 function getConfig() {
   // Wenn als Exe gepackt, ist der Ordner da wo die Exe liegt. Sonst Entwicklungsordner.
@@ -12,7 +12,7 @@ function getConfig() {
   if (fs.existsSync(configPath)) {
     try {
       Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   return {
@@ -32,7 +32,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  ipcMain.on('open-path', (event, folderPath) => shell.openPath(folderPath));
+  ipcMain.on('open-path', (_event, folderPath) => shell.openPath(folderPath));
 
   // Daten an Frontend schicken
   ipcMain.handle('load-catalog', async () => {
@@ -44,12 +44,12 @@ app.whenReady().then(() => {
   });
 
   // Scanner ausführen
-  ipcMain.handle('run-scan', async (event, isFull) => {
+  ipcMain.handle('run-scan', async (_event, isFull) => {
     const { scriptPath, appFolder } = getConfig();
     return new Promise((resolve, reject) => {
       // WICHTIG: Erfordert, dass auf dem ausführenden PC Node.js installiert ist!
       const cmd = `node "${scriptPath}" ${isFull ? '--full' : ''}`;
-      exec(cmd, { cwd: appFolder }, (error, stdout, stderr) => {
+      exec(cmd, { cwd: appFolder }, (error, stdout, _stderr) => {
         if (error) reject(error.message);
         else resolve(stdout);
       });
@@ -57,7 +57,7 @@ app.whenReady().then(() => {
   });
 
   // Dateien aus _last herunterladen (kopieren)
-  ipcMain.handle('download-files', async (event, sourceFiles) => {
+  ipcMain.handle('download-files', async (_event, sourceFiles) => {
     // 1. Benutzer wählt Zielordner aus
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Speicherort für Download auswählen',
@@ -80,7 +80,7 @@ app.whenReady().then(() => {
   });
 
   // Öffnet Web-Links im Standardbrowser (Chrome/Edge/Firefox)
-  ipcMain.on('open-url', (event, url) => shell.openExternal(url));
+  ipcMain.on('open-url', (_event, url) => shell.openExternal(url));
 
   createWindow();
 });

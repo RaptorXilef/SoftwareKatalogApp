@@ -28,7 +28,7 @@
       cursor: pointer; border: 1px solid var(--border); transition: 0.2s;
     }
     .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-    
+
     /* Grid */
     .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;
@@ -39,7 +39,7 @@
     }
     .card:hover { transform: translateY(-5px); border-color: var(--accent); }
     .card img { width: 64px; height: 64px; object-fit: contain; margin-bottom: 15px; }
-    
+
     /* Modal */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.7);
@@ -67,15 +67,15 @@
   <div class="toolbar">
     <div style="display: flex; gap: 15px; width: 100%;">
       <input type="text" id="searchInput" placeholder="Software suchen..." style="flex: 1;">
-      <button id="btnScan" class="action-btn" style="margin: 0;" onclick="startScan(false)">Neu scannen</button>
-      <button id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="startScan(true)">Vollständiger Rescan</button>
+      <button type="button" id="btnScan" class="action-btn" style="margin: 0;" onclick="_startScan(false)">Neu scannen</button>
+      <button type="button" id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="_startScan(true)">Vollständiger Rescan</button>
     </div>
     <div class="tags" id="tagContainer"></div>
   </div>
 
   <div class="grid" id="grid"></div>
 
-  <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" onclick="_closeModal(event)" onkeydown="if(event.key === 'Escape') _closeModal(event)">
     <div class="modal" id="modalContent">
       <!-- Modal Content gets injected here -->
     </div>
@@ -94,21 +94,21 @@
             const res = await fetch('catalog.json');
             catalog = await res.json();
         }
-        
+
         if(catalog.length === 0) {
             document.getElementById('grid').innerHTML = '<p>Katalog leer. Bitte zuerst scannen.</p>';
         } else {
             renderTags();
             renderGrid();
         }
-        } catch (e) {
+        } catch (_e) {
         document.getElementById('grid').innerHTML = '<p>Fehler: Konnte Daten nicht laden.</p>';
         }
     }
 
-    async function startScan(isFull) {
+    async function _startScan(isFull) {
       if (!window.electronAPI) return alert("Scannen ist nur in der Desktop-App möglich.");
-      
+
       const btnScan = document.getElementById('btnScan');
       const btnFullScan = document.getElementById('btnFullScan');
       const grid = document.getElementById('grid');
@@ -116,41 +116,46 @@
       // UI sperren
       btnScan.disabled = true;
       btnFullScan.disabled = true;
-      btnScan.innerText = "Scan läuft...";
+      btnScan.textContent = "Scan läuft...";
       grid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 40px;"><p>Durchsuche NAS-Laufwerk... Das kann einen Moment dauern.</p></div>';
 
       try {
         const output = await window.electronAPI.runScan(isFull);
-        console.log(output); 
+        console.log(output);
         await init(); // Nach Scan neu laden (rendert das Grid wieder)
       } catch (error) {
         if(error.includes("LOCKED")) {
           alert("Scan abgebrochen: Ein anderes Familienmitglied führt gerade einen Scan durch.");
         } else {
-          alert("Fehler beim Scannen:\n" + error);
+          alert(`Fehler beim Scannen:\n${error}`);
         }
         init(); // Versuche den alten Zustand wiederherzustellen
       } finally {
         // UI wieder entsperren
         btnScan.disabled = false;
         btnFullScan.disabled = false;
-        btnScan.innerText = "Neu scannen";
+        btnScan.textContent = "Neu scannen";
       }
     }
 
     function renderTags() {
       const allTags = new Set();
-      catalog.forEach(item => item.tags.forEach(t => allTags.add(t)));
-      
+      // forEach ohne automatischen Return via geschweifte Klammern
+      catalog.forEach(item => {
+        item.tags.forEach(t => {
+          allTags.add(t);
+        });
+      });
+
       const container = document.getElementById('tagContainer');
-      container.innerHTML = `<div class="tag ${!activeTag ? 'active' : ''}" onclick="filterByTag(null)">Alle</div>`;
-      
+      container.innerHTML = `<div class="tag ${!activeTag ? 'active' : ''}" onclick="_filterByTag(null)">Alle</div>`;
+
       Array.from(allTags).sort().forEach(tag => {
-        container.innerHTML += `<div class="tag ${activeTag === tag ? 'active' : ''}" onclick="filterByTag('${tag}')">${tag}</div>`;
+        container.innerHTML += `<div class="tag ${activeTag === tag ? 'active' : ''}" onclick="_filterByTag('${tag}')">${tag}</div>`;
       });
     }
 
-    function filterByTag(tag) {
+    function _filterByTag(tag) {
       activeTag = tag;
       renderTags();
       renderGrid();
@@ -161,7 +166,7 @@
     function renderGrid() {
       const search = document.getElementById('searchInput').value.toLowerCase();
       const grid = document.getElementById('grid');
-      
+
       const filtered = catalog.filter(item => {
         const matchesSearch = item.name.toLowerCase().includes(search) || item.description.toLowerCase().includes(search);
         const matchesTag = !activeTag || item.tags.includes(activeTag);
@@ -169,7 +174,7 @@
       });
 
       grid.innerHTML = filtered.map(item => `
-        <div class="card" onclick="openModal('${item.id}')">
+        <div class="card" onclick="_openModal('${item.id}')">
           ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" alt="Icon" onerror="this.style.display='none'">` : ''}
           <h3>${item.name}</h3>
           <small>${item.tags.join(', ')}</small>
@@ -177,18 +182,18 @@
       `).join('');
     }
 
-    function openModal(id) {
+    function _openModal(id) {
       const item = catalog.find(i => i.id === id);
       if (!item) return;
 
       const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${item.os.join(', ')}</p>` : '';
       const catText = item.mainCategory ? `<p><strong>Kategorie:</strong> ${item.mainCategory} ${item.subCategories.length > 0 ? `(${item.subCategories.join(', ')})` : ''}</p>` : '';
-      
+
       let downloadHtml = '';
       if (item.lastFiles && item.lastFiles.length > 0) {
         downloadHtml = `
-          <button class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;" 
-                  onclick='startDownload(${JSON.stringify(item.lastFiles)})'>
+          <button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;"
+                  onclick='_startDownload(${JSON.stringify(item.lastFiles)})'>
             Neueste Version downloaden (${item.lastFiles.length} Datei/en)
           </button>`;
       }
@@ -196,22 +201,22 @@
       // 1. Links generieren
       let linksHtml = '';
       if (item.links && item.links.length > 0) {
-        linksHtml = `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">` + 
-          item.links.map(l => `<li><a href="#" style="color: var(--accent);" onclick="openExternalUrl('${l.url}')">${l.label}</a></li>`).join('') + 
+        linksHtml = `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">` +
+          item.links.map(l => `<li><a href="#" style="color: var(--accent);" onclick="_openExternalUrl('${l.url}')">${l.label}</a></li>`).join('') +
         `</ul></div>`;
       }
 
       // 2. Screenshots generieren
       let imagesHtml = '';
       if (item.screenshots && item.screenshots.length > 0) {
-        imagesHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` + 
+        imagesHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
           item.screenshots.map(s => `<img src="file:///${s.replace(/\\/g, '/')}" style="height: 120px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`).join('') +
         `</div>`;
       }
 
       const modal = document.getElementById('modalContent');
       modal.innerHTML = `
-        <button class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'">&times;</button>
+        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'">&times;</button>
         <div style="display: flex; gap: 20px; align-items: flex-start;">
           ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" style="width: 80px; height: 80px; object-fit: contain;">` : ''}
           <div>
@@ -227,15 +232,14 @@
           <p><small style="color: gray;">Pfad: ${item.path}</small></p>
         </div>
         <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px;">
-          <button class="action-btn" onclick="openInExplorer('${item.path.replace(/\\/g, '\\\\')}')">Im Explorer öffnen</button>
+          <button type="button" class="action-btn" onclick="_openInExplorer('${item.path.replace(/\\/g, '\\\\')}')">Im Explorer öffnen</button>
           ${downloadHtml}
         </div>
       `;
       document.getElementById('modalOverlay').style.display = 'flex';
     }
 
-    // Neue kleine Hilfsfunktion für Weblinks
-    function openExternalUrl(url) {
+    function _openExternalUrl(url) {
       if (window.electronAPI) {
         window.electronAPI.openUrl(url);
       } else {
@@ -243,35 +247,33 @@
       }
     }
 
-    // Neue Funktion für den Download
-    async function startDownload(files) {
+    async function _startDownload(files) {
       const btn = event.target;
-      const originalText = btn.innerText;
-      btn.innerText = "Kopiere...";
+      const originalText = btn.textContent;
+      btn.textContent = "Kopiere...";
       btn.disabled = true;
 
       const res = await window.electronAPI.downloadFiles(files);
-      
+
       if (res.success) {
-        alert("Erfolgreich gespeichert unter:\n" + res.dest);
+        alert(`Erfolgreich gespeichert unter:\n${res.dest}`);
       } else if (res.error) {
-        alert("Fehler beim Kopieren:\n" + res.error);
+        alert(`Fehler beim Kopieren:\n${res.error}`);
       }
-      
-      btn.innerText = originalText;
+
+      btn.textContent = originalText;
       btn.disabled = false;
     }
 
-    function closeModal(e) {
+    function _closeModal(e) {
       if (e.target.id === 'modalOverlay') e.target.style.display = 'none';
     }
 
-    function openInExplorer(path) {
-      // Diese Funktion wird in Electron abgefangen
+    function _openInExplorer(path) {
       if (window.electronAPI) {
         window.electronAPI.openPath(path);
       } else {
-        alert("Um Ordner nativ zu öffnen, muss die App über Electron gestartet werden.\\nPfad: " + path);
+        alert(`Um Ordner nativ zu öffnen, muss die App über Electron gestartet werden.\\nPfad: ${path}`);
       }
     }
 
