@@ -1,0 +1,2 @@
+Zeile 1 ist die Hauptkategorie (z. B. Systemwartung)
+Zeile 2 sind die Sub-Kategorien (z. B. Uninstaller, RegistryCleaner, Sicherheit)

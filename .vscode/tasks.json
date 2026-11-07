@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "start",
+      "label": "App starten (Test)",
+      "problemMatcher": [],
+      "group": "build",
+      "detail": "Startet die Electron App lokal"
+    },
+    {
+      "type": "npm",
+      "script": "build",
+      "label": "EXE bauen",
+      "problemMatcher": [],
+      "group": "build",
+      "detail": "Kompiliert die portable Windows .exe"
+    }
+  ]
+}

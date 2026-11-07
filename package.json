@@ -1,0 +1,50 @@
+{
+  "name": "software-katalog",
+  "version": "1.0.0",
+  "description": "Ein portabler Software-Katalog für das NAS",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "scan": "node scanner.mjs",
+    "scan:full": "node scanner.mjs --full",
+    "build": "electron-builder --win portable",
+    "prepare": "husky",
+    "chk:biome": "biome check .",
+    "fix:biome": "biome check --write .",
+    "release": "release-it"
+  },
+  "keywords": [
+    "nas",
+    "catalog",
+    "electron"
+  ],
+  "author": "Dein Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@release-it/conventional-changelog": "^12.0.2",
+    "electron": "^45.2.3",
+    "electron-builder": "^25.1.0",
+    "husky": "^9.1.7",
+    "release-it": "^21.1.2"
+  },
+  "build": {
+    "appId": "com.familie.softwarekatalog",
+    "productName": "Software Katalog",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "SoftwareKatalog.exe"
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}

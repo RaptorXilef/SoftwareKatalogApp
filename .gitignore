@@ -1,0 +1,15 @@
+# Node Dependencies
+node_modules/
+
+# Build Output
+dist/
+build/
+
+# Generierte Daten (sollten lokal bleiben / dynamisch erzeugt werden)
+catalog.json
+
+# OS spezifische Dateien
+.DS_Store
+Thumbs.db
+
+notes.txt

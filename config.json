@@ -1,0 +1,5 @@
+{
+  "targetPath": "../software",
+  "jsonPath": "catalog.json",
+  "scriptPath": "scanner.mjs"
+}

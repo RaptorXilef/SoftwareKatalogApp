@@ -1,0 +1,40 @@
+name: Build and Upload EXE
+
+# Startet den Workflow automatisch, wenn ein Release veröffentlicht wird
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build Windows EXE
+    runs-on: windows-latest # Wir nutzen Windows, um die .exe nativ zu bauen
+
+    # Gibt dem automatischen Token die Rechte, Dateien zum Release hochzuladen
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Node.js einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20" # Nutzt die aktuelle stabile Node-Version
+          cache: "npm"
+
+      - name: 📦 Abhängigkeiten installieren
+        run: npm install
+
+      - name: 🏗️ Portable EXE bauen
+        run: npm run build
+
+      - name: 🚀 Dateien an GitHub Release anhängen
+        uses: softprops/action-gh-release@v2
+        with:
+          # Der Pfad zur gebauten EXE, wie in deiner package.json definiert
+          files: |
+            dist/SoftwareKatalog.exe
+            scanner.mjs
+            config.json
