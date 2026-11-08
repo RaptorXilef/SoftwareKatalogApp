@@ -29,6 +29,22 @@
     }
     .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 
+    /* Header */
+    .header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
+    }
+    .header h1 { margin: 0; font-size: 24px; color: var(--accent); display: flex; align-items: baseline; gap: 10px; }
+    .header .subtitle { font-size: 14px; color: var(--text); opacity: 0.7; font-weight: normal; }
+    .icon-btn {
+      background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text);
+      transition: color 0.2s, transform 0.2s; padding: 5px;
+    }
+    .icon-btn:hover { color: var(--accent); transform: rotate(90deg); }
+
+    /* Settings Modal Input */
+    .settings-row { display: flex; gap: 10px; margin-top: 10px; }
+    .settings-row input { flex: 1; }
+
     /* Grid */
     .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;
@@ -88,6 +104,10 @@
   </style>
 </head>
 <body>
+<div class="header">
+    <h1>Software Katalog <span class="subtitle">by Felix Maywald <span id="appVersion"></span></span></h1>
+    <button class="icon-btn" onclick="_openSettings()" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
+  </div>
 
   <div class="toolbar">
     <div style="display: flex; gap: 15px; width: 100%;">
@@ -385,6 +405,55 @@
       document.getElementById('lightboxOverlay').style.display = 'flex';
     }
 
+    async function _loadAppInfo() {
+      if (window.electronAPI) {
+        const info = await window.electronAPI.getAppInfo();
+        document.getElementById('appVersion').textContent = `(v${info.version})`;
+      }
+    }
+
+    async function _openSettings() {
+      if (!window.electronAPI) return alert("Einstellungen sind nur in der Desktop-App verfügbar.");
+
+      const currentPath = await window.electronAPI.getTargetDir();
+
+      const modal = document.getElementById('modalContent');
+      modal.innerHTML = `
+        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'">&times;</button>
+        <h2>Einstellungen</h2>
+        <p>Lege hier den Hauptordner fest, in dem sich deine Software (die _metadata Ordner) befindet.</p>
+
+        <div class="settings-row">
+          <input type="text" id="targetPathInput" value="${currentPath}" readonly>
+          <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseTargetDir()">Ordner wählen...</button>
+        </div>
+
+        <div style="margin-top: 30px; text-align: right;">
+          <button type="button" class="action-btn" onclick="_saveSettings()">Speichern</button>
+        </div>
+      `;
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    async function _browseTargetDir() {
+      const selectedPath = await window.electronAPI.selectTargetDir();
+      if (selectedPath) {
+        document.getElementById('targetPathInput').value = selectedPath;
+      }
+    }
+
+    async function _saveSettings() {
+      const newPath = document.getElementById('targetPathInput').value;
+      const res = await window.electronAPI.saveTargetDir(newPath);
+      if (res.success) {
+        document.getElementById('modalOverlay').style.display='none';
+        alert("Pfad erfolgreich gespeichert. Bitte starte einen neuen Scan, um den Katalog zu aktualisieren.");
+      } else {
+        alert(`Fehler beim Speichern:\n${res.error}`);
+      }
+    }
+
+    _loadAppInfo();
     init();
   </script>
 </body>

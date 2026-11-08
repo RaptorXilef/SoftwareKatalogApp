@@ -2,27 +2,53 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
-function getConfig() {
-  // FIX: Den echten Ordner der Portable.exe auslesen, statt des Temp-Entpack-Ordners!
-  let appFolder = __dirname;
+// Basis-Pfade definieren
+function getAppFolder() {
   if (app.isPackaged) {
-    appFolder = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
+    return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
   }
+  return __dirname;
+}
 
+function getConfig() {
+  const appFolder = getAppFolder();
   const configPath = path.join(appFolder, 'config.json');
 
-  const config = { jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
+  // Standard-Werte
+  const config = { targetPath: '../software', jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
+
   if (fs.existsSync(configPath)) {
     try {
       Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+    } catch (_e) {}
+  } else {
+    // NEU: config.json automatisch erstellen, falls sie fehlt
+    try {
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     } catch (_e) {}
   }
 
   return {
     appFolder,
+    targetPath: config.targetPath,
     jsonPath: path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(appFolder, config.jsonPath),
     scriptPath: path.isAbsolute(config.scriptPath) ? config.scriptPath : path.resolve(appFolder, config.scriptPath),
   };
+}
+
+function saveConfig(newTargetPath) {
+  const appFolder = getAppFolder();
+  const configPath = path.join(appFolder, 'config.json');
+  const currentConfig = { targetPath: newTargetPath, jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
+
+  if (fs.existsSync(configPath)) {
+    try {
+      Object.assign(currentConfig, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+      currentConfig.targetPath = newTargetPath; // Überschreiben
+    } catch (_e) {}
+  }
+
+  fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
 }
 
 function createWindow() {
@@ -129,6 +155,36 @@ app.whenReady().then(() => {
 
   // Öffnet Web-Links im Standardbrowser (Chrome/Edge/Firefox)
   ipcMain.on('open-url', (_event, url) => shell.openExternal(url));
+
+  // Version ans Frontend senden
+  ipcMain.handle('get-app-info', () => {
+    return { version: app.getVersion() };
+  });
+
+  // Ordnerauswahl für Einstellungen öffnen
+  ipcMain.handle('select-target-dir', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Software-Hauptordner auswählen',
+      properties: ['openDirectory'],
+    });
+    if (canceled || filePaths.length === 0) return null;
+    return filePaths[0];
+  });
+
+  // Pfad in config.json speichern
+  ipcMain.handle('save-target-dir', (_event, newPath) => {
+    try {
+      saveConfig(newPath);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // Aktuellen Pfad abfragen
+  ipcMain.handle('get-target-dir', () => {
+    return getConfig().targetPath;
+  });
 
   createWindow();
 });

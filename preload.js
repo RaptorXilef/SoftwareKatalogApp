@@ -8,4 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openUrl: (url) => ipcRenderer.send('open-url', url),
   onScanStart: (callback) => ipcRenderer.on('scan-start', (_event, path) => callback(path)),
   onScanProgress: (callback) => ipcRenderer.on('scan-progress', (_event, path) => callback(path)),
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
+  saveTargetDir: (path) => ipcRenderer.invoke('save-target-dir', path),
+  getTargetDir: () => ipcRenderer.invoke('get-target-dir'),
 });
