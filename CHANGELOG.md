@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.5.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.4.0...v1.5.0) (2026-11-08)
+
+### 🚀 Features
+
+* **core:** add 'formats' support to meta.json and update documentation ([0875742](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0875742883e99953e1920d2e27839a24274e7e6f))
+
 ## [1.4.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.3.0...v1.4.0) (2026-11-08)
 
 ### 🚀 Features
