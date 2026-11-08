@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Software Katalog</title>
+  <title>Software Katalog by Felix Maywald</title>
   <style>
     :root {
       --bg: #1e1e2e; --surface: #2a2a3f; --text: #cdd6f4;
@@ -255,8 +255,8 @@
       const grid = document.getElementById('grid');
 
       const filtered = catalog.filter(item => {
-        // Suchbereich: Name, Beschreibung und alle Tags zusammenfassen
-        const searchText = `${item.name} ${item.description} ${item.tags.join(' ')}`.toLowerCase();
+        // Suchbereich: Name, Beschreibung, Formate und alle Tags zusammenfassen
+        const searchText = `${item.name} ${item.description} ${item.tags.join(' ')} ${item.formats ? item.formats.join(' ') : ''}`.toLowerCase();
 
         const matchesTag = !activeTag || item.tags.includes(activeTag);
 
@@ -285,6 +285,7 @@
       if (!item) return;
 
       const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${item.os.join(', ')}</p>` : '';
+      const formatBadges = (item.formats && item.formats.length > 0) ? `<p><strong>Formate:</strong> ${item.formats.join(', ')}</p>` : '';
       const catText = item.mainCategory ? `<p><strong>Kategorie:</strong> ${item.mainCategory} ${item.subCategories.length > 0 ? `(${item.subCategories.join(', ')})` : ''}</p>` : '';
 
       let downloadHtml = '';
@@ -323,6 +324,7 @@
           <div>
             <h2>${item.name}</h2>
             ${osBadges}
+            ${formatBadges}
             ${catText}
           </div>
         </div>

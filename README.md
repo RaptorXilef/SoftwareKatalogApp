@@ -49,16 +49,38 @@ Der Scanner durchsucht deine Ordnerstruktur automatisch. Damit ein Ordner als "S
 
 **Mindestanforderung:** Der Ordner `_metadata` muss existieren. Wenn er leer ist, wird die Software trotzdem erkannt (die App nutzt dann einfach den Namen des übergeordneten Ordners).
 
-**Optionale Dateien zur Verschönerung (Beispiele):**
+**Optional: Die `meta.json`**Du kannst im `_metadata`-Ordner eine einzige Datei namens `meta.json` anlegen, um die Darstellung in der App aufzuwerten. Alle Felder sind freiwillig.
+
+Beispiel einer `meta.json`:
+
+``` json
+{
+  "name": "Offizieller Name der Software",
+  "category": "Video",
+  "tags": ["Player", "Streaming", "Open Source"],
+  "formats": [".mkv", ".mp4", ".flv"],
+  "os": ["Windows 10", "Windows 11", "macOS"],
+  "description": [
+    "Kurzer, prägnanter Einleitungssatz.",
+    "",
+    "<b>Hauptmerkmale:</b>",
+    "• Merkmal 1",
+    "• Merkmal 2"
+  ],
+  "links": {
+    "Offizielle Website": "https://...",
+    "Dokumentation": "https://..."
+  }
+}
+```
+
+**Bilder im `_metadata`-Ordner:**
+- **Das Icon:** Eine Bilddatei (`.png`, `.jpg`, `.ico`, `.svg`), die exakt mit `icon.` beginnt (z. B. `icon.png`), wird als App-Logo verwendet.
+- **Screenshots:** Alle weiteren Bilddateien in diesem Ordner (die *nicht* mit `icon.` beginnen) werden automatisch als klickbare Screenshot-Galerie eingebunden.
 
 | Dateiname | Inhalt / Funktion | Beispiel |
 | :--- | :--- | :--- |
-| `name.txt` (oder `titel.txt`) | Überschreibt den Ordnernamen in der App. | `Adobe Photoshop CC 2024` |
-| `beschreibung.txt` (oder `info.txt`) | Freitext-Beschreibung der Software. | `Professionelles Bildbearbeitungsprogramm...` |
 | `icon.png` / `.ico` / `.jpg` / `.svg` | Das Logo der Software. **Muss** mit `icon.` beginnen! | *(Bilddatei)* |
-| `os.txt` (oder `betriebssystem.txt`) | Unterstützte Betriebssysteme (kommagetrennt). | `Windows, Mac` |
-| `kategorie.txt` | Zeile 1: Hauptkategorie. Zeile 2: Sub-Kategorien. | Z1: `Grafik` Z2: `Bildbearbeitung, RAW` |
-| `links.txt` (oder `urls.txt`) | Format: `Name des Links \| URL` | `Hersteller \| https://adobe.com` |
 | `(beliebiger Name).jpg` / `.png` / `.webp` | Alle Bilder im Ordner, die **nicht** `icon.` heißen, werden als Screenshots angezeigt. | `interface.png`, `bild1.jpg` |
 
 ### Der `_last` Ordner (Für Downloads)

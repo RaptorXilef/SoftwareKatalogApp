@@ -37,7 +37,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
   let os = [],
     mainCategory = '',
     subCategories = [],
-    links = [];
+    links = [],
+    formats = [];
 
   try {
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
@@ -82,6 +83,14 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
                 .split(',')
                 .map((s) => s.trim());
 
+        // Formate parsen (Erlaubt Arrays [".mp4", ".mkv"] oder Strings ".mp4, .mkv")
+        if (data.formats)
+          formats = Array.isArray(data.formats)
+            ? data.formats
+            : String(data.formats)
+                .split(',')
+                .map((s) => s.trim());
+
         // Links parsen (Erlaubt {"Label": "URL"})
         if (data.links && typeof data.links === 'object') {
           if (Array.isArray(data.links)) {
@@ -118,6 +127,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     subCategories,
     lastFiles,
     links,
+    formats,
   };
 }
 
