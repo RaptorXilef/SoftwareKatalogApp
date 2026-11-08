@@ -210,7 +210,7 @@
     function getEditDistance(a, b) {
       if (!a.length) return b.length;
       if (!b.length) return a.length;
-      let v0 = new Array(b.length + 1), v1 = new Array(b.length + 1);
+      const v0 = new Array(b.length + 1), v1 = new Array(b.length + 1);
       for (let i = 0; i <= b.length; i++) v0[i] = i;
       for (let i = 0; i < a.length; i++) {
         v1[0] = i + 1;

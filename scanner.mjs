@@ -90,7 +90,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
             links = Object.entries(data.links).map(([label, url]) => ({ label, url }));
           }
         }
-      } catch (e) {
+      } catch (_e) {
         console.warn(`Fehler beim Parsen der meta.json in ${metaDir}`);
       }
     }
