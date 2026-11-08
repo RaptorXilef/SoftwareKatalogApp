@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.3...v1.2.4) (2026-11-08)
+
+### 🐛 Bug Fixes
+
+* **core,ui:** fix portable executable path resolution and missing tags mapping ([0fb7570](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0fb7570ffe7e4afb4a2e2762b1158fa778113e45))
+* **core:** utilize Electron's built-in Node engine via spawn for reliable scanning ([215b209](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/215b209bcc7908d06c9073d80116be78f69bfed2))
+
 ## [1.2.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.2...v1.2.3) (2026-11-08)
 
 ### 🐛 Bug Fixes
