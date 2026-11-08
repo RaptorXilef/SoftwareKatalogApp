@@ -48,9 +48,18 @@ app.whenReady().then(() => {
   ipcMain.handle('run-scan', async (event, isFull) => {
     const { scriptPath, appFolder } = getConfig();
     return new Promise((resolve, reject) => {
-      // WICHTIG: Erfordert, dass auf dem ausführenden PC Node.js installiert ist!
-      const cmd = `node "${scriptPath}" ${isFull ? '--full' : ''}`;
-      const child = exec(cmd, { cwd: appFolder });
+      const { spawn } = require('node:child_process');
+
+      const args = [scriptPath];
+      if (isFull) args.push('--full');
+
+      // Der Gamechanger: spawn statt exec & ELECTRON_RUN_AS_NODE.
+      // process.execPath ist die SoftwareKatalog.exe selbst. Mit der env-Variable
+      // verhält sie sich für diesen Unterprozess exakt wie die node.exe!
+      const child = spawn(process.execPath, args, {
+        cwd: appFolder,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      });
 
       let fullOutput = '';
       let fullError = '';
@@ -58,10 +67,11 @@ app.whenReady().then(() => {
 
       // Lese den Live-Output des Scanners Zeile für Zeile
       child.stdout.on('data', (data) => {
-        fullOutput += data;
-        buffer += data;
+        const text = data.toString();
+        fullOutput += text;
+        buffer += text;
         let lines = buffer.split('\n');
-        buffer = lines.pop(); // Unvollständige Zeile behalten
+        buffer = lines.pop(); // Unvollständige Zeile im Puffer behalten
 
         for (const line of lines) {
           const trimmed = line.trim();
@@ -73,20 +83,20 @@ app.whenReady().then(() => {
         }
       });
 
-      // Sammle alle Fehler, die Node im Hintergrund wirft
+      // Fehler-Stream erfassen
       child.stderr.on('data', (data) => {
-        fullError += data;
+        fullError += data.toString();
       });
 
-      // Fehler, wenn der Befehl 'node' gar nicht erst existiert
+      // Wenn der Prozess gar nicht erst starten kann
       child.on('error', (err) => {
-        reject(new Error(`Prozess konnte nicht gestartet werden (Ist Node.js installiert?): ${err.message}`));
+        reject(new Error(`Spawn-Fehler: ${err.message}`));
       });
 
       child.on('exit', (code) => {
         if (code === 0) resolve(fullOutput);
         else if (fullError.includes('LOCKED')) reject(new Error('LOCKED'));
-        else reject(new Error(`Node-Absturz (Code ${code}):\n${fullError}`));
+        else reject(new Error(`Scanner-Absturz (Code ${code}):\n${fullError}`));
       });
     });
   });
