@@ -21,8 +21,18 @@ jobs:
       - name: ⚙️ Node.js einrichten
         uses: actions/setup-node@v4
         with:
-          node-version: "20" # Nutzt die aktuelle stabile Node-Version
+          node-version: "26.12.1" # Nutzt aktuelle stabile Node-Version
           cache: "npm"
+
+      - name: 📦 Electron-Builder Cache aktivieren
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\Users\runneradmin\AppData\Local\electron-builder
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${- runner.os }}-electron-builder-
 
       - name: 📦 Abhängigkeiten installieren
         run: npm install

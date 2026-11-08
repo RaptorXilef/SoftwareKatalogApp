@@ -53,16 +53,21 @@ app.whenReady().then(() => {
       const child = exec(cmd, { cwd: appFolder });
 
       let fullOutput = '';
+      let buffer = '';
 
       // Lese den Live-Output des Scanners Zeile für Zeile
       child.stdout.on('data', (data) => {
         fullOutput += data;
-        const lines = data.split('\n');
+        buffer += data;
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // Unvollständige Zeile behalten
+
         for (const line of lines) {
-          if (line.startsWith('SCAN_START:')) {
-            event.sender.send('scan-start', line.replace('SCAN_START:', '').trim());
-          } else if (line.startsWith('SCAN_DIR:')) {
-            event.sender.send('scan-progress', line.replace('SCAN_DIR:', '').trim());
+          const trimmed = line.trim();
+          if (trimmed.startsWith('SCAN_START:')) {
+            event.sender.send('scan-start', trimmed.replace('SCAN_START:', '').trim());
+          } else if (trimmed.startsWith('SCAN_DIR:')) {
+            event.sender.send('scan-progress', trimmed.replace('SCAN_DIR:', '').trim());
           }
         }
       });
@@ -73,7 +78,7 @@ app.whenReady().then(() => {
 
       child.on('exit', (code) => {
         if (code === 0) resolve(fullOutput);
-        else reject(new Error('Scan abgebrochen oder fehlerhaft.'));
+        else reject(new Error('Scan fehlgeschlagen oder Node.js nicht im Pfad des Ziel-PCs.'));
       });
     });
   });

@@ -8,7 +8,7 @@ const META_FOLDER_NAME = '_metadata';
 const IS_FULL_RESCAN = process.argv.includes('--full');
 
 async function loadConfig() {
-  let targetPath = '.';
+  let targetPath = '../software';
   let jsonPath = 'catalog.json';
 
   const configPath = path.join(__dirname, 'config.json');
@@ -119,7 +119,8 @@ async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 
   if (currentDepth > maxDepth) return [];
 
   // LIVE FEEDBACK: Melde jeden betretenen Ordner
-  console.log(`SCAN_DIR:${currentDir}`);
+  // Wichtig: Flush/direkter Write, damit Electron stdout sofort liest
+  process.stdout.write(`SCAN_DIR:${currentDir}\n`);
 
   try {
     const entries = await fs.readdir(currentDir, { withFileTypes: true });
@@ -155,9 +156,7 @@ async function run() {
     await fs.writeFile(LOCK_FILE, Date.now().toString(), 'utf-8');
 
     // Sende Start-Signal mit dem exakten Pfad an die UI
-    console.log(`SCAN_START:${ROOT_DIR}`);
-    console.log(`Starte ${IS_FULL_RESCAN ? 'VOLLSTÄNDIGEN ' : 'INKREMENTELLEN '}Scan...`);
-
+    process.stdout.write(`SCAN_START:${ROOT_DIR}\n`);
     const startTime = Date.now();
     const cacheMap = new Map();
 
@@ -175,7 +174,7 @@ async function run() {
     await fs.writeFile(OUTPUT_FILE, JSON.stringify(softwareList, null, 2), 'utf-8');
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`Fertig! ${softwareList.length} Programme erfasst in ${duration}s.\nKatalog: ${OUTPUT_FILE}`);
+    console.log(`Fertig! ${softwareList.length} Programme erfasst in ${duration}s.`);
   } finally {
     // Lock entfernen, egal ob Erfolg oder Fehler
     if (existsSync(LOCK_FILE)) {
