@@ -26,6 +26,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: path.join(__dirname, 'build', 'icon.ico'), // Lade das Icon in die Fensterleiste
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
   win.loadFile('index.html');
@@ -44,14 +45,35 @@ app.whenReady().then(() => {
   });
 
   // Scanner ausführen
-  ipcMain.handle('run-scan', async (_event, isFull) => {
+  ipcMain.handle('run-scan', async (event, isFull) => {
     const { scriptPath, appFolder } = getConfig();
     return new Promise((resolve, reject) => {
       // WICHTIG: Erfordert, dass auf dem ausführenden PC Node.js installiert ist!
       const cmd = `node "${scriptPath}" ${isFull ? '--full' : ''}`;
-      exec(cmd, { cwd: appFolder }, (error, stdout, _stderr) => {
-        if (error) reject(error.message);
-        else resolve(stdout);
+      const child = exec(cmd, { cwd: appFolder });
+
+      let fullOutput = '';
+
+      // Lese den Live-Output des Scanners Zeile für Zeile
+      child.stdout.on('data', (data) => {
+        fullOutput += data;
+        const lines = data.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('SCAN_START:')) {
+            event.sender.send('scan-start', line.replace('SCAN_START:', '').trim());
+          } else if (line.startsWith('SCAN_DIR:')) {
+            event.sender.send('scan-progress', line.replace('SCAN_DIR:', '').trim());
+          }
+        }
+      });
+
+      child.stderr.on('data', (data) => {
+        if (data.includes('LOCKED')) reject(new Error('LOCKED'));
+      });
+
+      child.on('exit', (code) => {
+        if (code === 0) resolve(fullOutput);
+        else reject(new Error('Scan abgebrochen oder fehlerhaft.'));
       });
     });
   });

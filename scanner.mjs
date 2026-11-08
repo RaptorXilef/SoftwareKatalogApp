@@ -117,6 +117,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
 
 async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 4) {
   if (currentDepth > maxDepth) return [];
+
+  // LIVE FEEDBACK: Melde jeden betretenen Ordner
+  console.log(`SCAN_DIR:${currentDir}`);
+
   try {
     const entries = await fs.readdir(currentDir, { withFileTypes: true });
     const subDirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
@@ -150,7 +154,10 @@ async function run() {
     // Lock setzen
     await fs.writeFile(LOCK_FILE, Date.now().toString(), 'utf-8');
 
-    console.log(`Starte ${IS_FULL_RESCAN ? 'VOLLSTÄNDIGEN ' : 'INKREMENTELLEN '}Scan in: ${ROOT_DIR}...`);
+    // Sende Start-Signal mit dem exakten Pfad an die UI
+    console.log(`SCAN_START:${ROOT_DIR}`);
+    console.log(`Starte ${IS_FULL_RESCAN ? 'VOLLSTÄNDIGEN ' : 'INKREMENTELLEN '}Scan...`);
+
     const startTime = Date.now();
     const cacheMap = new Map();
 

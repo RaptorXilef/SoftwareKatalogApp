@@ -60,6 +60,16 @@
       font-weight: bold; margin-top: 20px; text-decoration: none;
     }
     .action-btn:hover { background: var(--accent-hover); }
+
+    /* Scan Animation */
+    .scan-status { text-align: center; grid-column: 1 / -1; padding: 40px; background: var(--surface); border-radius: 12px; border: 1px solid var(--border); }
+    .scan-path { color: var(--accent); font-size: 0.9em; word-break: break-all; margin-top: 10px; font-family: monospace; }
+    .spinner {
+      border: 4px solid var(--border); border-top: 4px solid var(--accent);
+      border-radius: 50%; width: 40px; height: 40px;
+      animation: spin 1s linear infinite; margin: 0 auto 15px auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -84,6 +94,17 @@
   <script>
     let catalog = [];
     let activeTag = null;
+
+    if (window.electronAPI) {
+      window.electronAPI.onScanStart((path) => {
+        const el = document.getElementById('scanTargetText');
+        if (el) el.textContent = `Durchsuche Laufwerk (${path})... Das kann einen Moment dauern.`;
+      });
+      window.electronAPI.onScanProgress((path) => {
+        const el = document.getElementById('scanPathText');
+        if (el) el.textContent = path;
+      });
+    }
 
     async function init() {
         try {
@@ -117,7 +138,14 @@
       btnScan.disabled = true;
       btnFullScan.disabled = true;
       btnScan.textContent = "Scan läuft...";
-      grid.innerHTML = '<div style="text-align: center; grid-column: 1 / -1; padding: 40px;"><p>Durchsuche NAS-Laufwerk... Das kann einen Moment dauern.</p></div>';
+
+      grid.innerHTML = `
+        <div class="scan-status">
+          <div class="spinner"></div>
+          <p id="scanTargetText">Scanner wird initialisiert...</p>
+          <p id="scanPathText" class="scan-path">Warte auf Verzeichnisse...</p>
+        </div>
+      `;
 
       try {
         const output = await window.electronAPI.runScan(isFull);
