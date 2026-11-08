@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.4...v1.3.0) (2026-11-08)
+
+### 🚀 Features
+
+* **scanner:** add support for GIF, JPEG, SVG, and ICO image formats ([c2d6d92](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c2d6d92239a86ffcd3e33baaec19490993a1ffd6))
+* **scanner:** support multiline descriptions and array format in meta.json ([2e8697f](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2e8697f150db116d170ee7a69d38a66c16cae60e))
+
+### ⚙️ Refactoring
+
+* **scanner:** consolidate metadata text files into a single meta.json ([68ef835](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/68ef8359c18ab8c200acbcdd24d76e8fd3b712ec))
+
 ## [1.2.4](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.3...v1.2.4) (2026-11-08)
 
 ### 🐛 Bug Fixes
