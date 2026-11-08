@@ -52,14 +52,18 @@
     }
     .modal h2 { margin-top: 0; }
 
-    /* NEU: Bild-Zoom */
+    /* Bild-Zoom (Lightbox) */
     .img-zoomable { cursor: zoom-in; transition: transform 0.2s; }
     .img-zoomable:hover { transform: scale(1.05); }
-    .img-zoomed {
-      position: fixed !important; inset: 0; width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.85); object-fit: contain !important;
-      z-index: 9999; padding: 40px; box-sizing: border-box;
-      cursor: zoom-out; transform: none !important;
+
+    .lightbox-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+      display: none; justify-content: center; align-items: center;
+      z-index: 10000; cursor: zoom-out; padding: 40px;
+    }
+    .lightbox-overlay img {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     }
     .close-btn {
       position: absolute; top: 15px; right: 20px; font-size: 24px;
@@ -100,6 +104,17 @@
     <div class="modal" id="modalContent">
       <!-- Modal Content gets injected here -->
     </div>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" onclick="_closeModal(event)" onkeydown="if(event.key === 'Escape') _closeModal(event)">
+    <div class="modal" id="modalContent">
+      <!-- Modal Content gets injected here -->
+    </div>
+  </div>
+
+  <!-- NEU: Das Lightbox-Overlay für große Bilder -->
+  <div class="lightbox-overlay" id="lightboxOverlay" onclick="this.style.display='none'">
+    <img id="lightboxImg" src="" alt="Zoomed Image">
   </div>
 
   <script>
@@ -295,11 +310,14 @@
         `</ul></div>`;
       }
 
-      // 2. Screenshots generieren (mit Zoom-Klasse)
+      // 2. Screenshots generieren (Klick öffnet Lightbox)
       let imagesHtml = '';
       if (item.screenshots && item.screenshots.length > 0) {
         imagesHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
-          item.screenshots.map(s => `<img src="file:///${s.replace(/\\/g, '/')}" class="img-zoomable" onclick="this.classList.toggle('img-zoomed')" style="height: 120px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`).join('') +
+          item.screenshots.map(s => {
+            const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
+            return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${fileUrl}')" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+          }).join('') +
         `</div>`;
       }
 
@@ -364,6 +382,11 @@
       } else {
         alert(`Um Ordner nativ zu öffnen, muss die App über Electron gestartet werden.\\nPfad: ${path}`);
       }
+    }
+
+    function _openLightbox(src) {
+      document.getElementById('lightboxImg').src = src;
+      document.getElementById('lightboxOverlay').style.display = 'flex';
     }
 
     init();
