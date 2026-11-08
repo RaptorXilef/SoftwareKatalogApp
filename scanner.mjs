@@ -79,10 +79,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
               if (parts.length > 1) return { label: parts[0].trim(), url: parts.slice(1).join('|').trim() };
               return { label: 'Link', url: line.trim() };
             });
-        } else if (lowerName.startsWith('icon.') && /\.(png|ico|svg|jpg|webp)$/i.test(lowerName)) {
+        } else if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
           iconPath = fullPath;
-        } else if (/\.(png|jpg|jpeg|webp)$/i.test(lowerName)) {
-          screenshots.push(fullPath); // Alles andere an Bildern landet hier
+        } else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
+          screenshots.push(fullPath); // Alle anderen Bilder landen in der Galerie
         }
       })
     );
