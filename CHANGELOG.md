@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.2...v1.2.3) (2026-11-08)
+
+### 🐛 Bug Fixes
+
+* main.mjs debug ([9cb74d6](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9cb74d644dcd9d60667c7e010c812531b010fba6))
+
 ## [1.2.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.1...v1.2.2) (2026-11-08)
 
 ### 🐛 Bug Fixes
