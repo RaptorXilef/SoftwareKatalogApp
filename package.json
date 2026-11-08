@@ -31,7 +31,7 @@
     "release-it": "^21.1.2"
   },
   "build": {
-    "appId": "com.familie.softwarekatalog",
+    "appId": "io.github.raptorxilef.softwarekatalogapp",
     "productName": "Software Katalog",
     "directories": {
       "output": "dist"

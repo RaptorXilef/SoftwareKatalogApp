@@ -3,7 +3,9 @@ node_modules/
 
 # Build Output
 dist/
-build/
+build/*.jfif
+
+*.url
 
 # Generierte Daten (sollten lokal bleiben / dynamisch erzeugt werden)
 catalog.json
