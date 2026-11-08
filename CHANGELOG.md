@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.0...v1.2.1) (2026-11-08)
+
+### 🐛 Bug Fixes
+
+* **assets:** Resize application icon to meet 256x256 electron-builder requirement ([1b63d29](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/1b63d2989a39373d1f55d471b060c3c4da061e08))
+
 ## [1.2.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.1.0...v1.2.0) (2026-11-08)
 
 ### 🚀 Features
