@@ -1,6 +1,6 @@
 {
   "name": "Adobe Photoshop CC",
-  "description": "Professionelles Bildbearbeitungsprogramm für Rastergrafiken.",
+  "description": "Professionelles Bildbearbeitungsprogramm für Rastergrafiken.<br><br><b>Highlights:</b><br>• Ebenen-Unterstützung<br>• RAW-Entwicklung<br>• KI-Filter",
   "os": ["Windows 10", "Windows 11", "macOS"],
   "category": "Grafik",
   "tags": ["Bildbearbeitung", "RAW", "Design"],

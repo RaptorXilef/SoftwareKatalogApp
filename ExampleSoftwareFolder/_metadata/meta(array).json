@@ -1,0 +1,18 @@
+{
+  "name": "Adobe Photoshop CC",
+  "description": [
+    "Professionelles Bildbearbeitungsprogramm für Rastergrafiken.",
+    "",
+    "<b>Highlights:</b>",
+    "- Unterstützung für unbegrenzte Ebenen",
+    "- Integrierte RAW-Entwicklung via Camera RAW",
+    "- Neue KI-basierte Füllmethoden"
+  ],
+  "os": ["Windows 10", "Windows 11", "macOS"],
+  "category": "Grafik",
+  "tags": ["Bildbearbeitung", "RAW", "Design"],
+  "links": {
+    "Offizielle Website": "https://adobe.com",
+    "Tutorials": "https://helpx.adobe.com"
+  }
+}

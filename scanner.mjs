@@ -63,7 +63,9 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
         const data = JSON.parse(rawJson);
 
         if (data.name) customName = data.name;
-        if (data.description) description = data.description;
+        // Verbindet Arrays automatisch mit Zeilenumbrüchen (<br>), lässt normale Strings wie sie sind
+        if (data.description)
+          description = Array.isArray(data.description) ? data.description.join('<br>') : data.description;
 
         // Erlaubt Arrays ["Win", "Mac"] oder Strings "Win, Mac"
         if (data.os)
