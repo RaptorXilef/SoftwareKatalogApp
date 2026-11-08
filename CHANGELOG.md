@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.5.0...v1.6.0) (2026-11-08)
+
+### 🚀 Features
+
+* **core,ui:** add automatic config generation, settings UI, and app branding ([98bc4ce](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/98bc4ceec35d07cf32927eb9c8f6adf4df8abee1))
+
+### 🐛 Bug Fixes
+
+* **ui:** add explicit type attribute to settings button ([53f6921](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/53f69215f802556fca9c88e593531d7282d597ef))
+
 ## [1.5.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.4.0...v1.5.0) (2026-11-08)
 
 ### 🚀 Features
