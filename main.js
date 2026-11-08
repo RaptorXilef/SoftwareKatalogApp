@@ -53,13 +53,14 @@ app.whenReady().then(() => {
       const child = exec(cmd, { cwd: appFolder });
 
       let fullOutput = '';
+      let fullError = '';
       let buffer = '';
 
       // Lese den Live-Output des Scanners Zeile für Zeile
       child.stdout.on('data', (data) => {
         fullOutput += data;
         buffer += data;
-        const lines = buffer.split('\n');
+        let lines = buffer.split('\n');
         buffer = lines.pop(); // Unvollständige Zeile behalten
 
         for (const line of lines) {
@@ -72,13 +73,20 @@ app.whenReady().then(() => {
         }
       });
 
+      // Sammle alle Fehler, die Node im Hintergrund wirft
       child.stderr.on('data', (data) => {
-        if (data.includes('LOCKED')) reject(new Error('LOCKED'));
+        fullError += data;
+      });
+
+      // Fehler, wenn der Befehl 'node' gar nicht erst existiert
+      child.on('error', (err) => {
+        reject(new Error(`Prozess konnte nicht gestartet werden (Ist Node.js installiert?): ${err.message}`));
       });
 
       child.on('exit', (code) => {
         if (code === 0) resolve(fullOutput);
-        else reject(new Error('Scan fehlgeschlagen oder Node.js nicht im Pfad des Ziel-PCs.'));
+        else if (fullError.includes('LOCKED')) reject(new Error('LOCKED'));
+        else reject(new Error(`Node-Absturz (Code ${code}):\n${fullError}`));
       });
     });
   });
