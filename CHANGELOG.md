@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.1...v1.2.2) (2026-11-08)
+
+### 🐛 Bug Fixes
+
+* **scanner,ui:** fix scan hanging state, improve real-time path streaming and optimize CI cache ([0ff7fa8](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0ff7fa8a0df84cf22d9c764227045746d29406fa))
+
 ## [1.2.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.0...v1.2.1) (2026-11-08)
 
 ### 🐛 Bug Fixes

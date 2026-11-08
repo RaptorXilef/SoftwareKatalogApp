@@ -1,6 +1,6 @@
 {
   "name": "software-katalog",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Ein portabler Software-Katalog für das NAS",
   "main": "main.js",
   "scripts": {
