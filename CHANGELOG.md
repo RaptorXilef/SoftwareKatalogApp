@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.6.0...v1.6.1) (2026-11-08)
+
+### ⚙️ Refactoring
+
+* **core:** store relative paths in catalog for true portability ([348a158](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/348a158ae16e4fe41c29442f66b98140d4fe270f))
+
 ## [1.6.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.5.0...v1.6.0) (2026-11-08)
 
 ### 🚀 Features
