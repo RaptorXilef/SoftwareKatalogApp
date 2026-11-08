@@ -106,15 +106,9 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" onclick="_closeModal(event)" onkeydown="if(event.key === 'Escape') _closeModal(event)">
-    <div class="modal" id="modalContent">
-      <!-- Modal Content gets injected here -->
-    </div>
-  </div>
-
-  <!-- NEU: Das Lightbox-Overlay für große Bilder -->
-  <div class="lightbox-overlay" id="lightboxOverlay" onclick="this.style.display='none'">
-    <img id="lightboxImg" src="" alt="Zoomed Image">
+  <!-- NEU: Das Lightbox-Overlay für große Bilder (mit a11y Fixes) -->
+  <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" onclick="this.style.display='none'" onkeydown="if(event.key === 'Escape' || event.key === 'Enter') this.style.display='none'">
+    <img id="lightboxImg" src="" alt="Vollbildansicht">
   </div>
 
   <script>
