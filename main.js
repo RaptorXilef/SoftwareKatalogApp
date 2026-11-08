@@ -66,9 +66,19 @@ app.whenReady().then(() => {
 
   // Daten an Frontend schicken
   ipcMain.handle('load-catalog', async () => {
-    const { jsonPath } = getConfig();
+    const { jsonPath, appFolder } = getConfig();
     if (fs.existsSync(jsonPath)) {
-      return JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+      try {
+        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+        // Pfade on-the-fly für das Frontend wieder in absolute Pfade umwandeln
+        return data.map((item) => {
+          if (item.path) item.path = path.resolve(appFolder, item.path);
+          if (item.icon) item.icon = path.resolve(appFolder, item.icon);
+          if (item.screenshots) item.screenshots = item.screenshots.map((s) => path.resolve(appFolder, s));
+          if (item.lastFiles) item.lastFiles = item.lastFiles.map((f) => path.resolve(appFolder, f));
+          return item;
+        });
+      } catch (_e) {}
     }
     return [];
   });

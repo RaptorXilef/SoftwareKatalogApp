@@ -75,8 +75,9 @@ Beispiel einer `meta.json`:
 ```
 
 **Bilder im `_metadata`-Ordner:**
-- **Das Icon:** Eine Bilddatei (`.png`, `.jpg`, `.ico`, `.svg`), die exakt mit `icon.` beginnt (z. B. `icon.png`), wird als App-Logo verwendet.
-- **Screenshots:** Alle weiteren Bilddateien in diesem Ordner (die *nicht* mit `icon.` beginnen) werden automatisch als klickbare Screenshot-Galerie eingebunden.
+
+* **Das Icon:** Eine Bilddatei (`.png`, `.jpg`, `.ico`, `.svg`), die exakt mit `icon.` beginnt (z. B. `icon.png`), wird als App-Logo verwendet.
+* **Screenshots:** Alle weiteren Bilddateien in diesem Ordner (die *nicht* mit `icon.` beginnen) werden automatisch als klickbare Screenshot-Galerie eingebunden.
 
 | Dateiname | Inhalt / Funktion | Beispiel |
 | :--- | :--- | :--- |

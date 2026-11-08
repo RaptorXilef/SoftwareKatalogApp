@@ -115,17 +115,20 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     } catch (_e) {}
   }
 
+  // Hilfsfunktion: Wandelt absolute Pfade in relative Pfade um (ausgehend vom App-Ordner)
+  const toRel = (p) => (p ? path.relative(__dirname, p) : null);
+
   return {
-    id: Buffer.from(softwareDir).toString('base64url'),
+    id: Buffer.from(toRel(softwareDir)).toString('base64url'),
     name: customName || path.basename(softwareDir),
-    path: softwareDir,
+    path: toRel(softwareDir), // Relativ speichern
     description,
-    icon: iconPath,
-    screenshots,
+    icon: toRel(iconPath),
+    screenshots: screenshots.map(toRel),
     os,
     mainCategory,
     subCategories,
-    lastFiles,
+    lastFiles: lastFiles.map(toRel),
     links,
     formats,
   };
@@ -180,7 +183,10 @@ async function run() {
       try {
         const oldData = JSON.parse(await fs.readFile(OUTPUT_FILE, 'utf-8'));
         oldData.forEach((item) => {
-          cacheMap.set(item.path, item);
+          // WICHTIG: Den relativen Pfad aus der JSON wieder absolut machen,
+          // damit der Scanner ihn mit currentDir abgleichen kann.
+          const absPath = path.resolve(__dirname, item.path);
+          cacheMap.set(absPath, item);
         });
       } catch (_e) {}
     }
