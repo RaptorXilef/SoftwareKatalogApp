@@ -107,24 +107,30 @@
     }
 
     async function init() {
-        try {
+      try {
         if (window.electronAPI) {
-            catalog = await window.electronAPI.loadCatalog();
+          catalog = await window.electronAPI.loadCatalog();
         } else {
-            // Fallback für reine Browser-Ansicht
-            const res = await fetch('catalog.json');
-            catalog = await res.json();
+          const res = await fetch('catalog.json');
+          catalog = await res.json();
         }
 
+        // FIX: Die 'tags'-Liste aus mainCategory und subCategories zusammensetzen
+        catalog.forEach(item => {
+          item.tags = [];
+          if (item.mainCategory) item.tags.push(item.mainCategory);
+          if (item.subCategories) item.tags.push(...item.subCategories);
+        });
+
         if(catalog.length === 0) {
-            document.getElementById('grid').innerHTML = '<p>Katalog leer. Bitte zuerst scannen.</p>';
+          document.getElementById('grid').innerHTML = '<p>Katalog leer. Bitte zuerst scannen.</p>';
         } else {
-            renderTags();
-            renderGrid();
+          renderTags();
+          renderGrid();
         }
-        } catch (_e) {
+      } catch (_e) {
         document.getElementById('grid').innerHTML = '<p>Fehler: Konnte Daten nicht laden.</p>';
-        }
+      }
     }
 
     async function _startScan(isFull) {

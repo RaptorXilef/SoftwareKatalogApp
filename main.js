@@ -1,11 +1,14 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const { exec } = require('node:child_process');
 
 function getConfig() {
-  // Wenn als Exe gepackt, ist der Ordner da wo die Exe liegt. Sonst Entwicklungsordner.
-  const appFolder = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+  // FIX: Den echten Ordner der Portable.exe auslesen, statt des Temp-Entpack-Ordners!
+  let appFolder = __dirname;
+  if (app.isPackaged) {
+    appFolder = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
+  }
+
   const configPath = path.join(appFolder, 'config.json');
 
   const config = { jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
@@ -70,7 +73,7 @@ app.whenReady().then(() => {
         const text = data.toString();
         fullOutput += text;
         buffer += text;
-        let lines = buffer.split('\n');
+        const lines = buffer.split('\n');
         buffer = lines.pop(); // Unvollständige Zeile im Puffer behalten
 
         for (const line of lines) {
