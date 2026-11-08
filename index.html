@@ -47,9 +47,20 @@
     }
     .modal {
       background: var(--surface); padding: 30px; border-radius: 12px;
-      width: 100%; max-width: 600px; position: relative; border: 1px solid var(--border);
+      width: 100%; max-width: 1100px; /* Hier auf 1100px geändert */
+      position: relative; border: 1px solid var(--border);
     }
     .modal h2 { margin-top: 0; }
+
+    /* NEU: Bild-Zoom */
+    .img-zoomable { cursor: zoom-in; transition: transform 0.2s; }
+    .img-zoomable:hover { transform: scale(1.05); }
+    .img-zoomed {
+      position: fixed !important; inset: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.85); object-fit: contain !important;
+      z-index: 9999; padding: 40px; box-sizing: border-box;
+      cursor: zoom-out; transform: none !important;
+    }
     .close-btn {
       position: absolute; top: 15px; right: 20px; font-size: 24px;
       cursor: pointer; color: var(--text); border: none; background: none;
@@ -195,15 +206,59 @@
       renderGrid();
     }
 
+    // Berechnet die Ähnlichkeit zweier Wörter
+    function getEditDistance(a, b) {
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      let v0 = new Array(b.length + 1), v1 = new Array(b.length + 1);
+      for (let i = 0; i <= b.length; i++) v0[i] = i;
+      for (let i = 0; i < a.length; i++) {
+        v1[0] = i + 1;
+        for (let j = 0; j < b.length; j++) {
+          const cost = a[i] === b[j] ? 0 : 1;
+          v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);
+        }
+        for (let j = 0; j <= b.length; j++) v0[j] = v1[j];
+      }
+      return v1[b.length];
+    }
+
+    // Prüft, ob ein Suchwort (mit Toleranz für Tippfehler) im Text existiert
+    function fuzzyMatch(searchWord, fullText) {
+      if (fullText.includes(searchWord)) return true;
+      if (searchWord.length < 3) return false; // Sehr kurze Wörter müssen exakt passen
+
+      const wordsInText = fullText.split(/[^a-z0-9äöüß]+/);
+      for (const textWord of wordsInText) {
+        if (textWord.length < 3) continue;
+        const distance = getEditDistance(searchWord, textWord);
+        // Erlaubt 1 Fehler bei kurzen Wörtern, 2 bei längeren
+        if (distance <= (searchWord.length <= 5 ? 1 : 2)) return true;
+      }
+      return false;
+    }
+
     document.getElementById('searchInput').addEventListener('input', renderGrid);
 
     function renderGrid() {
-      const search = document.getElementById('searchInput').value.toLowerCase();
+      const searchString = document.getElementById('searchInput').value.toLowerCase().trim();
+      const searchWords = searchString.split(/\s+/).filter(w => w.length > 0);
       const grid = document.getElementById('grid');
 
       const filtered = catalog.filter(item => {
-        const matchesSearch = item.name.toLowerCase().includes(search) || item.description.toLowerCase().includes(search);
+        // Suchbereich: Name, Beschreibung und alle Tags zusammenfassen
+        const searchText = `${item.name} ${item.description} ${item.tags.join(' ')}`.toLowerCase();
+
         const matchesTag = !activeTag || item.tags.includes(activeTag);
+
+        // Multi-Word UND-Suche mit Fuzzy Matching
+        let matchesSearch = true;
+        for (const word of searchWords) {
+          if (!fuzzyMatch(word, searchText)) {
+            matchesSearch = false;
+            break;
+          }
+        }
         return matchesSearch && matchesTag;
       });
 
@@ -240,11 +295,11 @@
         `</ul></div>`;
       }
 
-      // 2. Screenshots generieren
+      // 2. Screenshots generieren (mit Zoom-Klasse)
       let imagesHtml = '';
       if (item.screenshots && item.screenshots.length > 0) {
         imagesHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
-          item.screenshots.map(s => `<img src="file:///${s.replace(/\\/g, '/')}" style="height: 120px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`).join('') +
+          item.screenshots.map(s => `<img src="file:///${s.replace(/\\/g, '/')}" class="img-zoomable" onclick="this.classList.toggle('img-zoomed')" style="height: 120px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`).join('') +
         `</div>`;
       }
 
