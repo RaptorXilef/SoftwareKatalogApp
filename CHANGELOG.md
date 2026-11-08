@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.3.0...v1.4.0) (2026-11-08)
+
+### 🚀 Features
+
+* **ui:** enhance modal layout, add image zoom and fuzzy multi-word search ([3dd8983](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/3dd898362992c91ba023a337843220e71bc57595))
+
+### 🐛 Bug Fixes
+
+* **a11y:** remove redundant tabindex attribute from lightbox overlay ([04d84bc](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/04d84bca2e6874d4913fcd5a21babf6aba3301d6))
+* style biome ([fa70e81](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/fa70e818e808b4ae7cd29fdca03426b7810d9fe4))
+* **ui:** resolve image zoom glitch by implementing a dedicated lightbox overlay ([d1ade68](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d1ade689f64bb5b55707169b4638817b52485630))
+
+### 🧹 Chore / Maintenance
+
+* add meta.txt zu .gitignore ([3211d90](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/3211d903ea28dc3b3d56fde45400c9b6db61ac91))
+
 ## [1.3.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.2.4...v1.3.0) (2026-11-08)
 
 ### 🚀 Features
