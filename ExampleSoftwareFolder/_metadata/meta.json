@@ -1,0 +1,11 @@
+{
+  "name": "Adobe Photoshop CC",
+  "description": "Professionelles Bildbearbeitungsprogramm für Rastergrafiken.",
+  "os": ["Windows 10", "Windows 11", "macOS"],
+  "category": "Grafik",
+  "tags": ["Bildbearbeitung", "RAW", "Design"],
+  "links": {
+    "Offizielle Website": "https://adobe.com",
+    "Tutorials": "https://helpx.adobe.com"
+  }
+}

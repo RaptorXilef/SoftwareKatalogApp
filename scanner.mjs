@@ -41,54 +41,58 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
 
   try {
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
-    await Promise.all(
-      metaEntries.map(async (entry) => {
-        if (!entry.isFile()) return;
-        const fullPath = path.join(metaDir, entry.name);
-        const lowerName = entry.name.toLowerCase();
 
-        if (lowerName === 'beschreibung.txt' || lowerName === 'info.txt') {
-          description = (await fs.readFile(fullPath, 'utf-8')).trim();
-        } else if (lowerName === 'name.txt' || lowerName === 'titel.txt') {
-          customName = (await fs.readFile(fullPath, 'utf-8')).trim();
-        } else if (lowerName === 'os.txt' || lowerName === 'betriebssystem.txt') {
-          const rawOS = await fs.readFile(fullPath, 'utf-8');
-          os = rawOS
-            .split(/[\r\n,]+/)
-            .map((t) => t.trim())
-            .filter(Boolean);
-        } else if (lowerName === 'kategorie.txt') {
-          const rawCat = await fs.readFile(fullPath, 'utf-8');
-          const lines = rawCat
-            .split(/[\r\n]+/)
-            .map((t) => t.trim())
-            .filter(Boolean);
-          if (lines.length > 0) mainCategory = lines[0];
-          if (lines.length > 1)
-            subCategories = lines[1]
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean);
-        } else if (lowerName === 'links.txt' || lowerName === 'urls.txt') {
-          const rawLinks = await fs.readFile(fullPath, 'utf-8');
-          links = rawLinks
-            .split(/[\r\n]+/)
-            .filter(Boolean)
-            .map((line) => {
-              const parts = line.split('|');
-              if (parts.length > 1) return { label: parts[0].trim(), url: parts.slice(1).join('|').trim() };
-              return { label: 'Link', url: line.trim() };
-            });
-        } else if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
-          iconPath = fullPath;
-        } else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
-          screenshots.push(fullPath); // Alle anderen Bilder landen in der Galerie
+    // 1. Bilder einlesen (Icon und Screenshots)
+    metaEntries.forEach((entry) => {
+      if (!entry.isFile()) return;
+      const fullPath = path.join(metaDir, entry.name);
+      const lowerName = entry.name.toLowerCase();
+
+      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
+        iconPath = fullPath;
+      } else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
+        screenshots.push(fullPath);
+      }
+    });
+
+    // 2. meta.json auslesen (falls vorhanden)
+    const jsonPath = path.join(metaDir, 'meta.json');
+    if (existsSync(jsonPath)) {
+      try {
+        const rawJson = await fs.readFile(jsonPath, 'utf-8');
+        const data = JSON.parse(rawJson);
+
+        if (data.name) customName = data.name;
+        if (data.description) description = data.description;
+
+        // Erlaubt Arrays ["Win", "Mac"] oder Strings "Win, Mac"
+        if (data.os)
+          os = Array.isArray(data.os)
+            ? data.os
+            : String(data.os)
+                .split(',')
+                .map((s) => s.trim());
+        if (data.category) mainCategory = data.category;
+        if (data.tags)
+          subCategories = Array.isArray(data.tags)
+            ? data.tags
+            : String(data.tags)
+                .split(',')
+                .map((s) => s.trim());
+
+        // Links parsen (Erlaubt {"Label": "URL"})
+        if (data.links && typeof data.links === 'object') {
+          if (Array.isArray(data.links)) {
+            links = data.links;
+          } else {
+            links = Object.entries(data.links).map(([label, url]) => ({ label, url }));
+          }
         }
-      })
-    );
-  } catch (_err) {
-    /* Fehler ignorieren */
-  }
+      } catch (e) {
+        console.warn(`Fehler beim Parsen der meta.json in ${metaDir}`);
+      }
+    }
+  } catch (_err) {}
 
   // Check auf _last Ordner
   let lastFiles = [];
@@ -102,7 +106,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
 
   return {
     id: Buffer.from(softwareDir).toString('base64url'),
-    name: customName || path.basename(softwareDir), // <-- Wenn customName existiert, wird der Ordnername ignoriert!
+    name: customName || path.basename(softwareDir),
     path: softwareDir,
     description,
     icon: iconPath,
