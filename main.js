@@ -85,6 +85,8 @@ function createWindow() {
   const windowOptions = {
     width: 1200,
     height: 800,
+    show: false, // Fenster versteckt starten
+    backgroundColor: '#1e1e2e', // Passende Hintergrundfarbe setzen, verhindert weißes Aufblitzen
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   };
 
@@ -98,6 +100,11 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(windowOptions);
   mainWindow.loadFile('index.html');
+
+  // Fenster erst einblenden, wenn Chromium komplett fertig mit dem Rendern ist
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
