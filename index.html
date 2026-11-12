@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Software Katalog by Felix Maywald</title>
+  <title>Software Katalog by © Felix Maywald</title>
+  <!-- Behebt die Electron Security Warning -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; connect-src 'self';">
   <style>
     :root {
       --bg: #1e1e2e; --surface: #2a2a3f; --text: #cdd6f4;
@@ -73,7 +75,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>Software Katalog <span class="subtitle">by Felix Maywald <span id="appVersion"></span></span></h1>
+    <h1>Software Katalog <span class="subtitle">by © Felix Maywald <span id="appVersion"></span></span></h1>
     <button type="button" class="icon-btn" onclick="_openSettings()" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
   </div>
 
@@ -260,7 +262,7 @@
 
       grid.innerHTML = filtered.map(item => `
         <div class="card" onclick="_openModal('${item.id}')">
-          ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" alt="Icon" onerror="this.style.display='none'">` : ''}
+          ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon" onerror="this.style.display='none'">` : ''}
           <h3>${item.name}</h3>
           <small>${item.tags.join(', ')}</small>
         </div>

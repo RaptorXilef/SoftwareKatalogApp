@@ -10,8 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onScanProgress: (callback) => ipcRenderer.on('scan-progress', (_event, path) => callback(path)),
 
   // Erweiterte Settings-API
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
-  selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
+  selectFile: (filters) => ipcRenderer.invoke('select-file', filters)
 });

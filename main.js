@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
+// Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
+app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
+
 // Behebt den "Unable to move the cache" Fehler in Electron
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
