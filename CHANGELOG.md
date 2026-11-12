@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.8.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.7.0...v1.8.0) (2026-11-12)
+
+### 🚀 Features
+
+* **ui:** add native UI to add and edit software metadata ([4152a2a](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4152a2a64a28b43043c5a044a01523df90f125dc))
+
+### 🐛 Bug Fixes
+
+* **core,ui:** resolve Dawn GPU cache collisions and apply Biome string template fixes ([9b2ef88](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9b2ef8842be5b8badf126b6185fbd53880fc610f))
+
+### 🏗️ Build System
+
+* include scanner script in release archive via extraFiles ([19834a9](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/19834a933ca8a4110599d51a791735dd8c894c7d))
+
+### 👷 CI/CD Configuration
+
+* update github actions release workflow for dual-target deployment ([549901e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/549901e410d55a7eff5791b946b3357b29394be7))
+
+### 📚 Dokumentation
+
+* rewrite README to reflect current architecture and update package license ([720c1f0](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/720c1f0a1ac3f13eb20707196624d98da151e025))
+
+### 🧹 Chore / Maintenance
+
+* **build:** configure multiple deployment targets and project metadata ([aaca83c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/aaca83cd1591304f461ac56b77855e19564ca400))
+
 ## [1.7.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.6.1...v1.7.0) (2026-11-12)
 
 ### 🚀 Features
