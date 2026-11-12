@@ -11,6 +11,10 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-dawn-features', 'use_dxc');
 app.commandLine.appendSwitch('disable-features', 'DawnGraphiteCache');
 
+// Behebt den "White-Screen-Absturz" bei Ausführung direkt vom Netzlaufwerk (SMB)
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('no-sandbox');
+
 // Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
 app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
 
