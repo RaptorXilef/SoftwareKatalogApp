@@ -16,4 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
   selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
+
+  // Software hinzufügen & bearbeiten
+  addSoftware: () => ipcRenderer.invoke('add-software'),
+  saveMetaJson: (targetPath, data) => ipcRenderer.invoke('save-meta-json', targetPath, data),
 });

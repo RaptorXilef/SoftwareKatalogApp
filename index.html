@@ -82,6 +82,7 @@
   <div class="toolbar">
     <div style="display: flex; gap: 15px; width: 100%; flex-wrap: wrap;">
       <input type="text" id="searchInput" placeholder="Software suchen..." style="flex: 1; min-width: 250px;">
+      <button type="button" class="action-btn" style="margin: 0; background: var(--accent); color: var(--bg);" onclick="_addSoftware()" title="Fügt einen vorhandenen Ordner zum Katalog hinzu.">➕ Software hinzufügen</button>
       <button type="button" id="btnScan" class="action-btn" style="margin: 0;" onclick="_startScan('quick')" title="Sucht netzwerkschonend nach neuen Software-Ordnern. Bekannte Ordner werden übersprungen.">Neu scannen</button>
       <button type="button" id="btnUpdate" class="action-btn" style="margin: 0; background: #a6e3a1; color: var(--bg);" onclick="_startScan('update')" title="Liest Metadaten und Bilder der bereits bekannten Programme blitzschnell neu ein.">Metadaten aktualisieren</button>
       <button type="button" id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="_startScan('full')" title="Verwirft den aktuellen Katalog und liest das gesamte Laufwerk komplett neu ein.">Vollständiger Rescan</button>
@@ -321,8 +322,10 @@
           ${linksHtml} ${imagesHtml}
           <p><small style="color: gray;">Pfad: ${item.path}</small></p>
         </div>
-        <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px;">
-          <button type="button" class="action-btn" onclick="_openInExplorer('${item.path.replace(/\\/g, '\\\\')}')">Im Explorer öffnen</button>
+        <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center;">
+          <button type="button" class="action-btn" style="margin-top: 0;" onclick="_openInExplorer('${item.path.replace(/\\/g, '\\\\')}')">Im Explorer öffnen</button>
+          <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_editSoftware('${item.id}')">✏️ Bearbeiten</button>
+          <div style="flex: 1;"></div>
           ${downloadHtml}
         </div>
       `;
@@ -511,6 +514,94 @@
         alert("Einstellungen gespeichert. Falls sich Pfade geändert haben, starte bitte einen Scan.");
       } else {
         alert(`Fehler beim Speichern:\n${res.error}`);
+      }
+    }
+
+    async function _addSoftware() {
+      if (!window.electronAPI) return alert("Nur in der Desktop-App verfügbar.");
+      const res = await window.electronAPI.addSoftware();
+      if (res.success) {
+        await _startScan('quick');
+        alert(`Der Ordner wurde erfolgreich hinzugefügt und eine Standard-meta.json erstellt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".`);
+      } else if (res.error) {
+        alert("Fehler beim Hinzufügen:\n" + res.error);
+      }
+    }
+
+    function _editSoftware(id) {
+      const item = catalog.find(i => i.id === id);
+      if (!item) return;
+
+      // Beschreibung wiederherstellen (von <br> zurück zu Zeilenumbrüchen)
+      let desc = item.description || "";
+      if (desc.includes('<br>')) desc = desc.split('<br>').join('\n');
+
+      // Links wieder in "Label | URL" Format konvertieren
+      const linksStr = (item.links || []).map(l => `${l.label} | ${l.url}`).join('\n');
+
+      document.getElementById('modalContent').innerHTML = `
+        <button type="button" class="close-btn" onclick="_openModal('${item.id}')" title="Zurück" aria-label="Zurück">&times;</button>
+        <h2>Software bearbeiten: <span style="color: var(--accent);">${item.name}</span></h2>
+
+        <div class="settings-group" style="border: none; padding: 0; margin: 0;">
+          <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${item.name}"></div>
+          <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${item.mainCategory || ''}"></div>
+          <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${(item.subCategories || []).join(', ')}"></div>
+          <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${(item.formats || []).join(', ')}"></div>
+          <div class="settings-row"><label style="width:150px;">OS (Komma):</label><input type="text" id="editOS" value="${(item.os || []).join(', ')}"></div>
+          <div class="settings-row"><label style="width:150px;">Versteckt-Kat.:</label><input type="text" id="editHidden" value="${item.hiddenCategory || ''}" placeholder="Leer lassen für Standard"></div>
+
+          <div style="margin-top: 15px;">
+            <label style="display:block; margin-bottom:5px;">Beschreibung:</label>
+            <textarea id="editDesc" style="width:100%; height:120px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${desc}</textarea>
+          </div>
+
+          <div style="margin-top: 15px;">
+            <label style="display:block; margin-bottom:5px;">Links (Format: Name | https://...):</label>
+            <textarea id="editLinks" style="width:100%; height:80px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${linksStr}</textarea>
+          </div>
+        </div>
+
+        <div style="margin-top: 25px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border);" onclick="_openInExplorer('${item.path.replace(/\\/g, '\\\\')}\\\\_metadata')">Bilderordner öffnen (für Icons/Screenshots)</button>
+          <div>
+            <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border); margin-right: 10px;" onclick="_openModal('${item.id}')">Abbrechen</button>
+            <button type="button" class="action-btn" style="margin-top:0;" onclick="_saveSoftware('${item.id}')">Speichern & Aktualisieren</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function _saveSoftware(id) {
+      const item = catalog.find(i => i.id === id);
+
+      const data = {
+        name: document.getElementById('editName').value.trim(),
+        category: document.getElementById('editCat').value.trim(),
+        hiddenCategory: document.getElementById('editHidden').value.trim(),
+        tags: document.getElementById('editTags').value.split(',').map(s => s.trim()).filter(Boolean),
+        formats: document.getElementById('editFormats').value.split(',').map(s => s.trim()).filter(Boolean),
+        os: document.getElementById('editOS').value.split(',').map(s => s.trim()).filter(Boolean),
+        description: document.getElementById('editDesc').value.split('\n').map(s => s.replace('\r', '')),
+        links: {}
+      };
+
+      // Links parsen
+      const linksRaw = document.getElementById('editLinks').value.split('\n');
+      for (const l of linksRaw) {
+        const parts = l.split('|');
+        if(parts.length >= 2) {
+           data.links[parts[0].trim()] = parts.slice(1).join('|').trim();
+        }
+      }
+
+      const res = await window.electronAPI.saveMetaJson(item.path, data);
+      if (res.success) {
+        // Führt ein flottes Update aus, lädt den Katalog neu und öffnet das Modal wieder
+        await _startScan('update');
+        _openModal(id);
+      } else {
+        alert("Fehler beim Speichern:\n" + res.error);
       }
     }
 

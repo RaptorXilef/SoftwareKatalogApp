@@ -253,5 +253,54 @@ app.whenReady().then(() => {
     return getConfig().targetPath;
   });
 
+  // Neue Software hinzufügen (Ordner auswählen und Template erstellen)
+  ipcMain.handle('add-software', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Ordner der neuen Software auswählen',
+      properties: ['openDirectory'],
+    });
+    if (canceled || filePaths.length === 0) return { success: false };
+
+    const targetDir = filePaths[0];
+    const metaDir = path.join(targetDir, '_metadata');
+    const metaFile = path.join(metaDir, 'meta.json');
+
+    try {
+      if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+      if (!fs.existsSync(metaFile)) {
+        const template = {
+          name: path.basename(targetDir),
+          category: '',
+          hiddenCategory: '',
+          tags: [],
+          formats: [],
+          os: ['Windows 10', 'Windows 11'],
+          description: ['Hier eine kurze Beschreibung einfügen...'],
+          links: {},
+        };
+        fs.writeFileSync(metaFile, JSON.stringify(template, null, 2), 'utf-8');
+      }
+      return { success: true, path: targetDir };
+    } catch (e) {
+      console.error('Fehler beim Hinzufügen der Software:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // meta.json speichern
+  ipcMain.handle('save-meta-json', async (_event, targetPath, data) => {
+    try {
+      const metaDir = path.join(targetPath, '_metadata');
+      if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+      const metaFile = path.join(metaDir, 'meta.json');
+
+      fs.writeFileSync(metaFile, JSON.stringify(data, null, 2), 'utf-8');
+      return { success: true };
+    } catch (e) {
+      console.error('Fehler beim Speichern der meta.json:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
   createWindow();
 });

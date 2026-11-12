@@ -1,5 +1,10 @@
 {
   "targetPath": "../software",
   "jsonPath": "catalog.json",
-  "scriptPath": "scanner.mjs"
+  "scriptPath": "scanner.mjs",
+  "scanNested": false,
+  "nestedDepth": 1,
+  "visibleHiddenCats": [],
+  "updateInterval": 24,
+  "lastUpdateCheck": 1794499994277
 }
