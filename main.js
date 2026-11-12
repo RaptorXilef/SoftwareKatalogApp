@@ -178,6 +178,32 @@ app.whenReady().then(() => {
   // Settings API
   // Version ans Frontend senden
   ipcMain.handle('get-app-info', () => ({ version: app.getVersion() }));
+
+  ipcMain.handle('check-update', async () => {
+    try {
+      const currentVersion = app.getVersion();
+      const response = await fetch('https://api.github.com/repos/RaptorXilef/SoftwareKatalogApp/releases/latest', {
+        headers: { 'User-Agent': 'SoftwareKatalogApp' },
+      });
+
+      if (!response.ok) return { error: `GitHub API Fehler: ${response.statusText}` };
+
+      const data = await response.json();
+      // Entfernt ein eventuelles 'v' aus dem Tag (z.B. 'v1.6.1' -> '1.6.1')
+      const latestVersion = data.tag_name.replace(/^v/, '');
+
+      return {
+        updateAvailable: currentVersion !== latestVersion,
+        latestVersion,
+        currentVersion,
+        releaseUrl: data.html_url,
+      };
+    } catch (e) {
+      console.error('Update-Check fehlgeschlagen:', e);
+      return { error: e.message };
+    }
+  });
+
   ipcMain.handle('get-settings', () => getConfig());
   ipcMain.handle('save-settings', (_event, settings) => {
     try {

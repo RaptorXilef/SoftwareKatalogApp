@@ -11,8 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Erweiterte Settings-API
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  checkUpdate: () => ipcRenderer.invoke('check-update'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
-  selectFile: (filters) => ipcRenderer.invoke('select-file', filters)
+  selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
 });

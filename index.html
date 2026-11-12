@@ -353,6 +353,7 @@
       if (!window.electronAPI) return alert("Einstellungen sind nur in der Desktop-App verfügbar.");
 
       const s = await window.electronAPI.getSettings();
+      const info = await window.electronAPI.getAppInfo(); // Aktuelle Version abrufen
 
       const hiddenCheckboxes = availableHiddenCats.length === 0
         ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
@@ -404,11 +405,44 @@
           </div>
         </div>
 
+        <!-- NEU: Über-Bereich -->
+        <div class="settings-group">
+          <h3>Über (About)</h3>
+          <p style="margin-top: 5px; margin-bottom: 15px;">
+            <strong>Software Katalog</strong> v${info.version}<br>
+            Entwickelt von <strong>Felix Maywald / RaptorXilef</strong>
+          </p>
+          <div class="settings-row" style="align-items: center; justify-content: flex-start;">
+            <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_openExternalUrl('https://github.com/RaptorXilef/SoftwareKatalogApp')">GitHub Repository</button>
+            <span id="updateContainer" style="margin-left: 10px;"></span>
+          </div>
+        </div>
+
         <div style="margin-top: 30px; text-align: right;">
           <button type="button" class="action-btn" onclick="_saveSettings()">Speichern & Anwenden</button>
         </div>
       `;
       document.getElementById('modalOverlay').style.display = 'flex';
+
+      // Starte die Update-Prüfung im Hintergrund
+      _checkForUpdatesUI();
+    }
+
+    async function _checkForUpdatesUI() {
+      const container = document.getElementById('updateContainer');
+      if (!container || !window.electronAPI) return;
+
+      container.innerHTML = '<span style="color: gray; font-size: 0.9em;">Suche nach Updates...</span>';
+
+      const res = await window.electronAPI.checkUpdate();
+
+      if (res.error) {
+        container.innerHTML = `<span style="color: var(--text); opacity: 0.7; font-size: 0.9em;">Update-Prüfung fehlgeschlagen.</span>`;
+      } else if (res.updateAvailable) {
+        container.innerHTML = `<button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);" onclick="_openExternalUrl('${res.releaseUrl}')">Update verfügbar (v${res.latestVersion})</button>`;
+      } else {
+        container.innerHTML = '<span style="color: #a6e3a1; font-size: 0.9em;">✓ App ist auf dem neuesten Stand</span>';
+      }
     }
 
     async function _browseFile(inputId, isDir, filters) {
