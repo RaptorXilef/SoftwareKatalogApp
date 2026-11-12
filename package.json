@@ -47,8 +47,14 @@
     "directories": {
       "output": "dist"
     },
+    "extraFiles": [
+      "scanner.mjs"
+    ],
     "win": {
-      "target": ["portable", "zip"],
+      "target": [
+        "portable",
+        "zip"
+      ],
       "icon": "build/icon.ico"
     },
     "portable": {
@@ -58,7 +64,10 @@
       "target": "zip"
     },
     "linux": {
-      "target": ["AppImage", "zip"]
+      "target": [
+        "AppImage",
+        "zip"
+      ]
     }
   },
   "allowScripts": {
