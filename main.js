@@ -7,6 +7,12 @@ app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
 
 // Behebt den "Unable to move the cache" Fehler in Electron
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+// Behebt die "Failed to open persistent cache files (Dawn/Graphite)" Fehler
+app.commandLine.appendSwitch('disable-dawn-features', 'use_dxc');
+app.commandLine.appendSwitch('disable-features', 'DawnGraphiteCache');
+
+// Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
+app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
 
 // Basis-Pfade definieren
 function getAppFolder() {

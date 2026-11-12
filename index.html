@@ -524,7 +524,7 @@
         await _startScan('quick');
         alert(`Der Ordner wurde erfolgreich hinzugefügt und eine Standard-meta.json erstellt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".`);
       } else if (res.error) {
-        alert("Fehler beim Hinzufügen:\n" + res.error);
+        alert(`Fehler beim Hinzufügen:\n${res.error}`);
       }
     }
 
@@ -601,7 +601,7 @@
         await _startScan('update');
         _openModal(id);
       } else {
-        alert("Fehler beim Speichern:\n" + res.error);
+        alert(`Fehler beim Speichern:\n${res.error}`);
       }
     }
 
