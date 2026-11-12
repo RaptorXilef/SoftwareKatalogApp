@@ -1,4 +1,4 @@
-name: Build and Upload EXE
+name: Build and Upload Release
 
 # Startet den Workflow automatisch, wenn ein Release veröffentlicht wird
 on:
@@ -7,8 +7,8 @@ on:
 
 jobs:
   build:
-    name: Build Windows EXE
-    runs-on: windows-latest # Wir nutzen Windows, um die .exe nativ zu bauen
+    name: Build Windows EXE & ZIP
+    runs-on: windows-latest # Wir nutzen Windows, um die Dateien nativ zu bauen
 
     # Gibt dem automatischen Token die Rechte, Dateien zum Release hochzuladen
     permissions:
@@ -32,19 +32,19 @@ jobs:
             ~/.cache/electron-builder
           key: ${{ runner.os }}-electron-builder-${{ hashFiles('package.json') }}
           restore-keys: |
-            ${- runner.os }}-electron-builder-
+            ${{ runner.os }}-electron-builder-
 
       - name: 📦 Abhängigkeiten installieren
         run: npm install
 
-      - name: 🏗️ Portable EXE bauen
-        run: npm run build
+      - name: 🏗️ App-Build (Portable & ZIP)
+        run: npm run build:dist
 
       - name: 🚀 Dateien an GitHub Release anhängen
         uses: softprops/action-gh-release@v2
         with:
           # Der Pfad zur gebauten EXE, wie in deiner package.json definiert
           files: |
-            dist/SoftwareKatalog.exe
+            dist/SoftwareKatalog-Portable.exe
+            dist/*.zip
             scanner.mjs
-            config.json
