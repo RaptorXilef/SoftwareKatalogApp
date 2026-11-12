@@ -25,6 +25,8 @@ function getConfig() {
     scanNested: false,
     nestedDepth: 1,
     visibleHiddenCats: [],
+    updateInterval: 24, // Sucht alle 24 Stunden nach Updates
+    lastUpdateCheck: 0, // Zeitstempel der letzten Prüfung
   };
 
   if (fs.existsSync(configPath)) {
@@ -191,6 +193,9 @@ app.whenReady().then(() => {
       const data = await response.json();
       // Entfernt ein eventuelles 'v' aus dem Tag (z.B. 'v1.6.1' -> '1.6.1')
       const latestVersion = data.tag_name.replace(/^v/, '');
+
+      // Zeitstempel für automatische Update-Prüfung speichern
+      saveConfig({ lastUpdateCheck: Date.now() });
 
       return {
         updateAvailable: currentVersion !== latestVersion,

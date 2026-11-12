@@ -112,6 +112,7 @@
     let activeTag = null;
     let appSettings = {};
     let availableHiddenCats = [];
+    let hasCheckedForUpdates = false; // Verhindert mehrfaches Prüfen während einer Sitzung
 
     if (window.electronAPI) {
       window.electronAPI.onScanStart((path) => {
@@ -141,11 +142,12 @@
           if (item.subCategories) item.tags.push(...item.subCategories);
         });
 
-        if(catalog.length === 0) {
+        if (catalog.length === 0) {
           document.getElementById('grid').innerHTML = '<p>Katalog leer. Bitte zuerst scannen.</p>';
         } else {
           renderTags();
           renderGrid();
+          _performAutoUpdateCheck(); // Führt Prüfung im Hintergrund aus, falls Intervall erreicht
         }
       } catch (error) {
         console.error('Fehler beim Initialisieren:', error);
@@ -349,11 +351,31 @@
       }
     }
 
+    async function _performAutoUpdateCheck() {
+      if (!window.electronAPI || hasCheckedForUpdates) return;
+      hasCheckedForUpdates = true;
+
+      const s = appSettings;
+      if (s.updateInterval === -1) return; // Einstellung "Nie"
+
+      const now = Date.now();
+      const msSinceLast = now - (s.lastUpdateCheck || 0);
+      const intervalMs = (s.updateInterval || 0) * 60 * 60 * 1000;
+
+      if (msSinceLast >= intervalMs) {
+        const res = await window.electronAPI.checkUpdate();
+        if (res && !res.error && res.updateAvailable) {
+           const versionEl = document.getElementById('appVersion');
+           versionEl.innerHTML = `(v${res.currentVersion}) <a href="#" onclick="_openExternalUrl('${res.releaseUrl}')" style="color: #a6e3a1; font-size: 0.9em; text-decoration: none; margin-left: 10px;">🎁 Update verfügbar (v${res.latestVersion})!</a>`;
+        }
+      }
+    }
+
     async function _openSettings() {
       if (!window.electronAPI) return alert("Einstellungen sind nur in der Desktop-App verfügbar.");
 
       const s = await window.electronAPI.getSettings();
-      const info = await window.electronAPI.getAppInfo(); // Aktuelle Version abrufen
+      const info = await window.electronAPI.getAppInfo();
 
       const hiddenCheckboxes = availableHiddenCats.length === 0
         ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
@@ -405,7 +427,20 @@
           </div>
         </div>
 
-        <!-- NEU: Über-Bereich -->
+        <div class="settings-group">
+          <h3>Updates</h3>
+          <div class="settings-row">
+            <label style="width: 250px;">Automatisch nach Updates suchen:</label>
+            <select id="cfgUpdateInterval" style="flex: 1; padding: 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px;">
+              <option value="0" ${s.updateInterval === 0 ? 'selected' : ''}>Bei jedem Start</option>
+              <option value="24" ${s.updateInterval === 24 ? 'selected' : ''}>Täglich (alle 24h)</option>
+              <option value="168" ${s.updateInterval === 168 ? 'selected' : ''}>Wöchentlich</option>
+              <option value="720" ${s.updateInterval === 720 ? 'selected' : ''}>Monatlich</option>
+              <option value="-1" ${s.updateInterval === -1 ? 'selected' : ''}>Nie</option>
+            </select>
+          </div>
+        </div>
+
         <div class="settings-group">
           <h3>Über (About)</h3>
           <p style="margin-top: 5px; margin-bottom: 15px;">
@@ -414,6 +449,7 @@
           </p>
           <div class="settings-row" style="align-items: center; justify-content: flex-start;">
             <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_openExternalUrl('https://github.com/RaptorXilef/SoftwareKatalogApp')">GitHub Repository</button>
+            <button type="button" id="btnManualUpdate" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_checkForUpdatesUI()">Nach Updates suchen</button>
             <span id="updateContainer" style="margin-left: 10px;"></span>
           </div>
         </div>
@@ -430,18 +466,23 @@
 
     async function _checkForUpdatesUI() {
       const container = document.getElementById('updateContainer');
+      const btn = document.getElementById('btnManualUpdate');
       if (!container || !window.electronAPI) return;
 
+      if (btn) btn.disabled = true;
       container.innerHTML = '<span style="color: gray; font-size: 0.9em;">Suche nach Updates...</span>';
 
       const res = await window.electronAPI.checkUpdate();
+      if (btn) btn.disabled = false;
 
       if (res.error) {
         container.innerHTML = `<span style="color: var(--text); opacity: 0.7; font-size: 0.9em;">Update-Prüfung fehlgeschlagen.</span>`;
       } else if (res.updateAvailable) {
         container.innerHTML = `<button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);" onclick="_openExternalUrl('${res.releaseUrl}')">Update verfügbar (v${res.latestVersion})</button>`;
+        if (btn) btn.style.display = 'none';
       } else {
         container.innerHTML = '<span style="color: #a6e3a1; font-size: 0.9em;">✓ App ist auf dem neuesten Stand</span>';
+        if (btn) btn.style.display = 'none';
       }
     }
 
@@ -459,7 +500,8 @@
         scriptPath: document.getElementById('cfgScript').value,
         scanNested: document.getElementById('cfgScanNested').checked,
         nestedDepth: parseInt(document.getElementById('cfgNestedDepth').value, 10),
-        visibleHiddenCats: checkedCats
+        visibleHiddenCats: checkedCats,
+        updateInterval: parseInt(document.getElementById('cfgUpdateInterval').value, 10)
       };
 
       const res = await window.electronAPI.saveSettings(newSettings);
