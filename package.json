@@ -3,11 +3,22 @@
   "version": "1.7.0",
   "description": "Ein portabler Software-Katalog für das NAS",
   "main": "main.js",
+  "author": "Felix Maywald / RaptorXilef",
+  "homepage": "https://github.com/RaptorXilef/SoftwareKatalogApp#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RaptorXilef/SoftwareKatalogApp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RaptorXilef/SoftwareKatalogApp/issues"
+  },
   "scripts": {
     "start": "electron .",
     "scan": "node scanner.mjs",
     "scan:full": "node scanner.mjs --full",
-    "build": "electron-builder --win portable",
+    "build:dir": "electron-builder --dir",
+    "build:dist": "electron-builder",
+    "build:portable": "electron-builder --win portable",
     "prepare": "husky",
     "chk:biome": "biome check .",
     "fix:biome": "biome check --write .",
@@ -16,9 +27,9 @@
   "keywords": [
     "nas",
     "catalog",
-    "electron"
+    "electron",
+    "portable"
   ],
-  "author": "Dein Name",
   "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
@@ -37,11 +48,17 @@
       "output": "dist"
     },
     "win": {
-      "target": "portable",
+      "target": ["portable", "zip"],
       "icon": "build/icon.ico"
     },
     "portable": {
-      "artifactName": "SoftwareKatalog.exe"
+      "artifactName": "SoftwareKatalog-Portable.exe"
+    },
+    "mac": {
+      "target": "zip"
+    },
+    "linux": {
+      "target": ["AppImage", "zip"]
     }
   },
   "allowScripts": {
