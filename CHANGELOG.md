@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.6.1...v1.7.0) (2026-11-12)
+
+### 🚀 Features
+
+* **core,ui:** add advanced scanner configurations, hidden categories, and UI improvements ([62c6050](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/62c6050d1aeda378c1738668473467b5d39038ee))
+* **core,ui:** add configurable auto-update checker ([be3d1b1](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/be3d1b1dc3e0a5d05b48cf9212b88c1ea7240a83))
+* **ui:** add 'About' section with dynamic GitHub update checker ([d27784b](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d27784b567e49224cae69f22ec1dea8cbcac5ee3))
+
+### 🐛 Bug Fixes
+
+* **core,ui:** improve error handling, resolve Biome warnings, and fix Electron cache error ([d95558e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d95558e10ed86ad66b62e198976cf821a394166d))
+* **core,ui:** resolve NAS performance bottlenecks and Electron runtime errors ([5d04de2](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5d04de273c3387a5e6b269cc249c6b4c860f0b51))
+
 ## [1.6.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.6.0...v1.6.1) (2026-11-08)
 
 ### ⚙️ Refactoring
