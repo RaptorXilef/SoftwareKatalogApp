@@ -6,27 +6,30 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const META_FOLDER_NAME = '_metadata';
 const IS_FULL_RESCAN = process.argv.includes('--full');
+const IS_UPDATE = process.argv.includes('--update');
 
 async function loadConfig() {
-  let targetPath = '../software';
-  let jsonPath = 'catalog.json';
-
   const configPath = path.join(__dirname, 'config.json');
+  const config = {
+    targetPath: '../software',
+    jsonPath: 'catalog.json',
+    scanNested: false,
+    nestedDepth: 1,
+  };
+
   if (existsSync(configPath)) {
     try {
-      const config = JSON.parse(await fs.readFile(configPath, 'utf-8'));
-      if (config.targetPath) targetPath = config.targetPath;
-      if (config.jsonPath) jsonPath = config.jsonPath;
-    } catch (_e) {
-      console.warn('Fehler beim Lesen der config.json, nutze Standardwerte.');
-    }
+      Object.assign(config, JSON.parse(await fs.readFile(configPath, 'utf-8')));
+    } catch (_e) {}
   }
 
   // Pfade auflösen (unterstützt absolute und relative Pfade)
-  const resolvedTarget = path.isAbsolute(targetPath) ? targetPath : path.resolve(__dirname, targetPath);
-  const resolvedJson = path.isAbsolute(jsonPath) ? jsonPath : path.resolve(__dirname, jsonPath);
+  const resolvedTarget = path.isAbsolute(config.targetPath)
+    ? config.targetPath
+    : path.resolve(__dirname, config.targetPath);
+  const resolvedJson = path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(__dirname, config.jsonPath);
 
-  return { ROOT_DIR: resolvedTarget, OUTPUT_FILE: resolvedJson };
+  return { ...config, ROOT_DIR: resolvedTarget, OUTPUT_FILE: resolvedJson };
 }
 
 async function parseSoftwareMetadata(softwareDir, metaDir) {
@@ -38,7 +41,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     mainCategory = '',
     subCategories = [],
     links = [],
-    formats = [];
+    formats = [],
+    hiddenCategory = '';
 
   try {
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
@@ -48,12 +52,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
       if (!entry.isFile()) return;
       const fullPath = path.join(metaDir, entry.name);
       const lowerName = entry.name.toLowerCase();
-
-      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
-        iconPath = fullPath;
-      } else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) {
-        screenshots.push(fullPath);
-      }
+      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) iconPath = fullPath;
+      else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) screenshots.push(fullPath);
     });
 
     // 2. meta.json auslesen (falls vorhanden)
@@ -67,6 +67,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
         // Verbindet Arrays automatisch mit Zeilenumbrüchen (<br>), lässt normale Strings wie sie sind
         if (data.description)
           description = Array.isArray(data.description) ? data.description.join('<br>') : data.description;
+        if (data.hiddenCategory) hiddenCategory = data.hiddenCategory.trim();
 
         // Erlaubt Arrays ["Win", "Mac"] oder Strings "Win, Mac"
         if (data.os)
@@ -93,11 +94,9 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
 
         // Links parsen (Erlaubt {"Label": "URL"})
         if (data.links && typeof data.links === 'object') {
-          if (Array.isArray(data.links)) {
-            links = data.links;
-          } else {
-            links = Object.entries(data.links).map(([label, url]) => ({ label, url }));
-          }
+          links = Array.isArray(data.links)
+            ? data.links
+            : Object.entries(data.links).map(([label, url]) => ({ label, url }));
         }
       } catch (_e) {
         console.warn(`Fehler beim Parsen der meta.json in ${metaDir}`);
@@ -131,10 +130,11 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     lastFiles: lastFiles.map(toRel),
     links,
     formats,
+    hiddenCategory,
   };
 }
 
-async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 4) {
+async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, maxDepth = 6, nestedDepth = 0) {
   if (currentDepth > maxDepth) return [];
 
   // LIVE FEEDBACK: Melde jeden betretenen Ordner
@@ -147,12 +147,37 @@ async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 
     const metaEntry = subDirs.find((d) => d.name.toLowerCase() === META_FOLDER_NAME);
 
     if (metaEntry) {
-      if (!IS_FULL_RESCAN && cacheMap.has(currentDir)) return [cacheMap.get(currentDir)];
-      const metaPath = path.join(currentDir, metaEntry.name);
-      return [await parseSoftwareMetadata(currentDir, metaPath)];
+      // Nutze Cache, außer bei Full-Scan
+      const currentItem =
+        !IS_FULL_RESCAN && cacheMap.has(currentDir)
+          ? cacheMap.get(currentDir)
+          : await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name));
+
+      let results = [currentItem];
+
+      // NEU: Optional eine Ebene tiefer suchen, obwohl schon _metadata gefunden wurde
+      if (config.scanNested && nestedDepth < config.nestedDepth) {
+        const nestedResults = await Promise.all(
+          subDirs.map((dir) =>
+            scanDirectory(
+              path.join(currentDir, dir.name),
+              cacheMap,
+              config,
+              currentDepth + 1,
+              maxDepth,
+              nestedDepth + 1
+            )
+          )
+        );
+        results = results.concat(nestedResults.flat());
+      }
+      return results;
     }
+
     const results = await Promise.all(
-      subDirs.map((dir) => scanDirectory(path.join(currentDir, dir.name), cacheMap, currentDepth + 1, maxDepth))
+      subDirs.map((dir) =>
+        scanDirectory(path.join(currentDir, dir.name), cacheMap, config, currentDepth + 1, maxDepth, nestedDepth)
+      )
     );
     return results.flat();
   } catch (_err) {
@@ -161,10 +186,11 @@ async function scanDirectory(currentDir, cacheMap, currentDepth = 0, maxDepth = 
 }
 
 async function run() {
-  const { ROOT_DIR, OUTPUT_FILE } = await loadConfig();
+  const config = await loadConfig();
 
-  // LOCK-MECHANISMUS HINZUGEFÜGT
+  // LOCK-MECHANISMUS
   const LOCK_FILE = path.join(__dirname, 'scan.lock');
+
   if (existsSync(LOCK_FILE)) {
     console.error('LOCKED: Ein Scan läuft bereits!');
     process.exit(1); // Beendet das Skript sofort mit einem Fehlercode
@@ -175,33 +201,42 @@ async function run() {
     await fs.writeFile(LOCK_FILE, Date.now().toString(), 'utf-8');
 
     // Sende Start-Signal mit dem exakten Pfad an die UI
-    process.stdout.write(`SCAN_START:${ROOT_DIR}\n`);
+    process.stdout.write(`SCAN_START:${config.ROOT_DIR}\n`);
     const startTime = Date.now();
     const cacheMap = new Map();
 
-    if (!IS_FULL_RESCAN && existsSync(OUTPUT_FILE)) {
+    if (existsSync(config.OUTPUT_FILE)) {
       try {
-        const oldData = JSON.parse(await fs.readFile(OUTPUT_FILE, 'utf-8'));
-        oldData.forEach((item) => {
-          // WICHTIG: Den relativen Pfad aus der JSON wieder absolut machen,
-          // damit der Scanner ihn mit currentDir abgleichen kann.
-          const absPath = path.resolve(__dirname, item.path);
-          cacheMap.set(absPath, item);
-        });
+        const oldData = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
+        oldData.forEach((item) => cacheMap.set(path.resolve(__dirname, item.path), item));
       } catch (_e) {}
     }
 
-    const softwareList = await scanDirectory(ROOT_DIR, cacheMap);
+    let softwareList = [];
+
+    if (IS_UPDATE) {
+      // NEU: Update-Modus liest nur bekannte Ordner neu ein, kriecht nicht durchs Filesystem
+      for (const [absPath, _oldItem] of cacheMap.entries()) {
+        if (existsSync(absPath)) {
+          process.stdout.write(`SCAN_DIR:${absPath}\n`);
+          const metaPath = path.join(absPath, META_FOLDER_NAME);
+          if (existsSync(metaPath)) {
+            softwareList.push(await parseSoftwareMetadata(absPath, metaPath));
+          }
+        }
+      }
+    } else {
+      softwareList = await scanDirectory(config.ROOT_DIR, cacheMap, config);
+    }
+
     softwareList.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
-    await fs.writeFile(OUTPUT_FILE, JSON.stringify(softwareList, null, 2), 'utf-8');
+    await fs.writeFile(config.OUTPUT_FILE, JSON.stringify(softwareList, null, 2), 'utf-8');
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`Fertig! ${softwareList.length} Programme erfasst in ${duration}s.`);
   } finally {
     // Lock entfernen, egal ob Erfolg oder Fehler
-    if (existsSync(LOCK_FILE)) {
-      await fs.unlink(LOCK_FILE).catch(() => {});
-    }
+    if (existsSync(LOCK_FILE)) await fs.unlink(LOCK_FILE).catch(() => {});
   }
 }
 

@@ -13,109 +13,83 @@
       margin: 0; padding: 20px; font-family: 'Segoe UI', system-ui, sans-serif;
       background-color: var(--bg); color: var(--text);
     }
-    /* Toolbar & Search */
-    .toolbar {
-      display: flex; flex-direction: column; gap: 15px; margin-bottom: 30px;
-    }
-    input[type="text"] {
-      padding: 12px 20px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text); font-size: 16px;
-      width: 100%; max-width: 400px;
-    }
-    .tags { display: flex; gap: 8px; flex-wrap: wrap; }
-    .tag {
-      padding: 5px 12px; border-radius: 20px; background: var(--surface);
-      cursor: pointer; border: 1px solid var(--border); transition: 0.2s;
-    }
-    .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-
     /* Header */
-    .header {
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
-    }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
     .header h1 { margin: 0; font-size: 24px; color: var(--accent); display: flex; align-items: baseline; gap: 10px; }
     .header .subtitle { font-size: 14px; color: var(--text); opacity: 0.7; font-weight: normal; }
-    .icon-btn {
-      background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text);
-      transition: color 0.2s, transform 0.2s; padding: 5px;
-    }
+    .icon-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text); transition: color 0.2s, transform 0.2s; padding: 5px; }
     .icon-btn:hover { color: var(--accent); transform: rotate(90deg); }
 
-    /* Settings Modal Input */
-    .settings-row { display: flex; gap: 10px; margin-top: 10px; }
-    .settings-row input { flex: 1; }
+    /* Toolbar & Search */
+    .toolbar { display: flex; flex-direction: column; gap: 15px; margin-bottom: 30px; }
+    input[type="text"], input[type="number"] {
+      padding: 12px 20px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); font-size: 16px;
+    }
+    #searchInput { width: 100%; max-width: 400px; }
+
+    /* Collapsible Tags */
+    details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+    summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
+    summary:hover { color: var(--accent-hover); }
+    .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
+    .tag { padding: 5px 12px; border-radius: 20px; background: var(--bg); cursor: pointer; border: 1px solid var(--border); transition: 0.2s; }
+    .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+    /* Settings UI */
+    .settings-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+    .settings-row input[type="text"] { flex: 1; }
+    .settings-group { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 20px; }
+    .checkbox-lbl { display: flex; align-items: center; gap: 10px; cursor: pointer; margin-top: 5px;}
+    .hidden-cats-list { display: flex; gap: 15px; flex-wrap: wrap; margin-top: 10px; }
 
     /* Grid */
-    .grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;
-    }
-    .card {
-      background: var(--surface); padding: 20px; border-radius: 12px; cursor: pointer;
-      text-align: center; border: 1px solid var(--border); transition: transform 0.2s;
-    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+    .card { background: var(--surface); padding: 20px; border-radius: 12px; cursor: pointer; text-align: center; border: 1px solid var(--border); transition: transform 0.2s; }
     .card:hover { transform: translateY(-5px); border-color: var(--accent); }
     .card img { width: 64px; height: 64px; object-fit: contain; margin-bottom: 15px; }
 
     /* Modal */
-    .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-      display: none; justify-content: center; align-items: center; padding: 20px;
-    }
-    .modal {
-      background: var(--surface); padding: 30px; border-radius: 12px;
-      width: 100%; max-width: 1100px; /* Hier auf 1100px geändert */
-      position: relative; border: 1px solid var(--border);
-    }
-    .modal h2 { margin-top: 0; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; padding: 20px; z-index: 100; overflow-y: auto;}
+    .modal { background: var(--surface); padding: 30px; border-radius: 12px; width: 100%; max-width: 1100px; position: relative; border: 1px solid var(--border); margin: auto; }
+    .modal h2, .modal h3 { margin-top: 0; }
+    .close-btn { position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: var(--text); border: none; background: none; }
+    .action-btn { display: inline-block; padding: 10px 20px; background: var(--accent); color: var(--bg); border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 20px; text-decoration: none; }
+    .action-btn:hover { background: var(--accent-hover); }
+    .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Bild-Zoom (Lightbox) */
     .img-zoomable { cursor: zoom-in; transition: transform 0.2s; }
     .img-zoomable:hover { transform: scale(1.05); }
-
-    .lightbox-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.9);
-      display: none; justify-content: center; align-items: center;
-      z-index: 10000; cursor: zoom-out; padding: 40px;
-    }
-    .lightbox-overlay img {
-      max-width: 100%; max-height: 100%; object-fit: contain;
-      border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-    }
-    .close-btn {
-      position: absolute; top: 15px; right: 20px; font-size: 24px;
-      cursor: pointer; color: var(--text); border: none; background: none;
-    }
-    .action-btn {
-      display: inline-block; padding: 10px 20px; background: var(--accent);
-      color: var(--bg); border: none; border-radius: 6px; cursor: pointer;
-      font-weight: bold; margin-top: 20px; text-decoration: none;
-    }
-    .action-btn:hover { background: var(--accent-hover); }
+    .lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; cursor: zoom-out; padding: 40px; }
+    .lightbox-overlay img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 
     /* Scan Animation */
     .scan-status { text-align: center; grid-column: 1 / -1; padding: 40px; background: var(--surface); border-radius: 12px; border: 1px solid var(--border); }
     .scan-path { color: var(--accent); font-size: 0.9em; word-break: break-all; margin-top: 10px; font-family: monospace; }
-    .spinner {
-      border: 4px solid var(--border); border-top: 4px solid var(--accent);
-      border-radius: 50%; width: 40px; height: 40px;
-      animation: spin 1s linear infinite; margin: 0 auto 15px auto;
-    }
+    .spinner { border: 4px solid var(--border); border-top: 4px solid var(--accent); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 15px auto; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-<div class="header">
+  <div class="header">
     <h1>Software Katalog <span class="subtitle">by Felix Maywald <span id="appVersion"></span></span></h1>
     <button type="button" class="icon-btn" onclick="_openSettings()" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
   </div>
 
   <div class="toolbar">
-    <div style="display: flex; gap: 15px; width: 100%;">
-      <input type="text" id="searchInput" placeholder="Software suchen..." style="flex: 1;">
-      <button type="button" id="btnScan" class="action-btn" style="margin: 0;" onclick="_startScan(false)">Neu scannen</button>
-      <button type="button" id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="_startScan(true)">Vollständiger Rescan</button>
+    <div style="display: flex; gap: 15px; width: 100%; flex-wrap: wrap;">
+      <input type="text" id="searchInput" placeholder="Software suchen..." style="flex: 1; min-width: 250px;">
+      <button type="button" id="btnScan" class="action-btn" style="margin: 0;" onclick="_startScan('quick')" title="Sucht netzwerkschonend nach neuen Software-Ordnern. Bekannte Ordner werden übersprungen.">Neu scannen</button>
+      <button type="button" id="btnUpdate" class="action-btn" style="margin: 0; background: #a6e3a1; color: var(--bg);" onclick="_startScan('update')" title="Liest Metadaten und Bilder der bereits bekannten Programme blitzschnell neu ein.">Metadaten aktualisieren</button>
+      <button type="button" id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="_startScan('full')" title="Verwirft den aktuellen Katalog und liest das gesamte Laufwerk komplett neu ein.">Vollständiger Rescan</button>
     </div>
-    <div class="tags" id="tagContainer"></div>
+
+    <!-- Collapsible Tags -->
+    <details id="tagsDetails">
+      <summary>Kategorien & Filter ein/ausblenden</summary>
+      <div class="tags" id="tagContainer"></div>
+    </details>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -126,7 +100,7 @@
     </div>
   </div>
 
-  <!-- NEU: Das Lightbox-Overlay für große Bilder (mit a11y Fixes) -->
+  <!-- Das Lightbox-Overlay für große Bilder (mit a11y Fixes) -->
   <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" onclick="this.style.display='none'" onkeydown="if(event.key === 'Escape' || event.key === 'Enter') this.style.display='none'">
     <img id="lightboxImg" src="" alt="Vollbildansicht">
   </div>
@@ -134,6 +108,8 @@
   <script>
     let catalog = [];
     let activeTag = null;
+    let appSettings = {};
+    let availableHiddenCats = [];
 
     if (window.electronAPI) {
       window.electronAPI.onScanStart((path) => {
@@ -150,12 +126,13 @@
       try {
         if (window.electronAPI) {
           catalog = await window.electronAPI.loadCatalog();
+          appSettings = await window.electronAPI.getSettings();
         } else {
-          const res = await fetch('catalog.json');
-          catalog = await res.json();
+          catalog = await (await fetch('catalog.json')).json();
         }
 
-        // FIX: Die 'tags'-Liste aus mainCategory und subCategories zusammensetzen
+        availableHiddenCats = [...new Set(catalog.map(i => i.hiddenCategory).filter(c => c))];
+
         catalog.forEach(item => {
           item.tags = [];
           if (item.mainCategory) item.tags.push(item.mainCategory);
@@ -173,18 +150,13 @@
       }
     }
 
-    async function _startScan(isFull) {
+    async function _startScan(mode) {
       if (!window.electronAPI) return alert("Scannen ist nur in der Desktop-App möglich.");
 
-      const btnScan = document.getElementById('btnScan');
-      const btnFullScan = document.getElementById('btnFullScan');
+      const btns = ['btnScan', 'btnUpdate', 'btnFullScan'].map(id => document.getElementById(id));
+      btns.forEach(b => b.disabled = true);
+
       const grid = document.getElementById('grid');
-
-      // UI sperren
-      btnScan.disabled = true;
-      btnFullScan.disabled = true;
-      btnScan.textContent = "Scan läuft...";
-
       grid.innerHTML = `
         <div class="scan-status">
           <div class="spinner"></div>
@@ -194,21 +166,14 @@
       `;
 
       try {
-        const output = await window.electronAPI.runScan(isFull);
-        console.log(output);
+        await window.electronAPI.runScan(mode);
         await init(); // Nach Scan neu laden (rendert das Grid wieder)
       } catch (error) {
-        if(error.includes("LOCKED")) {
-          alert("Scan abgebrochen: Ein anderes Familienmitglied führt gerade einen Scan durch.");
-        } else {
-          alert(`Fehler beim Scannen:\n${error}`);
-        }
+        if(error.includes("LOCKED")) alert("Scan abgebrochen: Ein anderes Familienmitglied führt gerade einen Scan durch.");
+        else alert(`Fehler beim Scannen:\n${error}`);
         init(); // Versuche den alten Zustand wiederherzustellen
       } finally {
-        // UI wieder entsperren
-        btnScan.disabled = false;
-        btnFullScan.disabled = false;
-        btnScan.textContent = "Neu scannen";
+        btns.forEach(b => b.disabled = false);
       }
     }
 
@@ -216,9 +181,11 @@
       const allTags = new Set();
       // forEach ohne automatischen Return via geschweifte Klammern
       catalog.forEach(item => {
-        item.tags.forEach(t => {
-          allTags.add(t);
-        });
+        // Filtere versteckte Kategorien auch für die Tag-Generierung raus
+        const isHidden = item.hiddenCategory && item.hiddenCategory.trim() !== '';
+        if (isHidden && (!appSettings.visibleHiddenCats || !appSettings.visibleHiddenCats.includes(item.hiddenCategory))) return;
+
+        item.tags.forEach(t => allTags.add(t));
       });
 
       const container = document.getElementById('tagContainer');
@@ -229,13 +196,9 @@
       });
     }
 
-    function _filterByTag(tag) {
-      activeTag = tag;
-      renderTags();
-      renderGrid();
-    }
+    function _filterByTag(tag) { activeTag = tag; renderTags(); renderGrid(); }
 
-    // Berechnet die Ähnlichkeit zweier Wörter
+    // Fuzzy Search Helpers
     function getEditDistance(a, b) {
       if (!a.length) return b.length;
       if (!b.length) return a.length;
@@ -260,9 +223,8 @@
       const wordsInText = fullText.split(/[^a-z0-9äöüß]+/);
       for (const textWord of wordsInText) {
         if (textWord.length < 3) continue;
-        const distance = getEditDistance(searchWord, textWord);
         // Erlaubt 1 Fehler bei kurzen Wörtern, 2 bei längeren
-        if (distance <= (searchWord.length <= 5 ? 1 : 2)) return true;
+        if (getEditDistance(searchWord, textWord) <= (searchWord.length <= 5 ? 1 : 2)) return true;
       }
       return false;
     }
@@ -275,18 +237,18 @@
       const grid = document.getElementById('grid');
 
       const filtered = catalog.filter(item => {
+        // Versteckte Kategorien filtern
+        const isHidden = item.hiddenCategory && item.hiddenCategory.trim() !== '';
+        if (isHidden && (!appSettings.visibleHiddenCats || !appSettings.visibleHiddenCats.includes(item.hiddenCategory))) return false;
+
         // Suchbereich: Name, Beschreibung, Formate und alle Tags zusammenfassen
         const searchText = `${item.name} ${item.description} ${item.tags.join(' ')} ${item.formats ? item.formats.join(' ') : ''}`.toLowerCase();
-
         const matchesTag = !activeTag || item.tags.includes(activeTag);
 
         // Multi-Word UND-Suche mit Fuzzy Matching
         let matchesSearch = true;
         for (const word of searchWords) {
-          if (!fuzzyMatch(word, searchText)) {
-            matchesSearch = false;
-            break;
-          }
+          if (!fuzzyMatch(word, searchText)) { matchesSearch = false; break; }
         }
         return matchesSearch && matchesTag;
       });
@@ -336,22 +298,18 @@
         `</div>`;
       }
 
-      const modal = document.getElementById('modalContent');
-      modal.innerHTML = `
-        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'">&times;</button>
+      document.getElementById('modalContent').innerHTML = `
+        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'" title="Schließen" aria-label="Schließen">&times;</button>
         <div style="display: flex; gap: 20px; align-items: flex-start;">
           ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" style="width: 80px; height: 80px; object-fit: contain;">` : ''}
           <div>
             <h2>${item.name}</h2>
-            ${osBadges}
-            ${formatBadges}
-            ${catText}
+            ${osBadges} ${formatBadges} ${catText}
           </div>
         </div>
         <div style="margin-top: 20px;">
           <p>${item.description || 'Keine Beschreibung vorhanden.'}</p>
-          ${linksHtml}
-          ${imagesHtml}
+          ${linksHtml} ${imagesHtml}
           <p><small style="color: gray;">Pfad: ${item.path}</small></p>
         </div>
         <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px;">
@@ -362,48 +320,20 @@
       document.getElementById('modalOverlay').style.display = 'flex';
     }
 
-    function _openExternalUrl(url) {
-      if (window.electronAPI) {
-        window.electronAPI.openUrl(url);
-      } else {
-        window.open(url, '_blank'); // Fallback für reinen Browser
-      }
-    }
+    function _openExternalUrl(url) { window.electronAPI ? window.electronAPI.openUrl(url) : window.open(url, '_blank'); }
 
     async function _startDownload(files) {
-      const btn = event.target;
-      const originalText = btn.textContent;
-      btn.textContent = "Kopiere...";
-      btn.disabled = true;
-
+      const btn = event.target; const originalText = btn.textContent;
+      btn.textContent = "Kopiere..."; btn.disabled = true;
       const res = await window.electronAPI.downloadFiles(files);
-
-      if (res.success) {
-        alert(`Erfolgreich gespeichert unter:\n${res.dest}`);
-      } else if (res.error) {
-        alert(`Fehler beim Kopieren:\n${res.error}`);
-      }
-
-      btn.textContent = originalText;
-      btn.disabled = false;
+      if (res.success) alert(`Erfolgreich gespeichert unter:\n${res.dest}`);
+      else if (res.error) alert(`Fehler beim Kopieren:\n${res.error}`);
+      btn.textContent = originalText; btn.disabled = false;
     }
 
-    function _closeModal(e) {
-      if (e.target.id === 'modalOverlay') e.target.style.display = 'none';
-    }
-
-    function _openInExplorer(path) {
-      if (window.electronAPI) {
-        window.electronAPI.openPath(path);
-      } else {
-        alert(`Um Ordner nativ zu öffnen, muss die App über Electron gestartet werden.\\nPfad: ${path}`);
-      }
-    }
-
-    function _openLightbox(src) {
-      document.getElementById('lightboxImg').src = src;
-      document.getElementById('lightboxOverlay').style.display = 'flex';
-    }
+    function _closeModal(e) { if (e.target.id === 'modalOverlay') e.target.style.display = 'none'; }
+    function _openInExplorer(path) { window.electronAPI ? window.electronAPI.openPath(path) : alert(`App über Electron starten.`); }
+    function _openLightbox(src) { document.getElementById('lightboxImg').src = src; document.getElementById('lightboxOverlay').style.display = 'flex'; }
 
     async function _loadAppInfo() {
       if (window.electronAPI) {
@@ -415,39 +345,87 @@
     async function _openSettings() {
       if (!window.electronAPI) return alert("Einstellungen sind nur in der Desktop-App verfügbar.");
 
-      const currentPath = await window.electronAPI.getTargetDir();
+      const s = await window.electronAPI.getSettings();
 
-      const modal = document.getElementById('modalContent');
-      modal.innerHTML = `
-        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'">&times;</button>
+      const hiddenCheckboxes = availableHiddenCats.length === 0
+        ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
+        : availableHiddenCats.map(cat => {
+            const isChecked = s.visibleHiddenCats && s.visibleHiddenCats.includes(cat) ? 'checked' : '';
+            return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${cat}" ${isChecked}> ${cat}</label>`;
+          }).join('');
+
+      document.getElementById('modalContent').innerHTML = `
+        <button type="button" class="close-btn" onclick="document.getElementById('modalOverlay').style.display='none'" title="Schließen" aria-label="Schließen">&times;</button>
         <h2>Einstellungen</h2>
-        <p>Lege hier den Hauptordner fest, in dem sich deine Software (die _metadata Ordner) befindet.</p>
 
-        <div class="settings-row">
-          <input type="text" id="targetPathInput" value="${currentPath}" readonly>
-          <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseTargetDir()">Ordner wählen...</button>
+        <div class="settings-group" style="border-top: none; margin-top: 0; padding-top: 0;">
+          <h3>Dateipfade</h3>
+          <div class="settings-row">
+            <label style="width: 120px;">Software-Ordner:</label>
+            <input type="text" id="cfgTarget" value="${s.targetPath}" readonly>
+            <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgTarget', true)">Wählen</button>
+          </div>
+          <div class="settings-row">
+            <label style="width: 120px;">Katalog (JSON):</label>
+            <input type="text" id="cfgJson" value="${s.jsonPath}" readonly>
+            <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgJson', false, [{name: 'JSON', extensions: ['json']}])">Wählen</button>
+          </div>
+          <div class="settings-row">
+            <label style="width: 120px;">Scanner-Skript:</label>
+            <input type="text" id="cfgScript" value="${s.scriptPath}" readonly>
+            <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgScript', false, [{name: 'JavaScript', extensions: ['mjs', 'js']}])">Wählen</button>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Scanner-Tiefe</h3>
+          <label class="checkbox-lbl">
+            <input type="checkbox" id="cfgScanNested" ${s.scanNested ? 'checked' : ''}>
+            Nach Fund eines _metadata Ordners noch tiefere Ebenen durchsuchen
+          </label>
+          <div class="settings-row" style="margin-top: 10px;">
+            <label style="width: 250px;">Maximale Ebenen tiefer suchen:</label>
+            <input type="number" id="cfgNestedDepth" value="${s.nestedDepth || 1}" min="1" max="5" style="width: 80px; flex: none;">
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h3>Sichtbarkeit versteckter Kategorien</h3>
+          <p style="font-size: 0.9em; margin-top: 0;">Aktiviere Kategorien, um Software anzuzeigen, die in ihrer meta.json einen <code>hiddenCategory</code> Eintrag besitzt.</p>
+          <div class="hidden-cats-list">
+            ${hiddenCheckboxes}
+          </div>
         </div>
 
         <div style="margin-top: 30px; text-align: right;">
-          <button type="button" class="action-btn" onclick="_saveSettings()">Speichern</button>
+          <button type="button" class="action-btn" onclick="_saveSettings()">Speichern & Anwenden</button>
         </div>
       `;
       document.getElementById('modalOverlay').style.display = 'flex';
     }
 
-    async function _browseTargetDir() {
-      const selectedPath = await window.electronAPI.selectTargetDir();
-      if (selectedPath) {
-        document.getElementById('targetPathInput').value = selectedPath;
-      }
+    async function _browseFile(inputId, isDir, filters) {
+      const selectedPath = isDir ? await window.electronAPI.selectTargetDir() : await window.electronAPI.selectFile(filters);
+      if (selectedPath) document.getElementById(inputId).value = selectedPath;
     }
 
     async function _saveSettings() {
-      const newPath = document.getElementById('targetPathInput').value;
-      const res = await window.electronAPI.saveTargetDir(newPath);
+      const checkedCats = Array.from(document.querySelectorAll('input[name="hiddenCatCheck"]:checked')).map(cb => cb.value);
+
+      const newSettings = {
+        targetPath: document.getElementById('cfgTarget').value,
+        jsonPath: document.getElementById('cfgJson').value,
+        scriptPath: document.getElementById('cfgScript').value,
+        scanNested: document.getElementById('cfgScanNested').checked,
+        nestedDepth: parseInt(document.getElementById('cfgNestedDepth').value, 10),
+        visibleHiddenCats: checkedCats
+      };
+
+      const res = await window.electronAPI.saveSettings(newSettings);
       if (res.success) {
         document.getElementById('modalOverlay').style.display='none';
-        alert("Pfad erfolgreich gespeichert. Bitte starte einen neuen Scan, um den Katalog zu aktualisieren.");
+        await init(); // Lädt Katalog und wendet die neuen Sichtbarkeiten sofort an!
+        alert("Einstellungen gespeichert. Falls sich Pfade geändert haben, starte bitte einen Scan.");
       } else {
         alert(`Fehler beim Speichern:\n${res.error}`);
       }

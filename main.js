@@ -4,25 +4,28 @@ const fs = require('node:fs');
 
 // Basis-Pfade definieren
 function getAppFolder() {
-  if (app.isPackaged) {
-    return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
-  }
-  return __dirname;
+  return app.isPackaged ? process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath) : __dirname;
 }
 
 function getConfig() {
   const appFolder = getAppFolder();
   const configPath = path.join(appFolder, 'config.json');
 
-  // Standard-Werte
-  const config = { targetPath: '../software', jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
+  // Erweiterte Standard-Werte
+  const config = {
+    targetPath: '../software',
+    jsonPath: 'catalog.json',
+    scriptPath: 'scanner.mjs',
+    scanNested: false,
+    nestedDepth: 1,
+    visibleHiddenCats: [],
+  };
 
   if (fs.existsSync(configPath)) {
     try {
       Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
     } catch (_e) {}
   } else {
-    // NEU: config.json automatisch erstellen, falls sie fehlt
     try {
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
     } catch (_e) {}
@@ -30,23 +33,24 @@ function getConfig() {
 
   return {
     appFolder,
-    targetPath: config.targetPath,
-    jsonPath: path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(appFolder, config.jsonPath),
-    scriptPath: path.isAbsolute(config.scriptPath) ? config.scriptPath : path.resolve(appFolder, config.scriptPath),
+    ...config,
+    absJsonPath: path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(appFolder, config.jsonPath),
+    absScriptPath: path.isAbsolute(config.scriptPath) ? config.scriptPath : path.resolve(appFolder, config.scriptPath),
   };
 }
 
-function saveConfig(newTargetPath) {
+function saveConfig(newSettings) {
   const appFolder = getAppFolder();
   const configPath = path.join(appFolder, 'config.json');
-  const currentConfig = { targetPath: newTargetPath, jsonPath: 'catalog.json', scriptPath: 'scanner.mjs' };
+  const currentConfig = getConfig();
 
-  if (fs.existsSync(configPath)) {
-    try {
-      Object.assign(currentConfig, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
-      currentConfig.targetPath = newTargetPath; // Überschreiben
-    } catch (_e) {}
-  }
+  // Neue Einstellungen zusammenführen
+  Object.assign(currentConfig, newSettings);
+
+  // Hilfs-Attribute entfernen, bevor in JSON geschrieben wird
+  delete currentConfig.appFolder;
+  delete currentConfig.absJsonPath;
+  delete currentConfig.absScriptPath;
 
   fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
 }
@@ -66,10 +70,10 @@ app.whenReady().then(() => {
 
   // Daten an Frontend schicken
   ipcMain.handle('load-catalog', async () => {
-    const { jsonPath, appFolder } = getConfig();
-    if (fs.existsSync(jsonPath)) {
+    const { absJsonPath, appFolder } = getConfig();
+    if (fs.existsSync(absJsonPath)) {
       try {
-        const data = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+        const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
         // Pfade on-the-fly für das Frontend wieder in absolute Pfade umwandeln
         return data.map((item) => {
           if (item.path) item.path = path.resolve(appFolder, item.path);
@@ -84,13 +88,13 @@ app.whenReady().then(() => {
   });
 
   // Scanner ausführen
-  ipcMain.handle('run-scan', async (event, isFull) => {
-    const { scriptPath, appFolder } = getConfig();
+  ipcMain.handle('run-scan', async (event, mode) => {
+    const { absScriptPath, appFolder } = getConfig();
     return new Promise((resolve, reject) => {
       const { spawn } = require('node:child_process');
-
-      const args = [scriptPath];
-      if (isFull) args.push('--full');
+      const args = [absScriptPath];
+      if (mode === 'full') args.push('--full');
+      if (mode === 'update') args.push('--update');
 
       // Der Gamechanger: spawn statt exec & ELECTRON_RUN_AS_NODE.
       // process.execPath ist die SoftwareKatalog.exe selbst. Mit der env-Variable
@@ -100,9 +104,9 @@ app.whenReady().then(() => {
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       });
 
-      let fullOutput = '';
-      let fullError = '';
-      let buffer = '';
+      let fullOutput = '',
+        fullError = '',
+        buffer = '';
 
       // Lese den Live-Output des Scanners Zeile für Zeile
       child.stdout.on('data', (data) => {
@@ -114,24 +118,17 @@ app.whenReady().then(() => {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (trimmed.startsWith('SCAN_START:')) {
+          if (trimmed.startsWith('SCAN_START:'))
             event.sender.send('scan-start', trimmed.replace('SCAN_START:', '').trim());
-          } else if (trimmed.startsWith('SCAN_DIR:')) {
+          else if (trimmed.startsWith('SCAN_DIR:'))
             event.sender.send('scan-progress', trimmed.replace('SCAN_DIR:', '').trim());
-          }
         }
       });
 
       // Fehler-Stream erfassen
-      child.stderr.on('data', (data) => {
-        fullError += data.toString();
-      });
-
+      child.stderr.on('data', (data) => (fullError += data.toString()));
       // Wenn der Prozess gar nicht erst starten kann
-      child.on('error', (err) => {
-        reject(new Error(`Spawn-Fehler: ${err.message}`));
-      });
-
+      child.on('error', (err) => reject(new Error(`Spawn-Fehler: ${err.message}`)));
       child.on('exit', (code) => {
         if (code === 0) resolve(fullOutput);
         else if (fullError.includes('LOCKED')) reject(new Error('LOCKED'));
@@ -166,19 +163,36 @@ app.whenReady().then(() => {
   // Öffnet Web-Links im Standardbrowser (Chrome/Edge/Firefox)
   ipcMain.on('open-url', (_event, url) => shell.openExternal(url));
 
+  // Settings API
   // Version ans Frontend senden
-  ipcMain.handle('get-app-info', () => {
-    return { version: app.getVersion() };
+  ipcMain.handle('get-app-info', () => ({ version: app.getVersion() }));
+  ipcMain.handle('get-settings', () => getConfig());
+  ipcMain.handle('save-settings', (_event, settings) => {
+    try {
+      saveConfig(settings);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
   });
 
   // Ordnerauswahl für Einstellungen öffnen
   ipcMain.handle('select-target-dir', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Software-Hauptordner auswählen',
+      title: 'Ordner auswählen',
       properties: ['openDirectory'],
     });
+    return canceled ? null : filePaths[0];
+  });
+
+  ipcMain.handle('select-file', async (_event, filters) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Datei auswählen',
+      properties: ['openFile'],
+      filters,
+    });
     if (canceled || filePaths.length === 0) return null;
-    return filePaths[0];
+    return path.relative(getAppFolder(), filePaths[0]); // Speichert Pfad relativ zur App
   });
 
   // Pfad in config.json speichern

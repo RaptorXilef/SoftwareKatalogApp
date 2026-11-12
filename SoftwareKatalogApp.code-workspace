@@ -1,0 +1,15 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "gremlins.showInProblemPane": true,
+    "terminal.integrated.defaultProfile.windows": "Git Bash",
+    "workbench.iconTheme": "vira-icons-carbon",
+    "workbench.productIconTheme": "viraUIIcons",
+    "workbench.colorTheme": "Vira Carbon High Contrast",
+    "viraTheme.accent": "White"
+  }
+}
