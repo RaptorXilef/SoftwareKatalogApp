@@ -1,6 +1,6 @@
 {
   "name": "software-katalog",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Ein portabler Software-Katalog für das NAS",
   "main": "main.js",
   "author": "Felix Maywald / RaptorXilef",

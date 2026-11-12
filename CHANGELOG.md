@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.8.0...v1.8.1) (2026-11-12)
+
+### 🐛 Bug Fixes
+
+* **core:** disable hardware acceleration and sandbox for SMB execution stability ([ed08604](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/ed0860497424833a417ec4f4670e28184df35070))
+* **core:** resolve native image load warnings and GPU overlay probing errors ([2c4786b](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2c4786bbc3485e4eeb7d49a28c9667d9cd1cb613))
+
 ## [1.8.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.7.0...v1.8.0) (2026-11-12)
 
 ### 🚀 Features
