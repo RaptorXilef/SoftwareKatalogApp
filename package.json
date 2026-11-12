@@ -4,6 +4,7 @@
   "description": "Ein portabler Software-Katalog für das NAS",
   "main": "main.js",
   "author": "Felix Maywald / RaptorXilef",
+  "license": "CC-BY-SA-4.0",
   "homepage": "https://github.com/RaptorXilef/SoftwareKatalogApp#readme",
   "repository": {
     "type": "git",
@@ -30,7 +31,6 @@
     "electron",
     "portable"
   ],
-  "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
     "@commitlint/cli": "^21.2.4",
