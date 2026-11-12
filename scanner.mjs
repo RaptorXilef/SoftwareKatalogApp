@@ -20,7 +20,9 @@ async function loadConfig() {
   if (existsSync(configPath)) {
     try {
       Object.assign(config, JSON.parse(await fs.readFile(configPath, 'utf-8')));
-    } catch (_e) {}
+    } catch (e) {
+      console.error(`Fehler beim Lesen der config.json: ${e.message}`);
+    }
   }
 
   // Pfade auflösen (unterstützt absolute und relative Pfade)
@@ -98,11 +100,13 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
             ? data.links
             : Object.entries(data.links).map(([label, url]) => ({ label, url }));
         }
-      } catch (_e) {
-        console.warn(`Fehler beim Parsen der meta.json in ${metaDir}`);
+      } catch (e) {
+        console.warn(`Fehler beim Parsen der meta.json in ${metaDir}: ${e.message}`);
       }
     }
-  } catch (_err) {}
+  } catch (err) {
+    console.error(`Fehler beim Lesen des _metadata Ordners ${metaDir}: ${err.message}`);
+  }
 
   // Check auf _last Ordner
   let lastFiles = [];
@@ -111,7 +115,9 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     try {
       const lEntries = await fs.readdir(lastDir, { withFileTypes: true });
       lastFiles = lEntries.filter((e) => e.isFile()).map((e) => path.join(lastDir, e.name));
-    } catch (_e) {}
+    } catch (e) {
+      console.error(`Fehler beim Lesen des _last Ordners in ${softwareDir}: ${e.message}`);
+    }
   }
 
   // Hilfsfunktion: Wandelt absolute Pfade in relative Pfade um (ausgehend vom App-Ordner)
@@ -180,7 +186,8 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
       )
     );
     return results.flat();
-  } catch (_err) {
+  } catch (err) {
+    console.error(`Fehler beim Scannen von ${currentDir}: ${err.message}`);
     return [];
   }
 }
@@ -208,8 +215,12 @@ async function run() {
     if (existsSync(config.OUTPUT_FILE)) {
       try {
         const oldData = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
-        oldData.forEach((item) => cacheMap.set(path.resolve(__dirname, item.path), item));
-      } catch (_e) {}
+        oldData.forEach((item) => {
+          cacheMap.set(path.resolve(__dirname, item.path), item);
+        });
+      } catch (e) {
+        console.error(`Fehler beim Laden des alten Katalogs: ${e.message}`);
+      }
     }
 
     let softwareList = [];
@@ -236,7 +247,8 @@ async function run() {
     console.log(`Fertig! ${softwareList.length} Programme erfasst in ${duration}s.`);
   } finally {
     // Lock entfernen, egal ob Erfolg oder Fehler
-    if (existsSync(LOCK_FILE)) await fs.unlink(LOCK_FILE).catch(() => {});
+    if (existsSync(LOCK_FILE))
+      await fs.unlink(LOCK_FILE).catch((e) => console.error(`Konnte Lock-Datei nicht löschen: ${e.message}`));
   }
 }
 

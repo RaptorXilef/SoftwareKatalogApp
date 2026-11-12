@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
+// Behebt den "Unable to move the cache" Fehler in Electron
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 // Basis-Pfade definieren
 function getAppFolder() {
   return app.isPackaged ? process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath) : __dirname;
@@ -24,11 +27,15 @@ function getConfig() {
   if (fs.existsSync(configPath)) {
     try {
       Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
-    } catch (_e) {}
+    } catch (e) {
+      console.error('Fehler beim Lesen der config.json:', e);
+    }
   } else {
     try {
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (_e) {}
+    } catch (e) {
+      console.error('Fehler beim Erstellen der config.json:', e);
+    }
   }
 
   return {
@@ -82,7 +89,9 @@ app.whenReady().then(() => {
           if (item.lastFiles) item.lastFiles = item.lastFiles.map((f) => path.resolve(appFolder, f));
           return item;
         });
-      } catch (_e) {}
+      } catch (e) {
+        console.error('Fehler beim Verarbeiten des Katalogs:', e);
+      }
     }
     return [];
   });

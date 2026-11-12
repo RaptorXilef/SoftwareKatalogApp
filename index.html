@@ -145,8 +145,9 @@
           renderTags();
           renderGrid();
         }
-      } catch (_e) {
-        document.getElementById('grid').innerHTML = '<p>Fehler: Konnte Daten nicht laden.</p>';
+      } catch (error) {
+        console.error('Fehler beim Initialisieren:', error);
+        document.getElementById('grid').innerHTML = `<p>Fehler: Konnte Daten nicht laden. Details: ${error.message || error}</p>`;
       }
     }
 
@@ -154,7 +155,7 @@
       if (!window.electronAPI) return alert("Scannen ist nur in der Desktop-App möglich.");
 
       const btns = ['btnScan', 'btnUpdate', 'btnFullScan'].map(id => document.getElementById(id));
-      btns.forEach(b => b.disabled = true);
+      btns.forEach(b => { b.disabled = true; });
 
       const grid = document.getElementById('grid');
       grid.innerHTML = `
@@ -169,11 +170,15 @@
         await window.electronAPI.runScan(mode);
         await init(); // Nach Scan neu laden (rendert das Grid wieder)
       } catch (error) {
-        if(error.includes("LOCKED")) alert("Scan abgebrochen: Ein anderes Familienmitglied führt gerade einen Scan durch.");
-        else alert(`Fehler beim Scannen:\n${error}`);
+        console.error('Scan-Fehler:', error);
+        if(error.message?.includes("LOCKED") || error.includes?.("LOCKED")) {
+            alert("Scan abgebrochen: Ein anderes Familienmitglied führt gerade einen Scan durch.");
+        } else {
+            alert(`Fehler beim Scannen:\n${error.message || error}`);
+        }
         init(); // Versuche den alten Zustand wiederherzustellen
       } finally {
-        btns.forEach(b => b.disabled = false);
+        btns.forEach(b => { b.disabled = false; });
       }
     }
 
@@ -183,9 +188,9 @@
       catalog.forEach(item => {
         // Filtere versteckte Kategorien auch für die Tag-Generierung raus
         const isHidden = item.hiddenCategory && item.hiddenCategory.trim() !== '';
-        if (isHidden && (!appSettings.visibleHiddenCats || !appSettings.visibleHiddenCats.includes(item.hiddenCategory))) return;
+        if (isHidden && (!appSettings.visibleHiddenCats?.includes(item.hiddenCategory))) return;
 
-        item.tags.forEach(t => allTags.add(t));
+        item.tags.forEach(t => { allTags.add(t); });
       });
 
       const container = document.getElementById('tagContainer');
@@ -239,7 +244,7 @@
       const filtered = catalog.filter(item => {
         // Versteckte Kategorien filtern
         const isHidden = item.hiddenCategory && item.hiddenCategory.trim() !== '';
-        if (isHidden && (!appSettings.visibleHiddenCats || !appSettings.visibleHiddenCats.includes(item.hiddenCategory))) return false;
+        if (isHidden && (!appSettings.visibleHiddenCats?.includes(item.hiddenCategory))) return false;
 
         // Suchbereich: Name, Beschreibung, Formate und alle Tags zusammenfassen
         const searchText = `${item.name} ${item.description} ${item.tags.join(' ')} ${item.formats ? item.formats.join(' ') : ''}`.toLowerCase();
@@ -350,7 +355,7 @@
       const hiddenCheckboxes = availableHiddenCats.length === 0
         ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
         : availableHiddenCats.map(cat => {
-            const isChecked = s.visibleHiddenCats && s.visibleHiddenCats.includes(cat) ? 'checked' : '';
+            const isChecked = s.visibleHiddenCats?.includes(cat) ? 'checked' : '';
             return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${cat}" ${isChecked}> ${cat}</label>`;
           }).join('');
 
