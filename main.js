@@ -14,6 +14,8 @@ app.commandLine.appendSwitch('disable-features', 'DawnGraphiteCache');
 // Behebt den "White-Screen-Absturz" bei Ausführung direkt vom Netzlaufwerk (SMB)
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('no-sandbox');
+// Unterdrückt den "GetGpuDriverOverlayInfo" Fehler (weil Hardwarebeschleunigung aus ist)
+app.commandLine.appendSwitch('disable-direct-composition');
 
 // Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
 app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
@@ -80,12 +82,21 @@ function saveConfig(newSettings) {
 let mainWindow = null;
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const windowOptions = {
     width: 1200,
     height: 800,
-    icon: path.join(__dirname, 'build', 'icon.ico'), // Lade das Icon in die Fensterleiste
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
-  });
+  };
+
+  // electron-builder packt den 'build'-Ordner standardmäßig nicht ins app.asar, um Platz zu sparen.
+  // Wir setzen das Icon also nur, wenn die Datei existiert (z. B. während der lokalen Entwicklung).
+  // Im fertigen Build nutzt Windows ohnehin automatisch das Icon der .exe-Datei!
+  const iconPath = path.join(__dirname, 'build', 'icon.ico');
+  if (fs.existsSync(iconPath)) {
+    windowOptions.icon = iconPath;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
   mainWindow.loadFile('index.html');
 
   mainWindow.on('closed', () => {
