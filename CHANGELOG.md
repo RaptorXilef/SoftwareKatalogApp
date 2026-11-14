@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.8.1...v1.9.0) (2026-11-14)
+
+### 🚀 Features
+
+* **ui:** implement non-blocking scan execution, sticky toolbar, and scroll retention ([25cf0db](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/25cf0db84b688894ee4d9a268ecdccd87db63eb3))
+* **ui:** implement smart historical progress bar and resolve CSS specificity linter warnings ([0e52e21](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0e52e212134506fd2d1d456fe77d9cde9bf0d26a))
+
+### 🐛 Bug Fixes
+
+* entfernt weißes Aufblitzen ([5204bb0](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5204bb0ae8ea7e529c41771549e5f1e1627ea115))
+* **ui:** separate progress bar expectations by scan mode and resolve CSS linting order ([423a79f](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/423a79ffda05eb858cf9ac6b41c9c0910673b0c5))
+
 ## [1.8.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.8.0...v1.8.1) (2026-11-12)
 
 ### 🐛 Bug Fixes
