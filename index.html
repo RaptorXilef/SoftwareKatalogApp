@@ -17,6 +17,15 @@
       background-color: var(--bg); color: var(--text);
     }
 
+    /* Basis HTML Elemente (Linter Fix: Generische Elemente müssen oben stehen) */
+    details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+    summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
+    summary:hover { color: var(--accent-hover); }
+    input[type="text"], input[type="number"] {
+      padding: 12px 20px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text); font-size: 16px;
+    }
+
     /* Header */
     .header { display: flex; justify-content: space-between; align-items: center; padding-top: 20px; margin-bottom: 15px; }
     .header h1 { margin: 0; font-size: 24px; color: var(--accent); display: flex; align-items: baseline; gap: 10px; }
@@ -24,10 +33,7 @@
     .icon-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text); transition: color 0.2s, transform 0.2s; padding: 5px; }
     .icon-btn:hover { color: var(--accent); transform: rotate(90deg); }
 
-    /* Collapsible Tags (Nach oben verschoben für Linter-Fix) */
-    details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
-    summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
-    summary:hover { color: var(--accent-hover); }
+    /* Tags */
     .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
     .tag { padding: 5px 12px; border-radius: 20px; background: var(--bg); cursor: pointer; border: 1px solid var(--border); transition: 0.2s; }
     .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
@@ -36,12 +42,11 @@
     .toolbar {
       position: sticky; top: 0; z-index: 90;
       background: rgba(30, 30, 46, 0.95); backdrop-filter: blur(10px);
-      padding: 15px 20px; margin: 0 -20px 20px -20px; /* Zieht die Leiste links und rechts bis zum Rand */
+      padding: 15px 20px; margin: 0 -20px 20px -20px;
       border-bottom: 1px solid transparent;
       transition: all 0.3s ease; display: flex; flex-direction: column; gap: 15px;
     }
-
-    /* Die Klasse .shrink wird per JS hinzugefügt, wenn gescrollt wird */
+    /* Spezifische Toolbar Regeln (Linter Fix: Müssen nach 'details' kommen) */
     .toolbar.shrink {
       padding: 10px 20px;
       border-bottom: 1px solid var(--border);
@@ -51,10 +56,6 @@
       display: none; /* Versteckt die riesigen Tags beim Scrollen */
     }
 
-    input[type="text"], input[type="number"] {
-      padding: 12px 20px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--surface); color: var(--text); font-size: 16px;
-    }
     #searchInput { width: 100%; max-width: 400px; }
 
     /* Settings UI */
@@ -154,7 +155,9 @@
     // Globale Variablen für den intelligenten Ladebalken
     let scanCounter = 0;
     let currentScanMode = 'quick';
-    const expectedScanCount = parseInt(localStorage.getItem('lastScanCount'), 10) || 100;
+    let expectedScanCount = 0;
+    let currentPct = 0;
+    let scanInterval = null;
 
     // Scroll-Event-Listener für die Sticky Toolbar
     window.addEventListener('scroll', () => {
@@ -169,9 +172,28 @@
     if (window.electronAPI) {
       window.electronAPI.onScanStart((path) => {
         scanCounter = 0;
+        currentPct = 0;
         document.getElementById('scanTargetText').textContent = `Durchsuche Laufwerk (${path})...`;
-        document.getElementById('scanProgressBar').style.width = '0%';
-        document.getElementById('scanPercentText').textContent = '0%';
+        _updateProgressUI();
+
+        // Hole den spezifischen Zähler exakt für diesen Scan-Modus
+        expectedScanCount = parseInt(localStorage.getItem(`scanCount_${currentScanMode}`), 10) || 0;
+        if (currentScanMode === 'update') {
+           expectedScanCount = catalog.length || 1;
+        }
+
+        // Simulierter Hintergrund-Timer: Füllt den Balken sanft in ~2 Minuten auf 99%
+        // greift besonders dann, wenn die App die Dateimenge (noch) nicht kennt.
+        clearInterval(scanInterval);
+        scanInterval = setInterval(() => {
+          if (currentPct < 99) {
+            let increment = (99 - currentPct) * 0.015; // Wird langsamer, je näher er 99 kommt
+            if (increment < 0.1) increment = 0.1;
+            currentPct += increment;
+            if (currentPct > 99) currentPct = 99;
+            _updateProgressUI();
+          }
+        }, 500);
       });
 
       window.electronAPI.onScanProgress((path) => {
@@ -179,19 +201,23 @@
         const pathEl = document.getElementById('scanPathText');
         if (pathEl) pathEl.textContent = path;
 
-        // Dynamische Berechnung des Ladebalkens
-        let currentExpected = expectedScanCount;
-        if (currentScanMode === 'update') {
-           // Beim reinen Update entspricht die Dauer exakt der Kataloggröße
-           currentExpected = catalog.length || 1;
+        // Sobald wir einen echten (historischen) Wert haben, nutzen wir echte Mathematik
+        if (expectedScanCount > 0) {
+          let realPct = (scanCounter / expectedScanCount) * 100;
+          if (realPct > 99) realPct = 99;
+
+          // Die Prozentzahl darf niemals rückwärts laufen
+          if (realPct > currentPct) currentPct = realPct;
         }
-
-        // Begrenze auf maximal 99%, bis der Prozess wirklich beendet ist
-        const pct = Math.min(Math.floor((scanCounter / Math.max(currentExpected, 1)) * 100), 99);
-
-        document.getElementById('scanProgressBar').style.width = `${pct}%`;
-        document.getElementById('scanPercentText').textContent = `${pct}%`;
+        _updateProgressUI();
       });
+    }
+
+    // Ausgelagerte Funktion zum Aktualisieren der Balken-UI
+    function _updateProgressUI() {
+      const displayPct = Math.floor(currentPct);
+      document.getElementById('scanProgressBar').style.width = `${displayPct}%`;
+      document.getElementById('scanPercentText').textContent = `${displayPct}%`;
     }
 
     async function init() {
@@ -240,14 +266,15 @@
       try {
         await window.electronAPI.runScan(mode);
 
-        // Ladebalken visuell auf 100% setzen
-        document.getElementById('scanProgressBar').style.width = '100%';
-        document.getElementById('scanPercentText').textContent = '100%';
+        // Timer hart stoppen und visuell sofort auf 100% setzen
+        clearInterval(scanInterval);
+        currentPct = 100;
+        _updateProgressUI();
         document.getElementById('scanPathText').textContent = 'Katalog wird gespeichert...';
 
-        // Speichere den Ordner-Zähler für den nächsten Scan
+        // Speichere den Ordner-Zähler separat für den jeweiligen Scan-Modus in der Zukunft
         if (mode !== 'update') {
-          localStorage.setItem('lastScanCount', scanCounter.toString());
+          localStorage.setItem(`scanCount_${mode}`, scanCounter.toString());
         }
 
         // Kurze Verzögerung, damit der Nutzer die 100% sieht
@@ -265,6 +292,7 @@
         }
         init(); // Versuche den alten Zustand wiederherzustellen
       } finally {
+        clearInterval(scanInterval);
         btns.forEach(b => { b.disabled = false; });
         // Verstecke den Banner wieder
         document.getElementById('scanStatus').style.display = 'none';
