@@ -50,13 +50,14 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   try {
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
 
-    // 1. Bilder einlesen (Icon und Screenshots)
+    // 1. Bilder einlesen (Icon und Screenshots) - NEU: Unterstützt nun auch .avif
     metaEntries.forEach((entry) => {
       if (!entry.isFile()) return;
       const fullPath = path.join(metaDir, entry.name);
       const lowerName = entry.name.toLowerCase();
-      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) iconPath = fullPath;
-      else if (/\.(png|gif|jpg|jpeg|svg|webp|ico)$/i.test(lowerName)) screenshots.push(fullPath);
+      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico|avif)$/i.test(lowerName))
+        iconPath = fullPath;
+      else if (/\.(png|gif|jpg|jpeg|svg|webp|ico|avif)$/i.test(lowerName)) screenshots.push(fullPath);
     });
 
     // 2. meta.json auslesen (falls vorhanden)
@@ -131,6 +132,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
       // Die Reihenfolge im Array definiert die Priorität!
       for (const ext of config.autoExtensions) {
         let extLower = ext.toLowerCase().trim();
+        // LINTER-FIX: Template Literals statt String Konkatenation
         if (extLower && !extLower.startsWith('.')) extLower = `.${extLower}`; // Punkt sicherstellen
 
         const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
