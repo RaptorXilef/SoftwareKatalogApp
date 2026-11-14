@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.10.0...v1.11.0) (2026-11-14)
+
+### 🚀 Features
+
+* **core:** add native AVIF image format support to metadata scanner ([4494b19](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4494b194409847ab915c9a813c046ff8b3479a38))
+* **media:** add native playback for videos in metadata scanner and lightbox UI ([7435889](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7435889422a18080db1b1fe970165ea7af7bd0ce))
+
 ## [1.10.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.9.0...v1.10.0) (2026-11-14)
 
 ### 🚀 Features
