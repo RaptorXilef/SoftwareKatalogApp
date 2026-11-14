@@ -131,7 +131,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
       // Die Reihenfolge im Array definiert die Priorität!
       for (const ext of config.autoExtensions) {
         let extLower = ext.toLowerCase().trim();
-        if (extLower && !extLower.startsWith('.')) extLower = '.' + extLower; // Punkt sicherstellen
+        if (extLower && !extLower.startsWith('.')) extLower = `.${extLower}`; // Punkt sicherstellen
 
         const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
         if (matchingFiles.length > 0) {

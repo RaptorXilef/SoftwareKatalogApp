@@ -17,7 +17,7 @@
       background-color: var(--bg); color: var(--text);
     }
 
-    /* Basis HTML Elemente (Linter Fix: Generische Elemente müssen oben stehen) */
+    /* Basis HTML Elemente */
     details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
     summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
     summary:hover { color: var(--accent-hover); }
@@ -650,7 +650,7 @@
         autoExtensions: document.getElementById('cfgAutoExt').value.split(',')
           .map(s => s.trim())
           .filter(Boolean)
-          .map(s => s.startsWith('.') ? s : '.' + s) // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
+          .map(s => s.startsWith('.') ? s : `.${s}`) // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
       };
 
       const res = await window.electronAPI.saveSettings(newSettings);
