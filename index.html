@@ -24,6 +24,14 @@
     .icon-btn { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text); transition: color 0.2s, transform 0.2s; padding: 5px; }
     .icon-btn:hover { color: var(--accent); transform: rotate(90deg); }
 
+    /* Collapsible Tags (Nach oben verschoben für Linter-Fix) */
+    details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+    summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
+    summary:hover { color: var(--accent-hover); }
+    .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
+    .tag { padding: 5px 12px; border-radius: 20px; background: var(--bg); cursor: pointer; border: 1px solid var(--border); transition: 0.2s; }
+    .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
     /* Sticky Toolbar (Die klebende Suchleiste) */
     .toolbar {
       position: sticky; top: 0; z-index: 90;
@@ -48,14 +56,6 @@
       background: var(--surface); color: var(--text); font-size: 16px;
     }
     #searchInput { width: 100%; max-width: 400px; }
-
-    /* Collapsible Tags */
-    details { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
-    summary { font-weight: bold; cursor: pointer; user-select: none; color: var(--accent); }
-    summary:hover { color: var(--accent-hover); }
-    .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
-    .tag { padding: 5px 12px; border-radius: 20px; background: var(--bg); cursor: pointer; border: 1px solid var(--border); transition: 0.2s; }
-    .tag.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 
     /* Settings UI */
     .settings-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
@@ -85,8 +85,8 @@
     .lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; cursor: zoom-out; padding: 40px; }
     .lightbox-overlay img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 
-    /* Kompakte Scan-Animation für Non-Blocking UI */
-    .scan-status { background: var(--surface); border-radius: 12px; border: 1px solid var(--accent); padding: 15px 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+    /* Scan-Animation & Progress */
+    .scan-status { background: var(--bg); border-radius: 8px; border: 1px solid var(--border); padding: 12px 20px; margin: 0; }
     .spinner { border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
@@ -106,22 +106,29 @@
       <button type="button" id="btnFullScan" class="action-btn" style="margin: 0; background: var(--border);" onclick="_startScan('full')" title="Verwirft den aktuellen Katalog und liest das gesamte Laufwerk komplett neu ein.">Vollständiger Rescan</button>
     </div>
 
+    <!-- Status-Banner ist jetzt Teil der klebenden Leiste -->
+    <div id="scanStatus" class="scan-status" style="display: none;">
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="spinner" style="margin: 0; width: 24px; height: 24px;"></div>
+        <div style="flex: 1; overflow: hidden;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <strong id="scanTargetText" style="color: var(--accent); font-size: 0.95em;">Scanner wird initialisiert...</strong>
+            <span id="scanPercentText" style="font-size: 0.85em; font-weight: bold; color: var(--text);">0%</span>
+          </div>
+          <div id="scanPathText" style="font-family: monospace; font-size: 0.8em; color: var(--text); opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 8px;">Warte auf Verzeichnisse...</div>
+
+          <div style="width: 100%; background: var(--surface); height: 6px; border-radius: 3px; overflow: hidden;">
+            <div id="scanProgressBar" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.2s linear;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Collapsible Tags -->
     <details id="tagsDetails">
       <summary>Kategorien & Filter ein/ausblenden</summary>
       <div class="tags" id="tagContainer"></div>
     </details>
-  </div>
-
-  <!-- Dedizierter Status-Banner (versteckt die Karten nicht mehr!) -->
-  <div id="scanStatus" class="scan-status" style="display: none;">
-    <div style="display: flex; align-items: center; gap: 15px;">
-      <div class="spinner" style="margin: 0; width: 24px; height: 24px;"></div>
-      <div style="flex: 1;">
-        <strong id="scanTargetText" style="color: var(--accent); display: block;">Scanner wird initialisiert...</strong>
-        <span id="scanPathText" style="font-family: monospace; font-size: 0.85em; color: var(--text); opacity: 0.7; word-break: break-all;">Warte auf Verzeichnisse...</span>
-      </div>
-    </div>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -144,6 +151,11 @@
     let availableHiddenCats = [];
     let hasCheckedForUpdates = false; // Verhindert mehrfaches Prüfen während einer Sitzung
 
+    // Globale Variablen für den intelligenten Ladebalken
+    let scanCounter = 0;
+    let currentScanMode = 'quick';
+    const expectedScanCount = parseInt(localStorage.getItem('lastScanCount'), 10) || 100;
+
     // Scroll-Event-Listener für die Sticky Toolbar
     window.addEventListener('scroll', () => {
       const tb = document.getElementById('mainToolbar');
@@ -156,12 +168,29 @@
 
     if (window.electronAPI) {
       window.electronAPI.onScanStart((path) => {
-        const el = document.getElementById('scanTargetText');
-        if (el) el.textContent = `Durchsuche Laufwerk (${path})... Das kann einen Moment dauern.`;
+        scanCounter = 0;
+        document.getElementById('scanTargetText').textContent = `Durchsuche Laufwerk (${path})...`;
+        document.getElementById('scanProgressBar').style.width = '0%';
+        document.getElementById('scanPercentText').textContent = '0%';
       });
+
       window.electronAPI.onScanProgress((path) => {
-        const el = document.getElementById('scanPathText');
-        if (el) el.textContent = path;
+        scanCounter++;
+        const pathEl = document.getElementById('scanPathText');
+        if (pathEl) pathEl.textContent = path;
+
+        // Dynamische Berechnung des Ladebalkens
+        let currentExpected = expectedScanCount;
+        if (currentScanMode === 'update') {
+           // Beim reinen Update entspricht die Dauer exakt der Kataloggröße
+           currentExpected = catalog.length || 1;
+        }
+
+        // Begrenze auf maximal 99%, bis der Prozess wirklich beendet ist
+        const pct = Math.min(Math.floor((scanCounter / Math.max(currentExpected, 1)) * 100), 99);
+
+        document.getElementById('scanProgressBar').style.width = `${pct}%`;
+        document.getElementById('scanPercentText').textContent = `${pct}%`;
       });
     }
 
@@ -197,6 +226,7 @@
 
     async function _startScan(mode) {
       if (!window.electronAPI) return alert("Scannen ist nur in der Desktop-App möglich.");
+      currentScanMode = mode;
 
       const btns = ['btnScan', 'btnUpdate', 'btnFullScan'].map(id => document.getElementById(id));
       btns.forEach(b => { b.disabled = true; });
@@ -209,7 +239,20 @@
 
       try {
         await window.electronAPI.runScan(mode);
-        await init(); // Baut das Grid mit den neuen Programmen auf
+
+        // Ladebalken visuell auf 100% setzen
+        document.getElementById('scanProgressBar').style.width = '100%';
+        document.getElementById('scanPercentText').textContent = '100%';
+        document.getElementById('scanPathText').textContent = 'Katalog wird gespeichert...';
+
+        // Speichere den Ordner-Zähler für den nächsten Scan
+        if (mode !== 'update') {
+          localStorage.setItem('lastScanCount', scanCounter.toString());
+        }
+
+        // Kurze Verzögerung, damit der Nutzer die 100% sieht
+        await new Promise(r => setTimeout(r, 400));
+        await init();
 
         // Stelle die Scroll-Position sofort wieder her
         window.scrollTo(0, currentScroll);
@@ -274,7 +317,6 @@
       const wordsInText = fullText.split(/[^a-z0-9äöüß]+/);
       for (const textWord of wordsInText) {
         if (textWord.length < 3) continue;
-        // Erlaubt 1 Fehler bei kurzen Wörtern, 2 bei längeren
         if (getEditDistance(searchWord, textWord) <= (searchWord.length <= 5 ? 1 : 2)) return true;
       }
       return false;
