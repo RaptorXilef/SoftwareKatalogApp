@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.9.0...v1.10.0) (2026-11-14)
+
+### 🚀 Features
+
+* **core:** implement automatic fallback file discovery and direct execution UI ([4aa028d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4aa028d179f5d8d2071114bd12997c29fb4f1ce4))
+* **ui:** add real-time catalog item counter to the main toolbar ([ed5a0ac](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/ed5a0ac682c0781d226a98c9b4cd17582d077112))
+
+### 💎 Styling
+
+* apply ES6 template literals to string concatenations to satisfy Biome linter ([7c8aadc](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7c8aadccbbcc22b898ef9b6d889749ef8088870b))
+* **ui:** reformat catalog item counter to a two-line layout matching button heights ([e266979](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/e266979c05afdad7adeea02f2eb43dc696b6b66e))
+
 ## [1.9.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.8.1...v1.9.0) (2026-11-14)
 
 ### 🚀 Features
