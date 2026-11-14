@@ -50,17 +50,27 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   try {
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
 
-    // 1. Bilder einlesen (Icon und Screenshots) - NEU: Unterstützt nun auch .avif
+    // 1. Bilder & Videos einlesen (inkl. mp4, webm, ogg, mov, avi)
     metaEntries.forEach((entry) => {
       if (!entry.isFile()) return;
       const fullPath = path.join(metaDir, entry.name);
       const lowerName = entry.name.toLowerCase();
-      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico|avif)$/i.test(lowerName))
+      if (lowerName.startsWith('icon.') && /\.(png|gif|jpg|jpeg|svg|webp|ico|avif)$/i.test(lowerName)) {
         iconPath = fullPath;
-      else if (/\.(png|gif|jpg|jpeg|svg|webp|ico|avif)$/i.test(lowerName)) screenshots.push(fullPath);
+      } else if (/\.(png|gif|jpg|jpeg|svg|webp|ico|avif|mp4|webm|ogg|mov|avi)$/i.test(lowerName)) {
+        screenshots.push(fullPath);
+      }
     });
 
-    // 2. meta.json auslesen (falls vorhanden)
+    // Sortierung: Bilder zuerst alphabetisch, DANN Videos alphabetisch
+    screenshots.sort((a, b) => {
+      const isVidA = /\.(mp4|webm|ogg|mov|avi)$/i.test(a);
+      const isVidB = /\.(mp4|webm|ogg|mov|avi)$/i.test(b);
+      if (isVidA !== isVidB) return isVidA ? 1 : -1; // Bilder (false) vor Videos (true)
+      return a.localeCompare(b, 'de', { sensitivity: 'base' }); // Danach alphabetisch
+    });
+
+    // 2. meta.json auslesen
     const jsonPath = path.join(metaDir, 'meta.json');
     if (existsSync(jsonPath)) {
       try {
@@ -144,10 +154,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
           break; // Abbrechen, da wir die beste Dateiendung laut Priorität gefunden haben
         }
       }
-
-      if (bestFile) {
-        lastFiles.push(path.join(softwareDir, bestFile));
-      }
+      if (bestFile) lastFiles.push(path.join(softwareDir, bestFile));
     } catch (e) {
       console.error(`Fehler beim Suchen nach Auto-Download in ${softwareDir}: ${e.message}`);
     }

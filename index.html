@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Software Katalog by © Felix Maywald</title>
   <!-- Behebt die Electron Security Warning -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; connect-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; connect-src 'self'; media-src 'self' file:;">
   <style>
     :root {
       --bg: #1e1e2e; --surface: #2a2a3f; --text: #cdd6f4;
@@ -47,14 +47,9 @@
       transition: all 0.3s ease; display: flex; flex-direction: column; gap: 15px;
     }
     /* Spezifische Toolbar Regeln (Linter Fix: Müssen nach 'details' kommen) */
-    .toolbar.shrink {
-      padding: 10px 20px;
-      border-bottom: 1px solid var(--border);
-      box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-    }
-    .toolbar.shrink details {
-      display: none; /* Versteckt die riesigen Tags beim Scrollen */
-    }
+    .toolbar.shrink { padding: 10px 20px; border-bottom: 1px solid var(--border); box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+    /* Versteckt die riesigen Tags beim Scrollen */
+    .toolbar.shrink details { display: none; }
 
     #searchInput { width: 100%; max-width: 400px; }
 
@@ -80,11 +75,19 @@
     .action-btn:hover { background: var(--accent-hover); filter: brightness(1.1); }
     .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* Bild-Zoom (Lightbox) */
+    /* Lightbox mit interaktiven Pfeilen */
     .img-zoomable { cursor: zoom-in; transition: transform 0.2s; }
     .img-zoomable:hover { transform: scale(1.05); }
-    .lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 10000; cursor: zoom-out; padding: 40px; }
-    .lightbox-overlay img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .lightbox-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: none; justify-content: center; align-items: center; z-index: 10000; padding: 40px; }
+    .lightbox-arrow {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(0,0,0,0.6); color: white; border: none; font-size: 30px;
+      width: 50px; height: 50px; border-radius: 50%; cursor: pointer; z-index: 10001;
+      transition: 0.2s; display: flex; justify-content: center; align-items: center;
+    }
+    .lightbox-arrow:hover { background: var(--accent); color: var(--bg); }
+    .lightbox-arrow.left { left: 20px; }
+    .lightbox-arrow.right { right: 20px; }
 
     /* Scan-Animation & Progress */
     .scan-status { background: var(--bg); border-radius: 8px; border: 1px solid var(--border); padding: 12px 20px; margin: 0; }
@@ -145,9 +148,15 @@
     </div>
   </div>
 
-  <!-- Das Lightbox-Overlay für große Bilder (mit a11y Fixes) -->
-  <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" onclick="this.style.display='none'" onkeydown="if(event.key === 'Escape' || event.key === 'Enter') this.style.display='none'">
-    <img id="lightboxImg" src="" alt="Vollbildansicht">
+  <!-- Verbesserte Lightbox mit Video-Support und Pfeilen (Linter Fixes) -->
+  <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" onclick="_closeLightbox(event)" onkeydown="if(event.key === 'Escape') _closeLightbox(event)">
+    <button type="button" class="lightbox-arrow left" id="lightboxBtnLeft" onclick="_lightboxPrev(event)" aria-label="Zurück">&#10094;</button>
+    <img id="lightboxImg" src="" alt="Vollbildansicht" style="display:none; max-width: 90%; max-height: 90%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+    <video id="lightboxVid" src="" controls style="display:none; max-width: 90%; max-height: 90%; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); outline: none;">
+      <!-- Linter Fix für Barrierefreiheit: Leerer Track-Tag für Captions -->
+      <track kind="captions" src="" label="Keine Untertitel" default>
+    </video>
+    <button type="button" class="lightbox-arrow right" id="lightboxBtnRight" onclick="_lightboxNext(event)" aria-label="Vor">&#10095;</button>
   </div>
 
   <script>
@@ -163,6 +172,24 @@
     let expectedScanCount = 0;
     let currentPct = 0;
     let scanInterval = null;
+
+    // Globale Variablen für die Lightbox-Galerie
+    let currentLightboxMedia = [];
+    let currentLightboxIndex = 0;
+
+    // Globale Tastatur-Steuerung (Escape für Modals, Pfeile für Lightbox)
+    document.addEventListener('keydown', (e) => {
+      const lightbox = document.getElementById('lightboxOverlay');
+      const modal = document.getElementById('modalOverlay');
+
+      if (lightbox.style.display === 'flex') {
+        if (e.key === 'Escape') _closeLightbox();
+        if (e.key === 'ArrowRight') _lightboxNext();
+        if (e.key === 'ArrowLeft') _lightboxPrev();
+      } else if (modal.style.display === 'flex') {
+        if (e.key === 'Escape') modal.style.display = 'none';
+      }
+    });
 
     // Scroll-Event-Listener für die Sticky Toolbar
     window.addEventListener('scroll', () => {
@@ -390,6 +417,72 @@
       `).join('');
     }
 
+    // Lightbox Logik mit Array-Index und Video-Erkennung (Linter Fix)
+    function _openLightbox(itemId, index) {
+      const item = catalog.find(i => i.id === itemId);
+      // Linter Fix: Nutze Optional Chaining "?."
+      if (!item?.screenshots || item.screenshots.length === 0) return;
+
+      currentLightboxMedia = item.screenshots;
+      currentLightboxIndex = index;
+      _updateLightboxView();
+      document.getElementById('lightboxOverlay').style.display = 'flex';
+    }
+
+    function _updateLightboxView() {
+      const s = currentLightboxMedia[currentLightboxIndex];
+      const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
+      const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
+
+      const imgEl = document.getElementById('lightboxImg');
+      const vidEl = document.getElementById('lightboxVid');
+
+      if (isVid) {
+        imgEl.style.display = 'none';
+        vidEl.style.display = 'block';
+        vidEl.src = fileUrl;
+      } else {
+        vidEl.style.display = 'none';
+        vidEl.pause();
+        vidEl.src = '';
+        imgEl.style.display = 'block';
+        imgEl.src = fileUrl;
+      }
+
+      const leftBtn = document.getElementById('lightboxBtnLeft');
+      const rightBtn = document.getElementById('lightboxBtnRight');
+      if (currentLightboxMedia.length <= 1) {
+        leftBtn.style.display = 'none';
+        rightBtn.style.display = 'none';
+      } else {
+        leftBtn.style.display = 'flex';
+        rightBtn.style.display = 'flex';
+      }
+    }
+
+    function _lightboxNext(e) {
+      if (e) e.stopPropagation();
+      if (currentLightboxMedia.length <= 1) return;
+      currentLightboxIndex = (currentLightboxIndex + 1) % currentLightboxMedia.length;
+      _updateLightboxView();
+    }
+
+    function _lightboxPrev(e) {
+      if (e) e.stopPropagation();
+      if (currentLightboxMedia.length <= 1) return;
+      currentLightboxIndex = (currentLightboxIndex - 1 + currentLightboxMedia.length) % currentLightboxMedia.length;
+      _updateLightboxView();
+    }
+
+    function _closeLightbox(e) {
+      // Ignoriere Klicks auf die Pfeile, das Video selbst oder das Bild
+      if (e && (e.target.tagName === 'IMG' || e.target.tagName === 'VIDEO' || e.target.tagName === 'BUTTON')) return;
+      document.getElementById('lightboxOverlay').style.display = 'none';
+      const vidEl = document.getElementById('lightboxVid');
+      vidEl.pause();
+      vidEl.src = '';
+    }
+
     function _openModal(id) {
       const item = catalog.find(i => i.id === id);
       if (!item) return;
@@ -419,7 +512,7 @@
           </button>`;
       }
 
-      // 1. Links generieren
+      // Links generieren
       let linksHtml = '';
       if (item.links && item.links.length > 0) {
         linksHtml = `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">` +
@@ -427,13 +520,26 @@
         `</ul></div>`;
       }
 
-      // 2. Screenshots generieren (Klick öffnet Lightbox)
-      let imagesHtml = '';
+      // Generierung der Thumbnails (Bilder + Videos mit Play-Overlay)
+      let mediaHtml = '';
       if (item.screenshots && item.screenshots.length > 0) {
-        imagesHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
-          item.screenshots.map(s => {
+        mediaHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
+          item.screenshots.map((s, idx) => {
             const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
-            return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${fileUrl}')" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+            const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
+
+            if (isVid) {
+              // #t=1 springt bei der Vorschau auf Sekunde 1 (überspringt schwarze Anfangsbilder)
+              return `
+                <div style="position:relative; display:inline-block; cursor:pointer;" onclick="_openLightbox('${item.id}', ${idx})" title="Video abspielen">
+                  <video src="${fileUrl}#t=1" class="img-zoomable" style="height: 120px; min-width: 150px; max-width: 250px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;" muted preload="metadata"></video>
+                  <div style="position:absolute; inset:0; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.3); border-radius:8px; pointer-events:none;">
+                    <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
+                  </div>
+                </div>`;
+            } else {
+              return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${item.id}', ${idx})" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+            }
           }).join('') +
         `</div>`;
       }
@@ -449,7 +555,7 @@
         </div>
         <div style="margin-top: 20px;">
           <p>${item.description || 'Keine Beschreibung vorhanden.'}</p>
-          ${linksHtml} ${imagesHtml}
+          ${linksHtml} ${mediaHtml}
           <p><small style="color: gray;">Pfad: ${item.path}</small></p>
         </div>
         <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center;">
@@ -476,9 +582,7 @@
       btn.textContent = originalText; btn.disabled = false;
     }
 
-    function _closeModal(e) { if (e.target.id === 'modalOverlay') e.target.style.display = 'none'; }
     function _openInExplorer(path) { window.electronAPI ? window.electronAPI.openPath(path) : alert(`App über Electron starten.`); }
-    function _openLightbox(src) { document.getElementById('lightboxImg').src = src; document.getElementById('lightboxOverlay').style.display = 'flex'; }
 
     async function _loadAppInfo() {
       if (window.electronAPI) {
