@@ -39,6 +39,7 @@ function getConfig() {
     visibleHiddenCats: [],
     updateInterval: 24, // Sucht alle 24 Stunden nach Updates
     lastUpdateCheck: 0, // Zeitstempel der letzten Prüfung
+    autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download (mit Priorität)
   };
 
   if (fs.existsSync(configPath)) {

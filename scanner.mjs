@@ -15,6 +15,7 @@ async function loadConfig() {
     jsonPath: 'catalog.json',
     scanNested: false,
     nestedDepth: 1,
+    autoExtensions: ['.exe', '.msi', '.zip'],
   };
 
   if (existsSync(configPath)) {
@@ -34,7 +35,7 @@ async function loadConfig() {
   return { ...config, ROOT_DIR: resolvedTarget, OUTPUT_FILE: resolvedJson };
 }
 
-async function parseSoftwareMetadata(softwareDir, metaDir) {
+async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   let customName = '',
     description = '',
     iconPath = null,
@@ -120,6 +121,36 @@ async function parseSoftwareMetadata(softwareDir, metaDir) {
     }
   }
 
+  // Auto-Download Fallback, falls _last nicht existiert oder leer ist
+  if (lastFiles.length === 0 && config.autoExtensions && config.autoExtensions.length > 0) {
+    try {
+      const rootEntries = await fs.readdir(softwareDir, { withFileTypes: true });
+      const files = rootEntries.filter((e) => e.isFile()).map((e) => e.name);
+
+      let bestFile = null;
+      // Die Reihenfolge im Array definiert die Priorität!
+      for (const ext of config.autoExtensions) {
+        let extLower = ext.toLowerCase().trim();
+        if (extLower && !extLower.startsWith('.')) extLower = '.' + extLower; // Punkt sicherstellen
+
+        const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
+        if (matchingFiles.length > 0) {
+          // Alphabetisch sortieren
+          matchingFiles.sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
+          // Die letzte Datei nehmen (höchste Versionsnummer / Alphabet)
+          bestFile = matchingFiles[matchingFiles.length - 1];
+          break; // Abbrechen, da wir die beste Dateiendung laut Priorität gefunden haben
+        }
+      }
+
+      if (bestFile) {
+        lastFiles.push(path.join(softwareDir, bestFile));
+      }
+    } catch (e) {
+      console.error(`Fehler beim Suchen nach Auto-Download in ${softwareDir}: ${e.message}`);
+    }
+  }
+
   // Hilfsfunktion: Wandelt absolute Pfade in relative Pfade um (ausgehend vom App-Ordner)
   const toRel = (p) => (p ? path.relative(__dirname, p) : null);
 
@@ -157,11 +188,11 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
       const currentItem =
         !IS_FULL_RESCAN && cacheMap.has(currentDir)
           ? cacheMap.get(currentDir)
-          : await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name));
+          : await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name), config);
 
       let results = [currentItem];
 
-      // NEU: Optional eine Ebene tiefer suchen, obwohl schon _metadata gefunden wurde
+      // Optional eine Ebene tiefer suchen, obwohl schon _metadata gefunden wurde
       if (config.scanNested && nestedDepth < config.nestedDepth) {
         const nestedResults = await Promise.all(
           subDirs.map((dir) =>
@@ -226,13 +257,13 @@ async function run() {
     let softwareList = [];
 
     if (IS_UPDATE) {
-      // NEU: Update-Modus liest nur bekannte Ordner neu ein, kriecht nicht durchs Filesystem
+      // Update-Modus liest nur bekannte Ordner neu ein, kriecht nicht durchs Filesystem
       for (const [absPath, _oldItem] of cacheMap.entries()) {
         if (existsSync(absPath)) {
           process.stdout.write(`SCAN_DIR:${absPath}\n`);
           const metaPath = path.join(absPath, META_FOLDER_NAME);
           if (existsSync(metaPath)) {
-            softwareList.push(await parseSoftwareMetadata(absPath, metaPath));
+            softwareList.push(await parseSoftwareMetadata(absPath, metaPath, config));
           }
         }
       }
