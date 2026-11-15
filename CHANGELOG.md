@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.12.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.11.0...v1.12.0) (2026-11-15)
+
+### 🚀 Features
+
+* /fix(backend): Enforce security boundaries, SMB concurrency limits, and atomic catalog writes ([1f53172](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/1f53172c7ba334e936beafad4b9424924be41144))
+* /fix(ui): Polish search UX, handle empty states, and fix global event propagation ([c58eae9](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c58eae9328bd1f16174e52f87a76fd6640c0d9e5))
+* /fix(ui): Resolve Biome linter issues, remove artifacts, and implement drag & drop ([c33e7d4](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c33e7d4939f76191408edd38bf6be68b07a384ee))
+* /refactor(media): Move favorites to state.json, add file explorer shortcut, and implement media drag-and-drop ([0709e74](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0709e743ca7e11936bfe7cbdbfa9b17f4e8f2017))
+* **frontend:** Implement auto-update engine, favorites system, and XSS protection ([3f81c59](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/3f81c59e04a451895fb87740d28eb016dff9da9a))
+* **ui/media:** Add dedicated dropzone for automatic icon extraction and renaming ([29b56f7](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/29b56f75dc129208305c4348ef4179d3443bad76))
+* **ui/scanner:** Add sorting, 'NEW' badges, smart settings reload, version select, and shortcuts ([7bd47f3](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7bd47f38d8b28264bca2514fc1662ecceb0dd64e))
+* **ui/settings:** Make 'NEW' badge duration configurable ([9a9da3e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9a9da3e76e602b476cb4f6925a7ab3b2ce4fed31))
+
+### 🐛 Bug Fixes
+
+* /feat(ui): Fix save logic crash and add native offline rich text editor ([b918b4d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/b918b4d6f3024a439ab2031e7650b1a044e1cf44))
+* **core:** Resolve Biome linter warnings for template literals and async promise executor ([5a376dd](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5a376dd0f09da2d6e619514bce2075c8658fa640))
+* **core:** Resolve CSP errors, optimize save, fix modal buttons, and safely execute installers via temp folder ([c305d03](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c305d039aee869d1957c074f57e911acfba6d63e))
+* **ui/scanner:** Resolve Biome optional chain warning and fix version sorting ([1304758](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/130475809699a73fbdb64272d3de10f03879ffcd))
+
+### ⚙️ Refactoring
+
+* **ui:** Split index.html into dedicated HTML, CSS, and JS files ([bd2afb2](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/bd2afb28ad14de90f452c76e953798b4d8962b1b))
+
 ## [1.11.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.10.0...v1.11.0) (2026-11-14)
 
 ### 🚀 Features
