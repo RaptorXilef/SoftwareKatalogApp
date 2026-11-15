@@ -165,7 +165,11 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
-    ipcMain.on('open-path', (_event, folderPath) => shell.openPath(folderPath));
+    // FIX 1: Pfad ordnungsgemäß ausgeben, falls es fehlschlägt
+    ipcMain.on('open-path', async (_event, folderPath) => {
+      const err = await shell.openPath(folderPath);
+      if (err) console.error(`Fehler beim Öffnen des Pfads: ${folderPath}`, err);
+    });
 
     // Daten an Frontend schicken (Mit dynamischem Live-Check der Installationspfade)
     ipcMain.handle('load-catalog', async () => {
@@ -420,33 +424,28 @@ if (!gotTheLock) {
       }
     });
 
-    // Führt das Auto-Update via PowerShell aus (Dateien tauschen & Neustart)
+    // FIX 2: Bulletproof PowerShell Execution via native .cmd wrapper
     ipcMain.handle('install-update', async (event, localFilePath, isPortable) => {
       console.log(`Update-Skript gestartet von WebContents ID: ${event.sender.id}`);
 
       return new Promise((resolve) => {
         const tempDir = app.getPath('temp');
         const updateScriptPath = path.join(tempDir, 'sk_update.ps1');
+        const cmdScriptPath = path.join(tempDir, 'sk_update.cmd');
         const appPath = isPortable ? process.execPath : getAppFolder();
 
         let psScript = '';
         if (isPortable) {
           const destExe = process.execPath;
           psScript = `
-            Write-Host "Warte auf Beendigung der App..."
-            Start-Sleep -Seconds 3
             Move-Item -Path "${destExe}" -Destination "${destExe}.old" -Force
             Move-Item -Path "${localFilePath}" -Destination "${destExe}" -Force
             Start-Process "${destExe}"
-            Remove-Item -Path "${localFilePath}" -Force
           `;
         } else {
           const extractPath = path.join(tempDir, 'sk_update_extract');
           const backupDir = path.join(tempDir, 'sk_update_backup');
           psScript = `
-            Write-Host "Warte auf Beendigung der App..."
-            Start-Sleep -Seconds 3
-
             # 1. Ins Temp-Verzeichnis entpacken
             Remove-Item -Path "${extractPath}" -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path "${localFilePath}" -DestinationPath "${extractPath}" -Force
@@ -489,16 +488,23 @@ if (!gotTheLock) {
 
         fs.writeFileSync(updateScriptPath, psScript, 'utf-8');
 
-        // Starte das PS-Skript entkoppelt
-        const child = spawn(
-          'powershell.exe',
-          ['-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', updateScriptPath],
-          {
-            detached: true,
-            stdio: 'ignore',
-          }
-        );
-        child.unref();
+        // Das Batch-Skript ist von Electron entkoppelt und wartet 4 Sekunden, bis die App wirklich zu ist
+        const cmdContent = `
+@echo off
+echo =========================================
+echo Software Katalog wird aktualisiert...
+echo Bitte warten, Fenster schliesst von selbst!
+echo =========================================
+timeout /t 4 /nobreak > nul
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "${updateScriptPath}"
+del "${updateScriptPath}"
+del "%~f0"
+        `.trim();
+
+        fs.writeFileSync(cmdScriptPath, cmdContent, 'utf-8');
+
+        // Starte das CMD-Skript nativ über den Explorer (detaches completely from Electron)
+        shell.openPath(cmdScriptPath);
 
         resolve({ success: true });
         setTimeout(() => app.quit(), 500); // Beendet App sicher

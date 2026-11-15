@@ -17,7 +17,7 @@ let currentLightboxMedia = [];
 let currentLightboxIndex = 0;
 
 let currentOpenModalId = null; // Tracke das aktuell offene Modal für Dropdown Updates
-let isUpdating = false; // NEU: Merkt sich, ob gerade ein Update heruntergeladen wird
+let isUpdating = false; // Merkt sich, ob gerade ein Update heruntergeladen wird
 
 // Security: XSS Helper
 function escapeHTML(str) {
@@ -227,11 +227,16 @@ document.getElementById('lightboxBtnRight').addEventListener('click', (e) => {
   e.stopPropagation();
   lightboxNext();
 });
-document.getElementById('btnSettingsToggle').addEventListener('click', openSettings);
-document.getElementById('btnAddSoftware').addEventListener('click', addSoftwareFolder);
-document.getElementById('btnScan').addEventListener('click', () => startScan('quick'));
-document.getElementById('btnUpdate').addEventListener('click', () => startScan('update'));
-document.getElementById('btnFullScan').addEventListener('click', () => startScan('full'));
+
+// FIX: Verwende für die Haupt-Buttons auch Delegation, ist konsistenter
+// Wir haben sie aber im HTML teils noch mit id="btnScan".
+document.body.addEventListener('click', (e) => {
+  if (e.target.id === 'btnSettingsToggle') openSettings();
+  if (e.target.id === 'btnAddSoftware') addSoftwareFolder();
+  if (e.target.id === 'btnScan') startScan('quick');
+  if (e.target.id === 'btnUpdate') startScan('update');
+  if (e.target.id === 'btnFullScan') startScan('full');
+});
 
 el.searchInput.addEventListener('input', () => {
   el.clearSearchBtn.style.display = el.searchInput.value.length > 0 ? 'block' : 'none';
@@ -391,7 +396,7 @@ document.body.addEventListener('change', (e) => {
       const installBtn = document.getElementById('dynamicInstallBtn');
       const dlBtn = document.getElementById('dynamicDownloadBtn');
 
-      if (installBtn) installBtn.dataset.path = file.replace(/\\/g, '\\\\');
+      if (installBtn) installBtn.dataset.path = file;
       if (dlBtn) dlBtn.dataset.files = JSON.stringify([file]);
     }
   }
@@ -785,7 +790,7 @@ function openItemModal(id) {
   // Wenn es einen verifizierten lokalen Installationspfad gibt -> extra Start Button!
   let runLocalHtml = '';
   if (item.isInstalled && item.validInstallPath) {
-    runLocalHtml = `<button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-right: 10px;" data-action="open-explorer" data-path="${item.validInstallPath.replace(/\\/g, '\\\\')}" title="Startet die installierte Software auf diesem PC">🚀 Programm starten</button>`;
+    runLocalHtml = `<button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-right: 10px;" data-action="open-explorer" data-path="${escapeHTML(item.validInstallPath)}" title="Startet die installierte Software auf diesem PC">🚀 Programm starten</button>`;
   }
 
   if (item.lastFiles && item.lastFiles.length > 0) {
@@ -794,7 +799,7 @@ function openItemModal(id) {
       const fileName = item.lastFiles[0].split('\\').pop().split('/').pop();
       installHtml = `
         <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
-                data-action="execute-temp" data-id="${item.id}" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">
+                data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">
           ▶️ Setup / Installieren (${escapeHTML(fileName)})
         </button>`;
       downloadHtml = `
@@ -812,7 +817,7 @@ function openItemModal(id) {
 
       versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
 
-      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-id="${item.id}" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
+      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
       downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: var(--accent); color: var(--bg); margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
     }
   }
@@ -879,7 +884,7 @@ function openItemModal(id) {
     </div>
     <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center; justify-content: space-between;">
       <div>
-        <button type="button" class="action-btn" style="margin-top: 0;" data-action="open-explorer" data-path="${item.path.replace(/\\/g, '\\\\')}">Im Explorer öffnen</button>
+        <button type="button" class="action-btn" style="margin-top: 0;" data-action="open-explorer" data-path="${escapeHTML(item.path)}">Im Explorer öffnen</button>
         <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
       </div>
       <div style="display: flex; align-items: center;">
@@ -1113,7 +1118,7 @@ async function installUpdate(assetUrl, isPortable) {
     const res = await window.electronAPI.downloadUpdate(assetUrl);
     if (!res.success) throw new Error(res.error);
 
-    // 2. PowerShell Austausch & Neustart
+    // 2. CMD Austausch & Neustart
     const container = document.getElementById('updateContainer');
     if (container) {
       container.innerHTML = `
@@ -1208,7 +1213,7 @@ function editSoftware(id) {
   const installPathsStr = (item.installPaths || []).join('\n');
 
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="open-item-modal" data-id="${item.id}" title="Zurück">&times;</button>
+    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
@@ -1259,7 +1264,7 @@ function editSoftware(id) {
     </div>
 
     <div style="margin-top: 25px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
-      <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border);" data-action="open-explorer" data-path="${item.path.replace(/\\/g, '\\\\')}\\\\_metadata">Bilderordner öffnen</button>
+      <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border);" data-action="open-explorer" data-path="${escapeHTML(`${item.path}\\_metadata`)}">Bilderordner öffnen</button>
       <div>
         <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border); margin-right: 10px;" data-action="open-item-modal" data-id="${item.id}">Abbrechen</button>
         <button type="button" class="action-btn" style="margin-top:0;" data-action="save-software" data-id="${item.id}">Speichern & Aktualisieren</button>
