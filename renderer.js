@@ -197,7 +197,7 @@ el.clearSearchBtn.addEventListener('click', () => {
   el.searchInput.focus();
 });
 
-el.sortSelect.addEventListener('change', renderGrid); // NEU: Auf Sortieränderung reagieren
+el.sortSelect.addEventListener('change', renderGrid); // Auf Sortieränderung reagieren
 
 // ==========================================
 // EVENT DELEGATION (Clicks & Changes)
@@ -267,13 +267,13 @@ document.body.addEventListener('click', async (e) => {
   }
 });
 
-// NEU: Reagiert auf die VersionSelector-Änderung (um die Buttons im Modal dynamisch anzupassen)
+// Reagiert auf die VersionSelector-Änderung (um die Buttons im Modal dynamisch anzupassen)
 document.body.addEventListener('change', (e) => {
   if (e.target.id === 'versionSelector') {
     const selectedIdx = e.target.value;
     const activeItem = catalog.find((i) => i.id === currentOpenModalId);
 
-    if (activeItem && activeItem.lastFiles[selectedIdx]) {
+    if (activeItem?.lastFiles[selectedIdx]) {
       const file = activeItem.lastFiles[selectedIdx];
       const installBtn = document.getElementById('dynamicInstallBtn');
       const dlBtn = document.getElementById('dynamicDownloadBtn');

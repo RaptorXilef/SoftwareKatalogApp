@@ -155,7 +155,11 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   if (existsSync(lastDir)) {
     try {
       const lEntries = await fs.readdir(lastDir, { withFileTypes: true });
-      lastFiles = lEntries.filter((e) => e.isFile()).map((e) => path.join(lastDir, e.name));
+      const names = lEntries.filter((e) => e.isFile()).map((e) => e.name);
+
+      // Absteigend sortieren (Z-A), damit höchste/neuste Version vorne steht (Index 0)
+      names.sort((a, b) => b.localeCompare(a, 'de', { sensitivity: 'base' }));
+      lastFiles = names.map((e) => path.join(lastDir, e));
     } catch (e) {
       console.error(`Fehler beim Lesen des _last Ordners in ${softwareDir}: ${e.message}`);
     }
@@ -176,13 +180,13 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
 
         const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
         if (matchingFiles.length > 0) {
-          // Alphabetisch sortieren
-          matchingFiles.sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
+          // Absteigend sortieren (Z-A), damit höchste/neuste Version vorne steht
+          matchingFiles.sort((a, b) => b.localeCompare(a, 'de', { sensitivity: 'base' }));
           foundFiles.push(...matchingFiles);
         }
       }
       if (foundFiles.length > 0) {
-        // Hinzufügen (bereits alphabetisch und nach Priorität sortiert)
+        // Hinzufügen (bereits priorisiert und absteigend sortiert)
         lastFiles.push(...foundFiles.map((f) => path.join(softwareDir, f)));
       }
     } catch (e) {
