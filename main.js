@@ -389,9 +389,40 @@ if (!gotTheLock) {
       }
     });
 
-    // Führt das Auto-Update via PowerShell aus
-    ipcMain.handle('install-update', async (event, assetUrl, isPortable) => {
-      console.log(`Update-Installation angefordert von WebContents ID: ${event.sender.id}`);
+    // Läd das Update über Node.js sicher in den Temp-Ordner und sendet Fortschritt ans UI
+    ipcMain.handle('download-update', async (event, url) => {
+      const tempDir = app.getPath('temp');
+      const fileName = url.toLowerCase().includes('.zip') ? 'sk_update.zip' : 'sk_update.exe';
+      const tempFilePath = path.join(tempDir, fileName);
+
+      try {
+        const res = await fetch(url, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+        const total = parseInt(res.headers.get('content-length') || '0', 10);
+        let downloaded = 0;
+
+        const fileStream = fs.createWriteStream(tempFilePath);
+
+        for await (const chunk of res.body) {
+          fileStream.write(chunk);
+          downloaded += chunk.length;
+          if (total > 0) {
+            const percent = Math.round((downloaded / total) * 100);
+            event.sender.send('update-progress', percent);
+          }
+        }
+
+        await new Promise((resolve) => fileStream.end(resolve));
+        return { success: true, filePath: tempFilePath };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    });
+
+    // Führt das Auto-Update via PowerShell aus (Dateien tauschen & Neustart)
+    ipcMain.handle('install-update', async (event, localFilePath, isPortable) => {
+      console.log(`Update-Skript gestartet von WebContents ID: ${event.sender.id}`);
 
       return new Promise((resolve) => {
         const tempDir = app.getPath('temp');
@@ -401,37 +432,52 @@ if (!gotTheLock) {
         let psScript = '';
         if (isPortable) {
           const destExe = process.execPath;
-          const tempExe = path.join(tempDir, 'SoftwareKatalog-Update.exe');
           psScript = `
-            Write-Host "Lade Update herunter..."
-            Invoke-WebRequest -Uri "${assetUrl}" -OutFile "${tempExe}"
             Write-Host "Warte auf Beendigung der App..."
             Start-Sleep -Seconds 3
             Move-Item -Path "${destExe}" -Destination "${destExe}.old" -Force
-            Move-Item -Path "${tempExe}" -Destination "${destExe}" -Force
+            Move-Item -Path "${localFilePath}" -Destination "${destExe}" -Force
             Start-Process "${destExe}"
+            Remove-Item -Path "${localFilePath}" -Force
           `;
         } else {
-          const zipPath = path.join(tempDir, 'SoftwareKatalog-Update.zip');
+          const extractPath = path.join(tempDir, 'sk_update_extract');
+          const backupDir = path.join(tempDir, 'sk_update_backup');
           psScript = `
-            Write-Host "Lade Update herunter..."
-            Invoke-WebRequest -Uri "${assetUrl}" -OutFile "${zipPath}"
             Write-Host "Warte auf Beendigung der App..."
             Start-Sleep -Seconds 3
-            Expand-Archive -Path "${zipPath}" -DestinationPath "${tempDir}\\sk_update_extract" -Force
 
-            # Kopiere alles außer config.json, catalog.json und _metadata
-            $source = "${tempDir}\\sk_update_extract"
-            $dest = "${appPath}"
-            Get-ChildItem -Path $source -Recurse | Where-Object {
-              $_.FullName -notmatch '\\\\config\\.json$' -and
-              $_.FullName -notmatch '\\\\catalog\\.json$' -and
-              $_.FullName -notmatch '\\\\_metadata\\\\'
-            } | Copy-Item -Destination { $_.FullName.Replace($source, $dest) } -Force
+            # Entpacken
+            Remove-Item -Path "${extractPath}" -Recurse -Force -ErrorAction SilentlyContinue
+            Expand-Archive -Path "${localFilePath}" -DestinationPath "${extractPath}" -Force
 
-            Start-Process "$dest\\SoftwareKatalog.exe"
-            Remove-Item -Path "${zipPath}" -Force
-            Remove-Item -Path "${tempDir}\\sk_update_extract" -Recurse -Force
+            # Benutzerdaten sichern
+            New-Item -ItemType Directory -Force -Path "${backupDir}" | Out-Null
+            $SafeItems = @("config.json", "state.json", "catalog.json", "_metadata")
+            foreach ($item in $SafeItems) {
+                $fullPath = Join-Path "${appPath}" $item
+                if (Test-Path $fullPath) {
+                    Copy-Item -Path $fullPath -Destination "${backupDir}" -Recurse -Force
+                }
+            }
+
+            # App-Ordner leeren (verhindert Datei-Leichen, behält aber gesperrte Dateien in Ruhe)
+            Get-ChildItem -Path "${appPath}" | Where-Object { $SafeItems -notcontains $_.Name } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+            # Neue Dateien installieren
+            Copy-Item -Path "${extractPath}\\*" -Destination "${appPath}" -Recurse -Force
+
+            # Benutzerdaten zurückspielen
+            Copy-Item -Path "${backupDir}\\*" -Destination "${appPath}" -Recurse -Force
+
+            # Aufräumen
+            Remove-Item -Path "${backupDir}" -Recurse -Force
+            Remove-Item -Path "${extractPath}" -Recurse -Force
+            Remove-Item -Path "${localFilePath}" -Force
+
+            # Finde die richtige .exe dynamisch und starte sie
+            $exe = Get-ChildItem -Path "${appPath}" -Filter "*.exe" | Select-Object -First 1
+            if ($exe) { Start-Process $exe.FullName }
           `;
         }
 
@@ -449,8 +495,7 @@ if (!gotTheLock) {
         child.unref();
 
         resolve({ success: true });
-        // Beende die App sofort, damit das Skript die Dateien überschreiben kann
-        setTimeout(() => app.quit(), 500);
+        setTimeout(() => app.quit(), 500); // Beendet App sicher
       });
     });
 

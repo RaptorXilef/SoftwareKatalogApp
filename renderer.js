@@ -1069,14 +1069,38 @@ async function checkForUpdatesUI() {
 
 async function installUpdate(assetUrl, isPortable) {
   const container = document.getElementById('updateContainer');
+
+  // UI für Download-Fortschritt
   container.innerHTML = `
-    <span style="color: #fab387; font-weight: bold; font-size: 0.95em;">
-      Update wird geladen & installiert... App schließt sich gleich.
-    </span>`;
+    <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
+      <span style="color: #89b4fa; font-size: 0.9em; font-weight: bold;">Download: <span id="dlPercent">0</span>%</span>
+      <div style="width: 250px; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
+        <div id="dlBar" style="width: 0%; height: 100%; background: #89b4fa; transition: width 0.2s;"></div>
+      </div>
+    </div>`;
+
+  if (window.electronAPI) {
+    window.electronAPI.onUpdateProgress((pct) => {
+      const dlPercent = document.getElementById('dlPercent');
+      const dlBar = document.getElementById('dlBar');
+      if (dlPercent) dlPercent.textContent = pct;
+      if (dlBar) dlBar.style.width = `${pct}%`;
+    });
+  }
+
   try {
-    await window.electronAPI.installUpdate(assetUrl, isPortable);
+    // 1. Download in der App
+    const res = await window.electronAPI.downloadUpdate(assetUrl);
+    if (!res.success) throw new Error(res.error);
+
+    // 2. PowerShell Austausch & Neustart
+    container.innerHTML = `
+      <span style="color: #fab387; font-weight: bold; font-size: 0.95em;">
+        Installiere Update & Neustart...
+      </span>`;
+    await window.electronAPI.installUpdate(res.filePath, isPortable);
   } catch (err) {
-    alert(`Fehler beim Vorbereiten des Updates: ${err.message}`);
+    alert(`Fehler beim Update: ${err.message}`);
     container.innerHTML = `<span style="color: red;">Fehler!</span>`;
   }
 }

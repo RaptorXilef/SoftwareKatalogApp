@@ -13,7 +13,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Erweiterte Settings-API
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
-  installUpdate: (assetUrl, isPortable) => ipcRenderer.invoke('install-update', assetUrl, isPortable),
+
+  // Separater Download mit Fortschritt
+  downloadUpdate: (url) => ipcRenderer.invoke('download-update', url),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_event, pct) => callback(pct)),
+  installUpdate: (assetPath, isPortable) => ipcRenderer.invoke('install-update', assetPath, isPortable),
+
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
