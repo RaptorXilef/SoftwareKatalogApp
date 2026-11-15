@@ -571,6 +571,45 @@ if (!gotTheLock) {
       }
     });
 
+    // Handler speziell nur für das extrahieren/umbenennen des Icons
+    ipcMain.handle('add-icon', async (event, targetPath, filePath) => {
+      console.log(`Icon-Drop registriert von WebContents ID: ${event.sender.id}`);
+
+      try {
+        const config = getConfig();
+        const resolvedRoot = path.normalize(
+          path.isAbsolute(config.targetPath) ? config.targetPath : path.resolve(getAppFolder(), config.targetPath)
+        );
+        const resolvedTarget = path.normalize(targetPath);
+        const ensureTrailingSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+
+        if (!ensureTrailingSlash(resolvedTarget).startsWith(ensureTrailingSlash(resolvedRoot))) {
+          throw new Error('Sicherheitsverletzung: Zielpfad liegt außerhalb des zulässigen Software-Verzeichnisses.');
+        }
+
+        const metaDir = path.join(resolvedTarget, '_metadata');
+        if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+
+        // Alte Icons aufräumen, damit wir keine Konflikte haben (z.B. icon.png und icon.jpg)
+        const existing = await fs.promises.readdir(metaDir);
+        for (const f of existing) {
+          if (f.toLowerCase().startsWith('icon.')) {
+            await fs.promises.unlink(path.join(metaDir, f));
+          }
+        }
+
+        // Kopieren und in icon.* umbenennen
+        const ext = path.extname(filePath);
+        const destName = `icon${ext}`;
+        await fs.promises.copyFile(filePath, path.join(metaDir, destName));
+
+        return { success: true };
+      } catch (e) {
+        console.error('Fehler beim Hinzufügen des Icons:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
     // Optimiert! Schreibt die JSON und aktualisiert catalog.json direkt, OHNE langen Scan!
     ipcMain.handle('save-meta-json', async (_event, targetPath, data) => {
       try {

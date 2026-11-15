@@ -113,17 +113,28 @@ document.body.addEventListener('drop', async (e) => {
   const dropzone = e.target.closest('.media-dropzone');
   if (dropzone) {
     dropzone.classList.remove('dragover');
-    const filePaths = files.map((f) => f.path);
     const targetPath = dropzone.dataset.path;
     const softwareId = dropzone.dataset.id;
+    const dropType = dropzone.dataset.type;
 
-    const res = await window.electronAPI.addMedia(targetPath, filePaths);
-    if (res.success) {
-      // Flottes Update anstoßen, um das kopierte Bild sofort einzulesen
-      await startScan('update');
-      editSoftware(softwareId); // Modal mit neuen Bildern neu laden
+    if (dropType === 'icon') {
+      const res = await window.electronAPI.addIcon(targetPath, files[0].path);
+      if (res.success) {
+        await startScan('update');
+        editSoftware(softwareId);
+      } else {
+        alert(`Fehler beim Aktualisieren des Icons:\n${res.error}`);
+      }
     } else {
-      alert(`Fehler beim Hinzufügen der Medien:\n${res.error}`);
+      const filePaths = files.map((f) => f.path);
+      const res = await window.electronAPI.addMedia(targetPath, filePaths);
+      if (res.success) {
+        // Flottes Update anstoßen, um das kopierte Bild sofort einzulesen
+        await startScan('update');
+        editSoftware(softwareId); // Modal mit neuen Bildern neu laden
+      } else {
+        alert(`Fehler beim Hinzufügen der Medien:\n${res.error}`);
+      }
     }
     return;
   }
@@ -153,7 +164,10 @@ document.addEventListener('keydown', (e) => {
   } else {
     // Keyboard Shortcut für Suche (Strg+F oder /)
     const isInputActive = document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA';
-    if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isInputActive)) {
+    // Ignoriere den Editor (contenteditable) für den Strg+F Shortcut
+    const isEditorActive = document.activeElement.isContentEditable;
+
+    if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isInputActive && !isEditorActive)) {
       e.preventDefault();
       el.searchInput.focus();
     } else if (e.key === 'Escape' && isInputActive) {
@@ -772,7 +786,7 @@ function openItemModal(id) {
       </div>
     </div>
     <div style="margin-top: 20px;">
-      <p>${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</p>
+      <div style="line-height: 1.5; opacity: 0.9;">${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</div>
       ${linksHtml}
       ${mediaHtml}
       <p><small style="color: gray;">Pfad: ${escapeHTML(item.path)}</small></p>
@@ -1081,9 +1095,14 @@ function editSoftware(id) {
         <textarea id="editLinks" style="width:100%; height:80px;">${escapeHTML(linksStr)}</textarea>
       </div>
 
-      <!-- Drag & Drop Feld für Bilder und Videos -->
-      <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}">
-        📷 Bilder, Icons oder Videos hierhin ziehen, um sie anzuhängen...
+      <!-- NEU: Gesplittete Drag & Drop Zonen (Flexbox) -->
+      <div style="display: flex; gap: 15px; margin-top: 15px;">
+        <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="icon" style="flex: 1; margin-top: 0; padding: 15px; border-color: var(--accent);">
+          🖼️ <strong>Icon</strong> hier ablegen<br><small style="opacity: 0.7;">(Wird zu icon.* umbenannt)</small>
+        </div>
+        <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="media" style="flex: 2; margin-top: 0; padding: 15px;">
+          📷 <strong>Bilder oder Videos</strong> hier ablegen...
+        </div>
       </div>
     </div>
 
@@ -1097,7 +1116,6 @@ function editSoftware(id) {
   `;
 }
 
-// FIX: Tags nach dem Laden wieder ans Array heften, um join() Crashes zu vermeiden
 async function saveSoftware(id) {
   const item = catalog.find((i) => i.id === id);
 
