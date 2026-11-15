@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.13.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.12.0...v1.13.0) (2026-11-15)
+
+### 🚀 Features
+
+* **core:** Implement 'Installed' status, version tracking, and update badges ([4114aaa](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4114aaaa1d6e7aef11555f7496ea7d913984e0ac))
+
+### 🐛 Bug Fixes
+
+* **core/ui:** Resolve remaining Biome linter warnings ([f29ff4a](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f29ff4afa07958b850bd478859a1c462bcd480d1))
+* **core:** Refine version extraction regex and enable natural numeric sorting ([0608009](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0608009684bcbe9a974d94754fdcd25168db6cda))
+
 ## [1.12.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.11.0...v1.12.0) (2026-11-15)
 
 ### 🚀 Features
