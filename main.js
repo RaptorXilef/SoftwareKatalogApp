@@ -447,11 +447,11 @@ if (!gotTheLock) {
             Write-Host "Warte auf Beendigung der App..."
             Start-Sleep -Seconds 3
 
-            # Entpacken
+            # 1. Ins Temp-Verzeichnis entpacken
             Remove-Item -Path "${extractPath}" -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path "${localFilePath}" -DestinationPath "${extractPath}" -Force
 
-            # Benutzerdaten sichern
+            # 2. Katalog und Einstellungen ins Temp-Verzeichnis sichern
             New-Item -ItemType Directory -Force -Path "${backupDir}" | Out-Null
             $SafeItems = @("config.json", "state.json", "catalog.json", "_metadata")
             foreach ($item in $SafeItems) {
@@ -461,21 +461,19 @@ if (!gotTheLock) {
                 }
             }
 
-            # App-Ordner leeren (verhindert Datei-Leichen, behält aber gesperrte Dateien in Ruhe)
-            Get-ChildItem -Path "${appPath}" | Where-Object { $SafeItems -notcontains $_.Name } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-            # Neue Dateien installieren
+            # 3. 100% SICHER: Die neue Version wird nur DRÜBERKOPIERT.
+            # Es wird absolut NICHTS auf dem NAS gelöscht!
             Copy-Item -Path "${extractPath}\\*" -Destination "${appPath}" -Recurse -Force
 
-            # Benutzerdaten zurückspielen
+            # 4. Einstellungen und Katalog zurückspielen (überschreibt eventuelle leere Standard-Dateien aus der ZIP)
             Copy-Item -Path "${backupDir}\\*" -Destination "${appPath}" -Recurse -Force
 
-            # Aufräumen
+            # 5. Müll im lokalen Temp-Ordner des PCs aufräumen
             Remove-Item -Path "${backupDir}" -Recurse -Force
             Remove-Item -Path "${extractPath}" -Recurse -Force
             Remove-Item -Path "${localFilePath}" -Force
 
-            # Finde die richtige .exe dynamisch und starte sie
+            # 6. App neu starten
             $exe = Get-ChildItem -Path "${appPath}" -Filter "*.exe" | Select-Object -First 1
             if ($exe) { Start-Process $exe.FullName }
           `;
