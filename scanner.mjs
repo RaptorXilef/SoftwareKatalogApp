@@ -64,7 +64,15 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     formats = [],
     hiddenCategory = '';
 
+  let addedAt = 0,
+    updatedAt = 0;
+
   try {
+    // Hole Erstellungs- und Änderungsdatum für Sortierung und "NEU"-Badge
+    const swStat = await fs.stat(softwareDir);
+    addedAt = swStat.birthtimeMs || swStat.mtimeMs;
+    updatedAt = swStat.mtimeMs;
+
     const metaEntries = await fs.readdir(metaDir, { withFileTypes: true });
 
     // 1. Bilder & Videos einlesen (inkl. mp4, webm, ogg, mov, avi)
@@ -91,6 +99,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     const jsonPath = path.join(metaDir, 'meta.json');
     if (existsSync(jsonPath)) {
       try {
+        const metaStat = await fs.stat(jsonPath);
+        // Wenn Metadata neuer ist, Update-Datum anpassen
+        if (metaStat.mtimeMs > updatedAt) updatedAt = metaStat.mtimeMs;
+
         const rawJson = await fs.readFile(jsonPath, 'utf-8');
         const data = JSON.parse(rawJson);
 
@@ -154,24 +166,25 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     try {
       const rootEntries = await fs.readdir(softwareDir, { withFileTypes: true });
       const files = rootEntries.filter((e) => e.isFile()).map((e) => e.name);
-
-      let bestFile = null;
+      // Keine Einzeldatei-Beschränkung mehr! Wir holen uns ALLE Dateien der passenden Erweiterungen
+      // und filtern sie sauber, damit sie im Dropdown-Menü der Detailansicht auswählbar werden.
+      const foundFiles = [];
       // Die Reihenfolge im Array definiert die Priorität!
       for (const ext of config.autoExtensions) {
         let extLower = ext.toLowerCase().trim();
-        // LINTER-FIX: Template Literals statt String Konkatenation
         if (extLower && !extLower.startsWith('.')) extLower = `.${extLower}`; // Punkt sicherstellen
 
         const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
         if (matchingFiles.length > 0) {
           // Alphabetisch sortieren
           matchingFiles.sort((a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }));
-          // Die letzte Datei nehmen (höchste Versionsnummer / Alphabet)
-          bestFile = matchingFiles[matchingFiles.length - 1];
-          break; // Abbrechen, da wir die beste Dateiendung laut Priorität gefunden haben
+          foundFiles.push(...matchingFiles);
         }
       }
-      if (bestFile) lastFiles.push(path.join(softwareDir, bestFile));
+      if (foundFiles.length > 0) {
+        // Hinzufügen (bereits alphabetisch und nach Priorität sortiert)
+        lastFiles.push(...foundFiles.map((f) => path.join(softwareDir, f)));
+      }
     } catch (e) {
       console.error(`Fehler beim Suchen nach Auto-Download in ${softwareDir}: ${e.message}`);
     }
@@ -183,7 +196,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   return {
     id: Buffer.from(toRel(softwareDir)).toString('base64url'),
     name: customName || path.basename(softwareDir),
-    path: toRel(softwareDir), // Relativ speichern
+    path: toRel(softwareDir),
+    // Relativ speichern
     description,
     icon: toRel(iconPath),
     screenshots: screenshots.map(toRel),
@@ -194,6 +208,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     links,
     formats,
     hiddenCategory,
+    addedAt,
+    updatedAt,
   };
 }
 

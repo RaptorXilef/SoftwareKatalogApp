@@ -163,7 +163,28 @@ select {
   color: var(--accent);
 }
 
-/* Settings UI */
+/* Sortier-Dropdown */
+.sort-dropdown {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+.version-selector {
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin-right: 10px;
+  cursor: pointer;
+  max-width: 250px;
+  text-overflow: ellipsis;
+}
+
 .settings-row {
   display: flex;
   gap: 10px;
@@ -219,7 +240,21 @@ select {
   margin-bottom: 15px;
 }
 
-/* Favoriten Sternchen UI */
+/* "NEU" Badge */
+.badge-new {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 3px 8px;
+  border-radius: 12px;
+  text-shadow: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
 .fav-btn {
   position: absolute;
   top: 10px;

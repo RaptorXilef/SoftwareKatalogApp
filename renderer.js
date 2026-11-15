@@ -16,6 +16,8 @@ let scanInterval = null;
 let currentLightboxMedia = [];
 let currentLightboxIndex = 0;
 
+let currentOpenModalId = null; // Tracke das aktuell offene Modal für Dropdown Updates
+
 // Security: XSS Helper
 function escapeHTML(str) {
   if (typeof str !== 'string') return str;
@@ -32,11 +34,11 @@ function escapeHTML(str) {
   );
 }
 
-// DOM Elements Initialization
 const el = {
   grid: document.getElementById('grid'),
   searchInput: document.getElementById('searchInput'),
   clearSearchBtn: document.getElementById('clearSearchBtn'),
+  sortSelect: document.getElementById('sortSelect'),
   tagContainer: document.getElementById('tagContainer'),
   modalOverlay: document.getElementById('modalOverlay'),
   modalContent: document.getElementById('modalContent'),
@@ -78,9 +80,7 @@ document.body.addEventListener('dragleave', (e) => {
   e.stopPropagation();
 
   const dropzone = e.target.closest('.media-dropzone');
-  if (dropzone) {
-    dropzone.classList.remove('dragover');
-  }
+  if (dropzone) dropzone.classList.remove('dragover');
 });
 
 document.getElementById('dropOverlay').addEventListener('dragleave', (e) => {
@@ -139,12 +139,18 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft') lightboxPrev();
   } else if (el.modalOverlay.style.display === 'flex') {
     if (e.key === 'Escape') closeModal();
-  } else if (e.key === 'Escape' && document.activeElement === el.searchInput) {
-    // Leert die Suchleiste sofort, wenn man ESC drückt, während der Cursor darin ist
-    el.searchInput.value = '';
-    el.clearSearchBtn.style.display = 'none';
-    el.searchInput.blur();
-    renderGrid();
+  } else {
+    // Keyboard Shortcut für Suche (Strg+F oder /)
+    const isInputActive = document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA';
+    if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isInputActive)) {
+      e.preventDefault();
+      el.searchInput.focus();
+    } else if (e.key === 'Escape' && isInputActive) {
+      el.searchInput.value = '';
+      el.clearSearchBtn.style.display = 'none';
+      el.searchInput.blur();
+      renderGrid();
+    }
   }
 });
 
@@ -191,7 +197,11 @@ el.clearSearchBtn.addEventListener('click', () => {
   el.searchInput.focus();
 });
 
-// Event Delegation für Grid & Modal-Aktionen
+el.sortSelect.addEventListener('change', renderGrid); // NEU: Auf Sortieränderung reagieren
+
+// ==========================================
+// EVENT DELEGATION (Clicks & Changes)
+// ==========================================
 document.body.addEventListener('click', async (e) => {
   // Grid Card click
   const card = e.target.closest('.card');
@@ -253,6 +263,23 @@ document.body.addEventListener('click', async (e) => {
     const zoomTarget = e.target.classList.contains('img-zoomable') ? e.target : e.target.closest('.vid-container');
     if (zoomTarget.dataset.id) {
       openLightbox(zoomTarget.dataset.id, parseInt(zoomTarget.dataset.idx, 10));
+    }
+  }
+});
+
+// NEU: Reagiert auf die VersionSelector-Änderung (um die Buttons im Modal dynamisch anzupassen)
+document.body.addEventListener('change', (e) => {
+  if (e.target.id === 'versionSelector') {
+    const selectedIdx = e.target.value;
+    const activeItem = catalog.find((i) => i.id === currentOpenModalId);
+
+    if (activeItem && activeItem.lastFiles[selectedIdx]) {
+      const file = activeItem.lastFiles[selectedIdx];
+      const installBtn = document.getElementById('dynamicInstallBtn');
+      const dlBtn = document.getElementById('dynamicDownloadBtn');
+
+      if (installBtn) installBtn.dataset.path = file.replace(/\\/g, '\\\\');
+      if (dlBtn) dlBtn.dataset.files = JSON.stringify([file]);
     }
   }
 });
@@ -498,23 +525,38 @@ function renderGrid() {
     return matchesSearch && matchesTag;
   });
 
-  // Favoriten nach oben sortieren, danach alphabetisch
+  // Erweiterte Sortierung anwenden
   filtered.sort((a, b) => {
+    // Favoriten immer ganz oben
     const aFav = localFavorites.includes(a.id);
     const bFav = localFavorites.includes(b.id);
     if (aFav && !bFav) return -1;
     if (!aFav && bFav) return 1;
+
+    const sortMode = el.sortSelect.value;
+    if (sortMode === 'newest') return (b.addedAt || 0) - (a.addedAt || 0);
+    if (sortMode === 'updated') return (b.updatedAt || 0) - (a.updatedAt || 0);
+
+    // Standard: A-Z
     return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' });
   });
 
   if (filtered.length === 0) {
     el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
+    // Zeitstempel für "NEU"-Badge (alles was in den letzten 14 Tagen hinzugefügt/bearbeitet wurde)
+    const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
     el.grid.innerHTML = filtered
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
+        const itemTimestamp = item.updatedAt || item.addedAt || 0;
+        const isNew = itemTimestamp > 0 && now - itemTimestamp < TWO_WEEKS;
+
         return `
       <div class="card" data-id="${item.id}">
+        ${isNew ? '<div class="badge-new">NEU</div>' : ''}
         <button class="fav-btn ${isFav ? 'active' : ''}" data-id="${item.id}" title="Favorit">★</button>
         ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon" onerror="this.style.display='none'">` : ''}
         <h3>${escapeHTML(item.name)}</h3>
@@ -531,7 +573,6 @@ function renderGrid() {
 // ==========================================
 function openLightbox(itemId, index) {
   const item = catalog.find((i) => i.id === itemId);
-  // Linter Fix: Nutze Optional Chaining "?."
   if (!item?.screenshots || item.screenshots.length === 0) return;
 
   currentLightboxMedia = item.screenshots;
@@ -588,6 +629,8 @@ function openItemModal(id) {
   const item = catalog.find((i) => i.id === id);
   if (!item) return;
 
+  currentOpenModalId = id; // Tracken für Version-Select Update
+
   const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${escapeHTML(item.os.join(', '))}</p>` : '';
   const formatBadges =
     item.formats && item.formats.length > 0
@@ -599,6 +642,7 @@ function openItemModal(id) {
 
   let downloadHtml = '';
   let installHtml = '';
+  let versionSelectHtml = '';
 
   if (item.lastFiles && item.lastFiles.length > 0) {
     // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
@@ -609,13 +653,24 @@ function openItemModal(id) {
                 data-action="open-explorer" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Startet die Datei">
           ▶️ Starten / Installieren (${escapeHTML(fileName)})
         </button>`;
-    }
+      downloadHtml = `
+        <button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;"
+                data-action="start-download" data-files='${escapeHTML(JSON.stringify(item.lastFiles))}'>
+          ⬇️ Download</button>`;
+    } else {
+      // Versionsauswahl Dropdown, wenn es mehrere Installer/Dateien gibt!
+      const optionsHtml = item.lastFiles
+        .map((f, i) => {
+          const name = f.split('\\').pop().split('/').pop();
+          return `<option value="${i}">${escapeHTML(name)}</option>`;
+        })
+        .join('');
 
-    downloadHtml = `
-      <button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;"
-              data-action="start-download" data-files='${escapeHTML(JSON.stringify(item.lastFiles))}'>
-        ⬇️ Download (${item.lastFiles.length} Datei/en)
-      </button>`;
+      versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
+
+      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="open-explorer" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Startet die gewählte Datei">▶️ Starten</button>`;
+      downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
+    }
   }
 
   // Links generieren
@@ -673,12 +728,16 @@ function openItemModal(id) {
       ${linksHtml} ${mediaHtml}
       <p><small style="color: gray;">Pfad: ${escapeHTML(item.path)}</small></p>
     </div>
-    <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center;">
-      <button type="button" class="action-btn" style="margin-top: 0;" data-action="open-explorer" data-path="${item.path.replace(/\\/g, '\\\\')}">Im Explorer öffnen</button>
-      <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
-      <div style="flex: 1;"></div>
-      ${installHtml}
-      ${downloadHtml}
+    <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center; justify-content: space-between;">
+      <div>
+        <button type="button" class="action-btn" style="margin-top: 0;" data-action="open-explorer" data-path="${item.path.replace(/\\/g, '\\\\')}">Im Explorer öffnen</button>
+        <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
+      </div>
+      <div style="display: flex; align-items: center;">
+        ${versionSelectHtml}
+        ${installHtml}
+        ${downloadHtml}
+      </div>
     </div>
   `;
   el.modalOverlay.style.display = 'flex';
@@ -686,6 +745,7 @@ function openItemModal(id) {
 
 function closeModal() {
   el.modalOverlay.style.display = 'none';
+  currentOpenModalId = null;
 }
 
 function openExternalUrl(url) {
@@ -874,6 +934,7 @@ async function browseFile(inputId, isDir, filters) {
   if (selectedPath) document.getElementById(inputId).value = selectedPath;
 }
 
+// Save Settings ohne dummen Alert und mit dynamischem Neu-Laden
 async function saveSettings() {
   const checkedCats = Array.from(document.querySelectorAll('input[name="hiddenCatCheck"]:checked')).map(
     (cb) => cb.value
@@ -895,11 +956,22 @@ async function saveSettings() {
       .map((s) => (s.startsWith('.') ? s : `.${s}`)), // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
   };
 
+  // Überprüfen, ob sich Pfade oder Ext-Listen im Vergleich zum alten State geändert haben
+  const needsRescan =
+    appSettings.targetPath !== newSettings.targetPath ||
+    appSettings.jsonPath !== newSettings.jsonPath ||
+    appSettings.autoExtensions.join(',') !== newSettings.autoExtensions.join(',');
+
   const res = await window.electronAPI.saveSettings(newSettings);
   if (res.success) {
     el.modalOverlay.style.display = 'none';
-    await init(); // Lädt Katalog und wendet die neuen Sichtbarkeiten sofort an!
-    alert('Einstellungen gespeichert. Falls sich Pfade/Dateiendungen geändert haben, starte bitte einen Scan.');
+    appSettings = { ...appSettings, ...newSettings }; // Lokalen State sofort patchen
+
+    if (needsRescan) {
+      await startScan('quick'); // Führt den Scan und den Reload nahtlos aus!
+    } else {
+      await init(); // Nur UI aktualisieren (z.B. versteckte Kategorien)
+    }
   } else {
     alert(`Fehler beim Speichern:\n${res.error}`);
   }
