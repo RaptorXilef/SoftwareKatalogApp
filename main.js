@@ -17,9 +17,6 @@ app.commandLine.appendSwitch('no-sandbox');
 // Unterdrückt den "GetGpuDriverOverlayInfo" Fehler (weil Hardwarebeschleunigung aus ist)
 app.commandLine.appendSwitch('disable-direct-composition');
 
-// Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
-app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
-
 // Basis-Pfade definieren
 function getAppFolder() {
   return app.isPackaged ? process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath) : __dirname;
@@ -88,7 +85,12 @@ function createWindow() {
     height: 800,
     show: false, // Fenster versteckt starten
     backgroundColor: '#1e1e2e', // Passende Hintergrundfarbe setzen, verhindert weißes Aufblitzen
-    webPreferences: { preload: path.join(__dirname, 'preload.js') },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true, // Sicherheit: Isolierter Kontext für den Renderer
+      nodeIntegration: false, // Sicherheit: Keine direkte Node.js API im Frontend
+      sandbox: true, // Sicherheit: Strikte Sandbox aktivieren
+    },
   };
 
   // electron-builder packt den 'build'-Ordner standardmäßig nicht ins app.asar, um Platz zu sparen.
@@ -224,8 +226,19 @@ if (!gotTheLock) {
       }
     });
 
-    // Öffnet Web-Links im Standardbrowser (Chrome/Edge/Firefox)
-    ipcMain.on('open-url', (_event, url) => shell.openExternal(url));
+    // Sicherheit: Öffnet externe Web-Links im Standardbrowser nur bei gültigen Protokollen
+    ipcMain.on('open-url', (_event, url) => {
+      try {
+        const parsedUrl = new URL(url);
+        if (['http:', 'https:'].includes(parsedUrl.protocol)) {
+          shell.openExternal(url);
+        } else {
+          console.warn(`Blockierte URL (ungültiges Protokoll): ${url}`);
+        }
+      } catch (e) {
+        console.error(`Fehler beim Parsen der URL: ${url}`, e);
+      }
+    });
 
     // Settings API
     // Version ans Frontend senden
@@ -288,21 +301,6 @@ if (!gotTheLock) {
       return path.relative(getAppFolder(), filePaths[0]); // Speichert Pfad relativ zur App
     });
 
-    // Pfad in config.json speichern
-    ipcMain.handle('save-target-dir', (_event, newPath) => {
-      try {
-        saveConfig(newPath);
-        return { success: true };
-      } catch (e) {
-        return { success: false, error: e.message };
-      }
-    });
-
-    // Aktuellen Pfad abfragen
-    ipcMain.handle('get-target-dir', () => {
-      return getConfig().targetPath;
-    });
-
     // Neue Software hinzufügen (Ordner auswählen und Template erstellen)
     ipcMain.handle('add-software', async () => {
       const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -312,6 +310,18 @@ if (!gotTheLock) {
       if (canceled || filePaths.length === 0) return { success: false };
 
       const targetDir = filePaths[0];
+
+      // Sicherheit: Pfad-Prüfung
+      const config = getConfig();
+      const resolvedRoot = path.normalize(
+        path.isAbsolute(config.targetPath) ? config.targetPath : path.resolve(getAppFolder(), config.targetPath)
+      );
+      const ensureTrailingSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+
+      if (!ensureTrailingSlash(path.normalize(targetDir)).startsWith(ensureTrailingSlash(resolvedRoot))) {
+        return { success: false, error: 'Sicherheitsverletzung: Ordner liegt außerhalb des Software-Verzeichnisses.' };
+      }
+
       const metaDir = path.join(targetDir, '_metadata');
       const metaFile = path.join(metaDir, 'meta.json');
 
@@ -340,7 +350,22 @@ if (!gotTheLock) {
     // meta.json speichern
     ipcMain.handle('save-meta-json', async (_event, targetPath, data) => {
       try {
-        const metaDir = path.join(targetPath, '_metadata');
+        const config = getConfig();
+        const resolvedRoot = path.normalize(
+          path.isAbsolute(config.targetPath) ? config.targetPath : path.resolve(getAppFolder(), config.targetPath)
+        );
+        const resolvedTarget = path.normalize(targetPath);
+
+        const ensureTrailingSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+
+        // Sicherheit: Pfad muss innerhalb des konfigurierten Software-Verzeichnisses liegen
+        if (!ensureTrailingSlash(resolvedTarget).startsWith(ensureTrailingSlash(resolvedRoot))) {
+          throw new Error(
+            'Sicherheitsverletzung: Speicherpfad liegt außerhalb des zulässigen Software-Verzeichnisses.'
+          );
+        }
+
+        const metaDir = path.join(resolvedTarget, '_metadata');
         if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
         const metaFile = path.join(metaDir, 'meta.json');
 

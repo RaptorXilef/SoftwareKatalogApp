@@ -8,6 +8,22 @@ const META_FOLDER_NAME = '_metadata';
 const IS_FULL_RESCAN = process.argv.includes('--full');
 const IS_UPDATE = process.argv.includes('--update');
 
+// Hilfsfunktion: Begrenzt gleichzeitige asynchrone Tasks, um SMB-Überlastungen zu verhindern
+async function asyncPool(limit, tasks) {
+  const results = [];
+  const executing = new Set();
+  for (const task of tasks) {
+    const p = Promise.resolve().then(() => task());
+    results.push(p);
+    executing.add(p);
+    const clean = p.then(() => executing.delete(p));
+    if (executing.size >= limit) {
+      await Promise.race(executing);
+    }
+  }
+  return Promise.all(results);
+}
+
 async function loadConfig() {
   const configPath = path.join(__dirname, 'config.json');
   const config = {
@@ -203,8 +219,8 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
 
       // Optional eine Ebene tiefer suchen, obwohl schon _metadata gefunden wurde
       if (config.scanNested && nestedDepth < config.nestedDepth) {
-        const nestedResults = await Promise.all(
-          subDirs.map((dir) =>
+        const tasks = subDirs.map(
+          (dir) => () =>
             scanDirectory(
               path.join(currentDir, dir.name),
               cacheMap,
@@ -213,18 +229,19 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
               maxDepth,
               nestedDepth + 1
             )
-          )
         );
+        // Concurrency-Limit von 8 Workers für NAS-Schonung
+        const nestedResults = await asyncPool(8, tasks);
         results = results.concat(nestedResults.flat());
       }
       return results;
     }
 
-    const results = await Promise.all(
-      subDirs.map((dir) =>
+    const tasks = subDirs.map(
+      (dir) => () =>
         scanDirectory(path.join(currentDir, dir.name), cacheMap, config, currentDepth + 1, maxDepth, nestedDepth)
-      )
     );
+    const results = await asyncPool(8, tasks);
     return results.flat();
   } catch (err) {
     console.error(`Fehler beim Scannen von ${currentDir}: ${err.message}`);
@@ -239,8 +256,20 @@ async function run() {
   const LOCK_FILE = path.join(__dirname, 'scan.lock');
 
   if (existsSync(LOCK_FILE)) {
-    console.error('LOCKED: Ein Scan läuft bereits!');
-    process.exit(1); // Beendet das Skript sofort mit einem Fehlercode
+    try {
+      const lockTime = parseInt(await fs.readFile(LOCK_FILE, 'utf-8'), 10);
+      // Timeout nach 10 Minuten, um verwaiste Locks (z.B. durch Absturz) aufzulösen
+      if (Date.now() - lockTime > 10 * 60 * 1000) {
+        console.error('Veraltete Lock-Datei gefunden. Wird überschrieben.');
+        await fs.unlink(LOCK_FILE);
+      } else {
+        console.error('LOCKED: Ein Scan läuft bereits!');
+        process.exit(1);
+      }
+    } catch (e) {
+      console.error('LOCKED: Fehler beim Lesen der Lock-Datei!');
+      process.exit(1);
+    }
   }
 
   try {
@@ -281,7 +310,12 @@ async function run() {
     }
 
     softwareList.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
-    await fs.writeFile(config.OUTPUT_FILE, JSON.stringify(softwareList, null, 2), 'utf-8');
+
+    // Atomares Schreiben: Erst .tmp anlegen, dann atomar umbenennen
+    // Dadurch wird verhindert, dass andere NAS-Nutzer eine halb fertige JSON-Datei auslesen
+    const tmpFile = `${config.OUTPUT_FILE}.tmp`;
+    await fs.writeFile(tmpFile, JSON.stringify(softwareList, null, 2), 'utf-8');
+    await fs.rename(tmpFile, config.OUTPUT_FILE);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`Fertig! ${softwareList.length} Programme erfasst in ${duration}s.`);
