@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.13.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.1...v1.13.2) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **updater/ui:** Fix explorer button, persistent update progress, and robust zip extraction ([c7a39d0](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c7a39d0e43375e563e489ce4c13dea4a40320f8f))
+
 ## [1.13.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.0...v1.13.1) (2026-11-15)
 
 ### 🐛 Bug Fixes
