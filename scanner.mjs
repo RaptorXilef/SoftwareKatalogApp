@@ -16,7 +16,8 @@ async function asyncPool(limit, tasks) {
     const p = Promise.resolve().then(() => task());
     results.push(p);
     executing.add(p);
-    const clean = p.then(() => executing.delete(p));
+    // Linter-Fix: Zuweisung entfernt, da 'clean' nicht weiter genutzt wird
+    p.then(() => executing.delete(p));
     if (executing.size >= limit) {
       await Promise.race(executing);
     }
@@ -267,7 +268,8 @@ async function run() {
         process.exit(1);
       }
     } catch (e) {
-      console.error('LOCKED: Fehler beim Lesen der Lock-Datei!');
+      // Linter-Fix: e wird nun sinnvoll in der Fehlermeldung genutzt
+      console.error(`LOCKED: Fehler beim Lesen der Lock-Datei! Details: ${e.message}`);
       process.exit(1);
     }
   }

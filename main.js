@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 
 // Zwingt Electron, den Cache auf dem lokalen PC statt auf dem NAS abzulegen
 app.setPath('userData', path.join(app.getPath('temp'), 'SoftwareKatalog_Data'));
@@ -37,6 +38,7 @@ function getConfig() {
     updateInterval: 24, // Sucht alle 24 Stunden nach Updates
     lastUpdateCheck: 0, // Zeitstempel der letzten Prüfung
     autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download (mit Priorität)
+    favorites: [], // Favoriten-Speicher
   };
 
   if (fs.existsSync(configPath)) {
@@ -244,6 +246,7 @@ if (!gotTheLock) {
     // Version ans Frontend senden
     ipcMain.handle('get-app-info', () => ({ version: app.getVersion() }));
 
+    // Erweitertes Check-Update für das Auto-Update System
     ipcMain.handle('check-update', async () => {
       try {
         const currentVersion = app.getVersion();
@@ -260,16 +263,96 @@ if (!gotTheLock) {
         // Zeitstempel für automatische Update-Prüfung speichern
         saveConfig({ lastUpdateCheck: Date.now() });
 
+        // Assets analysieren für In-App Update
+        const isPortable = app.isPackaged && process.execPath.toLowerCase().includes('portable');
+        let updateAssetUrl = null;
+
+        if (isPortable) {
+          const asset = data.assets.find((a) => a.name.endsWith('-Portable.exe'));
+          if (asset) updateAssetUrl = asset.browser_download_url;
+        } else {
+          // ZIP Version
+          const asset = data.assets.find(
+            (a) => a.name.endsWith('.zip') && !a.name.includes('mac') && !a.name.includes('linux')
+          );
+          if (asset) updateAssetUrl = asset.browser_download_url;
+        }
+
         return {
           updateAvailable: currentVersion !== latestVersion,
           latestVersion,
           currentVersion,
           releaseUrl: data.html_url,
+          updateAssetUrl,
+          isPortable,
         };
       } catch (e) {
         console.error('Update-Check fehlgeschlagen:', e);
         return { error: e.message };
       }
+    });
+
+    // Führt das Auto-Update via PowerShell aus
+    ipcMain.handle('install-update', async (event, assetUrl, isPortable) => {
+      return new Promise((resolve) => {
+        const tempDir = app.getPath('temp');
+        const updateScriptPath = path.join(tempDir, 'sk_update.ps1');
+        const appPath = isPortable ? process.execPath : getAppFolder();
+
+        let psScript = '';
+        if (isPortable) {
+          const destExe = process.execPath;
+          const tempExe = path.join(tempDir, 'SoftwareKatalog-Update.exe');
+          psScript = `
+            Write-Host "Lade Update herunter..."
+            Invoke-WebRequest -Uri "${assetUrl}" -OutFile "${tempExe}"
+            Write-Host "Warte auf Beendigung der App..."
+            Start-Sleep -Seconds 3
+            Move-Item -Path "${destExe}" -Destination "${destExe}.old" -Force
+            Move-Item -Path "${tempExe}" -Destination "${destExe}" -Force
+            Start-Process "${destExe}"
+          `;
+        } else {
+          const zipPath = path.join(tempDir, 'SoftwareKatalog-Update.zip');
+          psScript = `
+            Write-Host "Lade Update herunter..."
+            Invoke-WebRequest -Uri "${assetUrl}" -OutFile "${zipPath}"
+            Write-Host "Warte auf Beendigung der App..."
+            Start-Sleep -Seconds 3
+            Expand-Archive -Path "${zipPath}" -DestinationPath "${tempDir}\\sk_update_extract" -Force
+
+            # Kopiere alles außer config.json, catalog.json und _metadata
+            $source = "${tempDir}\\sk_update_extract"
+            $dest = "${appPath}"
+            Get-ChildItem -Path $source -Recurse | Where-Object {
+                $_.FullName -notmatch '\\\\config\\.json$' -and
+                $_.FullName -notmatch '\\\\catalog\\.json$' -and
+                $_.FullName -notmatch '\\\\_metadata\\\\'
+            } | Copy-Item -Destination { $_.FullName.Replace($source, $dest) } -Force
+
+            Start-Process "$dest\\SoftwareKatalog.exe"
+            Remove-Item -Path "${zipPath}" -Force
+            Remove-Item -Path "${tempDir}\\sk_update_extract" -Recurse -Force
+          `;
+        }
+
+        fs.writeFileSync(updateScriptPath, psScript, 'utf-8');
+
+        // Starte das PS-Skript entkoppelt
+        const child = spawn(
+          'powershell.exe',
+          ['-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', updateScriptPath],
+          {
+            detached: true,
+            stdio: 'ignore',
+          }
+        );
+        child.unref();
+
+        resolve({ success: true });
+        // Beende die App sofort, damit das Skript die Dateien überschreiben kann
+        setTimeout(() => app.quit(), 500);
+      });
     });
 
     ipcMain.handle('get-settings', () => getConfig());

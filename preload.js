@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Erweiterte Settings-API
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
+  installUpdate: (assetUrl, isPortable) => ipcRenderer.invoke('install-update', assetUrl, isPortable),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),

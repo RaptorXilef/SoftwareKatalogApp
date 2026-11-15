@@ -62,9 +62,14 @@
 
     /* Grid */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
-    .card { background: var(--surface); padding: 20px; border-radius: 12px; cursor: pointer; text-align: center; border: 1px solid var(--border); transition: transform 0.2s; }
+    .card { position: relative; background: var(--surface); padding: 20px; border-radius: 12px; cursor: pointer; text-align: center; border: 1px solid var(--border); transition: transform 0.2s; }
     .card:hover { transform: translateY(-5px); border-color: var(--accent); }
     .card img { width: 64px; height: 64px; object-fit: contain; margin-bottom: 15px; }
+
+    /* Favoriten Sternchen UI */
+    .fav-btn { position: absolute; top: 10px; right: 10px; font-size: 20px; background: none; border: none; cursor: pointer; opacity: 0.3; transition: 0.2s; text-shadow: 0 0 5px rgba(0,0,0,0.5); }
+    .fav-btn:hover { opacity: 0.8; transform: scale(1.1); }
+    .fav-btn.active { opacity: 1; color: #f9e2af; } /* Gelber Stern */
 
     /* Modal */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; padding: 20px; z-index: 100; overflow-y: auto;}
@@ -177,6 +182,14 @@
     let currentLightboxMedia = [];
     let currentLightboxIndex = 0;
 
+    // Hilfsfunktion gegen XSS (Cross-Site Scripting) in manipulieren meta.json Dateien
+    function escapeHTML(str) {
+      if (typeof str !== 'string') return str;
+      return str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      }[tag]));
+    }
+
     // Globale Tastatur-Steuerung (Escape für Modals, Pfeile für Lightbox)
     document.addEventListener('keydown', (e) => {
       const lightbox = document.getElementById('lightboxOverlay');
@@ -194,25 +207,20 @@
     // Scroll-Event-Listener für die Sticky Toolbar
     window.addEventListener('scroll', () => {
       const tb = document.getElementById('mainToolbar');
-      if (window.scrollY > 40) {
-        tb.classList.add('shrink');
-      } else {
-        tb.classList.remove('shrink');
-      }
+      if (window.scrollY > 40) tb.classList.add('shrink');
+      else tb.classList.remove('shrink');
     });
 
     if (window.electronAPI) {
       window.electronAPI.onScanStart((path) => {
         scanCounter = 0;
         currentPct = 0;
-        document.getElementById('scanTargetText').textContent = `Durchsuche Laufwerk (${path})...`;
+        document.getElementById('scanTargetText').textContent = `Durchsuche Laufwerk (${escapeHTML(path)})...`;
         _updateProgressUI();
 
         // Hole den spezifischen Zähler exakt für diesen Scan-Modus
         expectedScanCount = parseInt(localStorage.getItem(`scanCount_${currentScanMode}`), 10) || 0;
-        if (currentScanMode === 'update') {
-           expectedScanCount = catalog.length || 1;
-        }
+        if (currentScanMode === 'update') expectedScanCount = catalog.length || 1;
 
         // Simulierter Hintergrund-Timer: Füllt den Balken sanft in ~2 Minuten auf 99%
         // greift besonders dann, wenn die App die Dateimenge (noch) nicht kennt.
@@ -231,7 +239,7 @@
       window.electronAPI.onScanProgress((path) => {
         scanCounter++;
         const pathEl = document.getElementById('scanPathText');
-        if (pathEl) pathEl.textContent = path;
+        if (pathEl) pathEl.textContent = path; // setTextContent is naturally XSS safe
 
         // Sobald wir einen echten (historischen) Wert haben, nutzen wir echte Mathematik
         if (expectedScanCount > 0) {
@@ -257,8 +265,10 @@
         if (window.electronAPI) {
           catalog = await window.electronAPI.loadCatalog();
           appSettings = await window.electronAPI.getSettings();
+          if (!appSettings.favorites) appSettings.favorites = [];
         } else {
           catalog = await (await fetch('catalog.json')).json();
+          appSettings = { favorites: [] };
         }
 
         availableHiddenCats = [...new Set(catalog.map(i => i.hiddenCategory).filter(c => c))];
@@ -280,7 +290,7 @@
         }
       } catch (error) {
         console.error('Fehler beim Initialisieren:', error);
-        document.getElementById('grid').innerHTML = `<p>Fehler: Konnte Daten nicht laden. Details: ${error.message || error}</p>`;
+        document.getElementById('grid').innerHTML = `<p>Fehler: Konnte Daten nicht laden. Details: ${escapeHTML(error.message || error)}</p>`;
       }
     }
 
@@ -307,9 +317,7 @@
         document.getElementById('scanPathText').textContent = 'Katalog wird gespeichert...';
 
         // Speichere den Ordner-Zähler separat für den jeweiligen Scan-Modus in der Zukunft
-        if (mode !== 'update') {
-          localStorage.setItem(`scanCount_${mode}`, scanCounter.toString());
-        }
+        if (mode !== 'update') localStorage.setItem(`scanCount_${mode}`, scanCounter.toString());
 
         // Kurze Verzögerung, damit der Nutzer die 100% sieht
         await new Promise(r => setTimeout(r, 400));
@@ -348,7 +356,7 @@
       container.innerHTML = `<div class="tag ${!activeTag ? 'active' : ''}" onclick="_filterByTag(null)">Alle</div>`;
 
       Array.from(allTags).sort().forEach(tag => {
-        container.innerHTML += `<div class="tag ${activeTag === tag ? 'active' : ''}" onclick="_filterByTag('${tag}')">${tag}</div>`;
+        container.innerHTML += `<div class="tag ${activeTag === tag ? 'active' : ''}" onclick="_filterByTag('${escapeHTML(tag)}')">${escapeHTML(tag)}</div>`;
       });
     }
 
@@ -386,6 +394,21 @@
 
     document.getElementById('searchInput').addEventListener('input', renderGrid);
 
+    // Favoriten Toggle
+    async function _toggleFav(e, id) {
+      e.stopPropagation(); // Verhindert das Öffnen der Karte
+      if (!window.electronAPI) return;
+
+      const favs = appSettings.favorites || [];
+      const idx = favs.indexOf(id);
+      if (idx > -1) favs.splice(idx, 1);
+      else favs.push(id);
+
+      appSettings.favorites = favs;
+      await window.electronAPI.saveSettings({ favorites: favs });
+      renderGrid(); // Grid sofort neu zeichnen
+    }
+
     function renderGrid() {
       const searchString = document.getElementById('searchInput').value.toLowerCase().trim();
       const searchWords = searchString.split(/\s+/).filter(w => w.length > 0);
@@ -408,13 +431,26 @@
         return matchesSearch && matchesTag;
       });
 
-      grid.innerHTML = filtered.map(item => `
+      // Favoriten nach oben sortieren, danach alphabetisch
+      const favs = appSettings.favorites || [];
+      filtered.sort((a, b) => {
+        const aFav = favs.includes(a.id);
+        const bFav = favs.includes(b.id);
+        if (aFav && !bFav) return -1;
+        if (!aFav && bFav) return 1;
+        return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' });
+      });
+
+      grid.innerHTML = filtered.map(item => {
+        const isFav = favs.includes(item.id);
+        return `
         <div class="card" onclick="_openModal('${item.id}')">
+          <button class="fav-btn ${isFav ? 'active' : ''}" onclick="_toggleFav(event, '${item.id}')" title="Favorit">★</button>
           ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon" onerror="this.style.display='none'">` : ''}
-          <h3>${item.name}</h3>
-          <small>${item.tags.join(', ')}</small>
+          <h3>${escapeHTML(item.name)}</h3>
+          <small>${escapeHTML(item.tags.join(', '))}</small>
         </div>
-      `).join('');
+      `}).join('');
     }
 
     // Lightbox Logik mit Array-Index und Video-Erkennung (Linter Fix)
@@ -487,9 +523,9 @@
       const item = catalog.find(i => i.id === id);
       if (!item) return;
 
-      const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${item.os.join(', ')}</p>` : '';
-      const formatBadges = (item.formats && item.formats.length > 0) ? `<p><strong>Formate:</strong> ${item.formats.join(', ')}</p>` : '';
-      const catText = item.mainCategory ? `<p><strong>Kategorie:</strong> ${item.mainCategory} ${item.subCategories.length > 0 ? `(${item.subCategories.join(', ')})` : ''}</p>` : '';
+      const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${escapeHTML(item.os.join(', '))}</p>` : '';
+      const formatBadges = (item.formats && item.formats.length > 0) ? `<p><strong>Formate:</strong> ${escapeHTML(item.formats.join(', '))}</p>` : '';
+      const catText = item.mainCategory ? `<p><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)} ${item.subCategories.length > 0 ? `(${escapeHTML(item.subCategories.join(', '))})` : ''}</p>` : '';
 
       let downloadHtml = '';
       let installHtml = '';
@@ -501,7 +537,7 @@
           installHtml = `
             <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
                     onclick="_openInExplorer('${item.lastFiles[0].replace(/\\/g, '\\\\')}')" title="Startet die Datei direkt über das Netzwerk">
-              ▶️ Starten / Installieren (${fileName})
+              ▶️ Starten / Installieren (${escapeHTML(fileName)})
             </button>`;
         }
 
@@ -516,7 +552,7 @@
       let linksHtml = '';
       if (item.links && item.links.length > 0) {
         linksHtml = `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">` +
-          item.links.map(l => `<li><a href="#" style="color: var(--accent);" onclick="_openExternalUrl('${l.url}')">${l.label}</a></li>`).join('') +
+          item.links.map(l => `<li><a href="#" style="color: var(--accent);" onclick="_openExternalUrl('${l.url}')">${escapeHTML(l.label)}</a></li>`).join('') +
         `</ul></div>`;
       }
 
@@ -531,14 +567,14 @@
             if (isVid) {
               // #t=1 springt bei der Vorschau auf Sekunde 1 (überspringt schwarze Anfangsbilder)
               return `
-                <div style="position:relative; display:inline-block; cursor:pointer;" onclick="_openLightbox('${item.id}', ${idx})" title="Video abspielen">
+                <div style="position:relative; display:inline-block; cursor:pointer;" onclick="_openLightbox('${item.id}',${idx})" title="Video abspielen">
                   <video src="${fileUrl}#t=1" class="img-zoomable" style="height: 120px; min-width: 150px; max-width: 250px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;" muted preload="metadata"></video>
                   <div style="position:absolute; inset:0; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.3); border-radius:8px; pointer-events:none;">
                     <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
                   </div>
                 </div>`;
             } else {
-              return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${item.id}', ${idx})" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+              return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${item.id}',${idx})" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
             }
           }).join('') +
         `</div>`;
@@ -549,14 +585,14 @@
         <div style="display: flex; gap: 20px; align-items: flex-start;">
           ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" style="width: 80px; height: 80px; object-fit: contain;">` : ''}
           <div>
-            <h2>${item.name}</h2>
+            <h2>${escapeHTML(item.name)}</h2>
             ${osBadges} ${formatBadges} ${catText}
           </div>
         </div>
         <div style="margin-top: 20px;">
-          <p>${item.description || 'Keine Beschreibung vorhanden.'}</p>
+          <p>${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</p>
           ${linksHtml} ${mediaHtml}
-          <p><small style="color: gray;">Pfad: ${item.path}</small></p>
+          <p><small style="color: gray;">Pfad: ${escapeHTML(item.path)}</small></p>
         </div>
         <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center;">
           <button type="button" class="action-btn" style="margin-top: 0;" onclick="_openInExplorer('${item.path.replace(/\\/g, '\\\\')}')">Im Explorer öffnen</button>
@@ -569,6 +605,11 @@
         </div>
       `;
       document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function _closeModal(e) {
+      if (e && e.target !== document.getElementById('modalOverlay')) return;
+      document.getElementById('modalOverlay').style.display = 'none';
     }
 
     function _openExternalUrl(url) { window.electronAPI ? window.electronAPI.openUrl(url) : window.open(url, '_blank'); }
@@ -587,7 +628,7 @@
     async function _loadAppInfo() {
       if (window.electronAPI) {
         const info = await window.electronAPI.getAppInfo();
-        document.getElementById('appVersion').textContent = `(v${info.version})`;
+        document.getElementById('appVersion').textContent = `(v${escapeHTML(info.version)})`;
       }
     }
 
@@ -606,7 +647,7 @@
         const res = await window.electronAPI.checkUpdate();
         if (res && !res.error && res.updateAvailable) {
            const versionEl = document.getElementById('appVersion');
-           versionEl.innerHTML = `(v${res.currentVersion}) <a href="#" onclick="_openExternalUrl('${res.releaseUrl}')" style="color: #a6e3a1; font-size: 0.9em; text-decoration: none; margin-left: 10px;">🎁 Update verfügbar (v${res.latestVersion})!</a>`;
+           versionEl.innerHTML = `(v${res.currentVersion}) <a href="#" onclick="_openSettings()" style="color: #a6e3a1; font-size: 0.9em; text-decoration: none; margin-left: 10px;">🎁 Update verfügbar (v${res.latestVersion})!</a>`;
         }
       }
     }
@@ -621,7 +662,7 @@
         ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
         : availableHiddenCats.map(cat => {
             const isChecked = s.visibleHiddenCats?.includes(cat) ? 'checked' : '';
-            return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${cat}" ${isChecked}> ${cat}</label>`;
+            return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${escapeHTML(cat)}" ${isChecked}>${escapeHTML(cat)}</label>`;
           }).join('');
 
       document.getElementById('modalContent').innerHTML = `
@@ -632,17 +673,17 @@
           <h3>Dateipfade</h3>
           <div class="settings-row">
             <label style="width: 120px;">Software-Ordner:</label>
-            <input type="text" id="cfgTarget" value="${s.targetPath}" readonly>
+            <input type="text" id="cfgTarget" value="${escapeHTML(s.targetPath)}" readonly>
             <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgTarget', true)">Wählen</button>
           </div>
           <div class="settings-row">
             <label style="width: 120px;">Katalog (JSON):</label>
-            <input type="text" id="cfgJson" value="${s.jsonPath}" readonly>
+            <input type="text" id="cfgJson" value="${escapeHTML(s.jsonPath)}" readonly>
             <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgJson', false, [{name: 'JSON', extensions: ['json']}])">Wählen</button>
           </div>
           <div class="settings-row">
             <label style="width: 120px;">Scanner-Skript:</label>
-            <input type="text" id="cfgScript" value="${s.scriptPath}" readonly>
+            <input type="text" id="cfgScript" value="${escapeHTML(s.scriptPath)}" readonly>
             <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" onclick="_browseFile('cfgScript', false, [{name: 'JavaScript', extensions: ['mjs', 'js']}])">Wählen</button>
           </div>
         </div>
@@ -664,7 +705,7 @@
           <p style="font-size: 0.9em; margin-top: 0;">Wenn kein <code>_last</code>-Ordner existiert, sucht der Scanner im Hauptordner des Programms nach diesen Dateitypen (die alphabetisch letzte Datei wird gewählt). Die Reihenfolge von links nach rechts bestimmt die Priorität!</p>
           <div class="settings-row">
             <label style="width: 250px;">Dateiendungen (Komma-getrennt):</label>
-            <input type="text" id="cfgAutoExt" value="${(s.autoExtensions || ['.exe', '.msi', '.zip']).join(', ')}">
+            <input type="text" id="cfgAutoExt" value="${escapeHTML((s.autoExtensions || ['.exe', '.msi', '.zip']).join(', '))}">
           </div>
         </div>
 
@@ -693,7 +734,7 @@
         <div class="settings-group">
           <h3>Über (About)</h3>
           <p style="margin-top: 5px; margin-bottom: 15px;">
-            <strong>Software Katalog</strong> v${info.version}<br>
+            <strong>Software Katalog</strong> v${escapeHTML(info.version)}<br>
             Entwickelt von <strong>Felix Maywald / RaptorXilef</strong>
           </p>
           <div class="settings-row" style="align-items: center; justify-content: flex-start;">
@@ -713,6 +754,7 @@
       _checkForUpdatesUI();
     }
 
+    // Verbesserte Update-UI für One-Click Self-Update
     async function _checkForUpdatesUI() {
       const container = document.getElementById('updateContainer');
       const btn = document.getElementById('btnManualUpdate');
@@ -727,11 +769,35 @@
       if (res.error) {
         container.innerHTML = `<span style="color: var(--text); opacity: 0.7; font-size: 0.9em;">Update-Prüfung fehlgeschlagen.</span>`;
       } else if (res.updateAvailable) {
-        container.innerHTML = `<button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);" onclick="_openExternalUrl('${res.releaseUrl}')">Update verfügbar (v${res.latestVersion})</button>`;
+        // Prüfen, ob wir die App direkt aktualisieren können (Asset URL vorhanden)
+        if (res.updateAssetUrl) {
+          container.innerHTML = `
+            <button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);"
+                    onclick="_installUpdate('${res.updateAssetUrl}',${res.isPortable})">
+              Auf v${res.latestVersion} aktualisieren (Neustart)
+            </button>`;
+        } else {
+           // Fallback auf GitHub Seite, falls keine EXE/ZIP im Asset gefunden wurde
+           container.innerHTML = `<button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);" onclick="_openExternalUrl('${res.releaseUrl}')">Update verfügbar (v${res.latestVersion})</button>`;
+        }
         if (btn) btn.style.display = 'none';
       } else {
         container.innerHTML = '<span style="color: #a6e3a1; font-size: 0.9em;">✓ App ist auf dem neuesten Stand</span>';
         if (btn) btn.style.display = 'none';
+      }
+    }
+
+    async function _installUpdate(assetUrl, isPortable) {
+      const container = document.getElementById('updateContainer');
+      container.innerHTML = `
+        <span style="color: #fab387; font-weight: bold; font-size: 0.95em;">
+          Update wird geladen & installiert... App schließt sich gleich.
+        </span>`;
+      try {
+        await window.electronAPI.installUpdate(assetUrl, isPortable);
+      } catch (err) {
+        alert("Fehler beim Vorbereiten des Updates: " + err.message);
+        container.innerHTML = `<span style="color: red;">Fehler!</span>`;
       }
     }
 
@@ -791,24 +857,24 @@
 
       document.getElementById('modalContent').innerHTML = `
         <button type="button" class="close-btn" onclick="_openModal('${item.id}')" title="Zurück" aria-label="Zurück">&times;</button>
-        <h2>Software bearbeiten: <span style="color: var(--accent);">${item.name}</span></h2>
+        <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
         <div class="settings-group" style="border: none; padding: 0; margin: 0;">
-          <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${item.name}"></div>
-          <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${item.mainCategory || ''}"></div>
-          <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${(item.subCategories || []).join(', ')}"></div>
-          <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${(item.formats || []).join(', ')}"></div>
-          <div class="settings-row"><label style="width:150px;">OS (Komma):</label><input type="text" id="editOS" value="${(item.os || []).join(', ')}"></div>
-          <div class="settings-row"><label style="width:150px;">Versteckt-Kat.:</label><input type="text" id="editHidden" value="${item.hiddenCategory || ''}" placeholder="Leer lassen für Standard"></div>
+          <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${escapeHTML(item.name)}"></div>
+          <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}"></div>
+          <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', ' дослід))}"></div>
+          <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}"></div>
+          <div class="settings-row"><label style="width:150px;">OS (Komma):</label><input type="text" id="editOS" value="${escapeHTML((item.os || []).join(', '))}"></div>
+          <div class="settings-row"><label style="width:150px;">Versteckt-Kat.:</label><input type="text" id="editHidden" value="${escapeHTML(item.hiddenCategory || '')}" placeholder="Leer lassen für Standard"></div>
 
           <div style="margin-top: 15px;">
             <label style="display:block; margin-bottom:5px;">Beschreibung:</label>
-            <textarea id="editDesc" style="width:100%; height:120px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${desc}</textarea>
+            <textarea id="editDesc" style="width:100%; height:120px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${escapeHTML(desc)}</textarea>
           </div>
 
           <div style="margin-top: 15px;">
             <label style="display:block; margin-bottom:5px;">Links (Format: Name | https://...):</label>
-            <textarea id="editLinks" style="width:100%; height:80px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${linksStr}</textarea>
+            <textarea id="editLinks" style="width:100%; height:80px; padding:10px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); box-sizing: border-box; font-family: inherit;">${escapeHTML(linksStr)}</textarea>
           </div>
         </div>
 
