@@ -6,5 +6,10 @@
   "nestedDepth": 1,
   "visibleHiddenCats": [],
   "updateInterval": 24,
-  "lastUpdateCheck": 0
+  "autoExtensions": [
+    ".exe",
+    ".msi",
+    ".zip"
+  ],
+  "newBadgeDays": 14
 }

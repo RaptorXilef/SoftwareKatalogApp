@@ -42,10 +42,11 @@ function getConfig() {
     newBadgeDays: 14, // Dauer des NEU-Badges in Tagen
   };
 
-  // Lokaler State (pro PC, z.B. Favoriten und wann zuletzt nach Updates gesucht wurde)
+  // Lokaler State (pro PC, z.B. Favoriten, Update-Check und installierte Versionen)
   const state = {
     lastUpdateCheck: 0,
     favorites: [],
+    installedVersions: {}, // Speichert { "software-id": "3.0.1" }
   };
 
   if (fs.existsSync(configPath)) {
@@ -91,7 +92,7 @@ function saveConfig(newSettings) {
   Object.assign(currentFullConfig, newSettings);
 
   // Saubere Trennung: Welche Eigenschaft gehört wohin?
-  const stateKeys = ['lastUpdateCheck', 'favorites'];
+  const stateKeys = ['lastUpdateCheck', 'favorites', 'installedVersions'];
 
   const newState = {};
   const newConfig = {};
@@ -166,9 +167,9 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     ipcMain.on('open-path', (_event, folderPath) => shell.openPath(folderPath));
 
-    // Daten an Frontend schicken
+    // Daten an Frontend schicken (Mit dynamischem Live-Check der Installationspfade)
     ipcMain.handle('load-catalog', async () => {
-      const { absJsonPath, appFolder } = getConfig();
+      const { absJsonPath, appFolder, installedVersions } = getConfig();
       if (fs.existsSync(absJsonPath)) {
         try {
           const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
@@ -178,6 +179,23 @@ if (!gotTheLock) {
             if (item.icon) item.icon = path.resolve(appFolder, item.icon);
             if (item.screenshots) item.screenshots = item.screenshots.map((s) => path.resolve(appFolder, s));
             if (item.lastFiles) item.lastFiles = item.lastFiles.map((f) => path.resolve(appFolder, f));
+
+            // Dynamische Prüfung, ob das Programm lokal installiert ist
+            item.isInstalled = false;
+            item.validInstallPath = null;
+            if (item.installPaths && Array.isArray(item.installPaths)) {
+              for (const p of item.installPaths) {
+                if (fs.existsSync(p)) {
+                  item.isInstalled = true;
+                  item.validInstallPath = p; // Der erste gefundene Pfad wird unser Start-Pfad
+                  break;
+                }
+              }
+            }
+
+            // Hänge die gemerkte lokale Version an
+            item.installedVersion = installedVersions && installedVersions[item.id] ? installedVersions[item.id] : null;
+
             return item;
           });
         } catch (e) {
@@ -269,6 +287,19 @@ if (!gotTheLock) {
         });
       } catch (err) {
         return { success: false, error: err.message };
+      }
+    });
+
+    // Speichert die frisch installierte Version lokal
+    ipcMain.handle('mark-as-installed', async (_event, id, version) => {
+      try {
+        const currentConfig = getConfig();
+        const installedVersions = currentConfig.installedVersions || {};
+        installedVersions[id] = version;
+        saveConfig({ installedVersions });
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
       }
     });
 
@@ -449,6 +480,12 @@ if (!gotTheLock) {
         filters,
       });
       if (canceled || filePaths.length === 0) return null;
+
+      // Wenn es Installationspfade sind (.exe/.bat), geben wir den absoluten Pfad zurück
+      if (filters && filters[0].name === 'Ausführbare Dateien') {
+        return filePaths[0];
+      }
+
       return path.relative(getAppFolder(), filePaths[0]); // Speichert Pfad relativ zur App
     });
 
@@ -487,6 +524,7 @@ if (!gotTheLock) {
             formats: [],
             os: ['Windows 10', 'Windows 11'],
             description: ['Hier eine kurze Beschreibung einfügen...'],
+            installPaths: [],
             links: {},
           };
           fs.writeFileSync(metaFile, JSON.stringify(template, null, 2), 'utf-8');
@@ -529,6 +567,7 @@ if (!gotTheLock) {
             formats: [],
             os: ['Windows 10', 'Windows 11'],
             description: ['Hier eine kurze Beschreibung einfügen...'],
+            installPaths: [],
             links: {},
           };
           fs.writeFileSync(metaFile, JSON.stringify(template, null, 2), 'utf-8');
@@ -651,6 +690,7 @@ if (!gotTheLock) {
             catData[catIdx].mainCategory = data.category || '';
             catData[catIdx].subCategories = data.tags || [];
             catData[catIdx].formats = data.formats || [];
+            catData[catIdx].installPaths = data.installPaths || [];
             catData[catIdx].links = Object.entries(data.links || {}).map(([label, url]) => ({ label, url }));
 
             // Atomares Schreiben für catalog.json

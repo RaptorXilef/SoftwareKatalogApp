@@ -62,6 +62,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     subCategories = [],
     links = [],
     formats = [],
+    installPaths = [],
     hiddenCategory = '';
 
   let addedAt = 0,
@@ -135,7 +136,13 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
                 .split(',')
                 .map((s) => s.trim());
 
-        // Links parsen (Erlaubt {"Label": "URL"})
+        // Lade die Liste möglicher lokaler Installationspfade
+        if (data.installPaths) {
+          installPaths = Array.isArray(data.installPaths)
+            ? data.installPaths.filter(Boolean)
+            : [data.installPaths].filter(Boolean);
+        }
+
         if (data.links && typeof data.links === 'object') {
           links = Array.isArray(data.links)
             ? data.links
@@ -209,6 +216,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     mainCategory,
     subCategories,
     lastFiles: lastFiles.map(toRel),
+    installPaths,
     links,
     formats,
     hiddenCategory,

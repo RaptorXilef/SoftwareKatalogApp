@@ -34,7 +34,27 @@ function escapeHTML(str) {
   );
 }
 
-// Globaler Error-Listener zum Ausblenden fehlender Bilder (eliminiert Hunderte CSP Warnungen durch onerror="")
+// SemVer / Regex Logic for "Update" Badges
+function extractVersion(filename) {
+  // Erkennt Dinge wie "VLC_v3.0.1.exe" oder "App-2.0.0.zip"
+  const match = filename.match(/[_-]v?\.?(\d+(?:\.\d+)+)/i);
+  return match ? match[1] : null;
+}
+
+function compareVersions(v1, v2) {
+  if (!v1 || !v2) return 0;
+  const p1 = v1.split('.').map(Number);
+  const p2 = v2.split('.').map(Number);
+  for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+    const n1 = p1[i] || 0;
+    const n2 = p2[i] || 0;
+    if (n1 > n2) return 1;
+    if (n1 < n2) return -1;
+  }
+  return 0;
+}
+
+// Globaler Error-Listener zum Ausblenden fehlender Bilder
 document.addEventListener(
   'error',
   (e) => {
@@ -279,6 +299,19 @@ document.body.addEventListener('click', async (e) => {
     const inputId = e.target.dataset.target;
     browseFile(inputId, isDir, filterExt ? [{ name: filterExt, extensions: [filterExt] }] : undefined);
   }
+
+  // Hinzufügen lokaler Installationspfade im Edit-Modal
+  if (e.target.dataset.action === 'browse-install-path') {
+    const inputId = e.target.dataset.target;
+    const selectedPath = await window.electronAPI.selectFile([
+      { name: 'Ausführbare Dateien', extensions: ['exe', 'bat', 'cmd', 'ps1'] },
+    ]);
+    if (selectedPath) {
+      const textarea = document.getElementById(inputId);
+      textarea.value = textarea.value ? `${textarea.value}\n${selectedPath}` : selectedPath;
+    }
+  }
+
   if (e.target.dataset.action === 'manual-update') checkForUpdatesUI();
   if (e.target.dataset.action === 'install-update') {
     installUpdate(e.target.dataset.url, e.target.dataset.portable === 'true');
@@ -288,10 +321,25 @@ document.body.addEventListener('click', async (e) => {
   if (e.target.dataset.action === 'execute-temp') {
     const btn = e.target;
     const originalText = btn.textContent;
+    const itemId = btn.dataset.id;
+    const filePath = btn.dataset.path;
+
+    // Markiere Programm als installiert & merke dir die Setup-Versionsnummer
+    const version = extractVersion(path.basename(filePath));
+    if (version && itemId) {
+      await window.electronAPI.markAsInstalled(itemId, version);
+      const catItem = catalog.find((i) => i.id === itemId);
+      if (catItem) {
+        catItem.isInstalled = true;
+        catItem.installedVersion = version;
+        renderGrid();
+      }
+    }
+
     btn.textContent = '⏳ Kopiere & Starte...';
     btn.disabled = true;
     try {
-      const res = await window.electronAPI.executeTempInstaller(btn.dataset.path);
+      const res = await window.electronAPI.executeTempInstaller(filePath);
       if (!res.success) alert(`Fehler bei der Ausführung:\n${res.error}`);
     } catch (err) {
       alert(`Fehler:\n${err.message}`);
@@ -602,21 +650,43 @@ function renderGrid() {
     el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
     // Hole konfigurierte Anzahl an Tagen (Standard: 14)
-    const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
-    const TIME_WINDOW = badgeDays * 24 * 60 * 60 * 1000;
+    const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
     const now = Date.now();
 
     el.grid.innerHTML = filtered
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
-        // Badge anzeigen, wenn Option > 0 Tage und das Programm "jung" genug ist
-        const isNew = itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW;
 
-        // FIX: onerror entfernt für CSP Konformität. Fehlende Bilder werden über global error listener ausgeblendet
+        let badgesHtml = '';
+
+        // Update- oder Install-Badge Rendering
+        if (item.isInstalled) {
+          let hasUpdate = false;
+          // Wenn wir eine Setup-Datei haben und eine lokale Version registriert ist, vergleichen
+          if (item.lastFiles && item.lastFiles.length > 0 && item.installedVersion) {
+            const latestFile = path.basename(item.lastFiles[0]);
+            const latestNasVersion = extractVersion(latestFile);
+            if (latestNasVersion && compareVersions(latestNasVersion, item.installedVersion) > 0) {
+              hasUpdate = true;
+            }
+          }
+          if (hasUpdate)
+            badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
+          else
+            badgesHtml +=
+              '<div class="badge badge-installed" title="Programm ist auf diesem PC installiert">Installiert ✓</div>';
+        }
+
+        // Badge anzeigen, wenn Option > 0 Tage und das Programm "jung" genug ist
+        const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
+        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < badgeDays * 24 * 60 * 60 * 1000) {
+          badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
+        }
+
         return `
       <div class="card" data-id="${item.id}">
-        ${isNew ? '<div class="badge-new">NEU</div>' : ''}
+        <div class="badges-container">${badgesHtml}</div>
         <button class="fav-btn ${isFav ? 'active' : ''}" data-id="${item.id}" title="Favorit">★</button>
         ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon">` : ''}
         <h3>${escapeHTML(item.name)}</h3>
@@ -704,17 +774,23 @@ function openItemModal(id) {
   let installHtml = '';
   let versionSelectHtml = '';
 
+  // Wenn es einen verifizierten lokalen Installationspfad gibt -> extra Start Button!
+  let runLocalHtml = '';
+  if (item.isInstalled && item.validInstallPath) {
+    runLocalHtml = `<button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-right: 10px;" data-action="open-explorer" data-path="${item.validInstallPath.replace(/\\/g, '\\\\')}" title="Startet die installierte Software auf diesem PC">🚀 Programm starten</button>`;
+  }
+
   if (item.lastFiles && item.lastFiles.length > 0) {
     // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
     if (item.lastFiles.length === 1) {
       const fileName = item.lastFiles[0].split('\\').pop().split('/').pop();
       installHtml = `
         <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
-                data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">
-          ▶️ Starten / Installieren (${escapeHTML(fileName)})
+                data-action="execute-temp" data-id="${item.id}" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">
+          ▶️ Setup / Installieren (${escapeHTML(fileName)})
         </button>`;
       downloadHtml = `
-        <button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;"
+        <button type="button" class="action-btn" style="background: var(--accent); color: var(--bg); margin-left: 10px;"
                 data-action="start-download" data-files='${escapeHTML(JSON.stringify(item.lastFiles))}'>
           ⬇️ Download</button>`;
     } else {
@@ -728,8 +804,8 @@ function openItemModal(id) {
 
       versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
 
-      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">▶️ Starten</button>`;
-      downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
+      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-id="${item.id}" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
+      downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: var(--accent); color: var(--bg); margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
     }
   }
 
@@ -791,7 +867,7 @@ function openItemModal(id) {
       <div style="line-height: 1.5; opacity: 0.9;">${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</div>
       ${linksHtml}
       ${mediaHtml}
-      <p><small style="color: gray;">Pfad: ${escapeHTML(item.path)}</small></p>
+      <p><small style="color: gray;">Netzwerk-Pfad: ${escapeHTML(item.path)}</small></p>
     </div>
     <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center; justify-content: space-between;">
       <div>
@@ -799,6 +875,7 @@ function openItemModal(id) {
         <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
       </div>
       <div style="display: flex; align-items: center;">
+        ${runLocalHtml}
         ${versionSelectHtml}
         ${installHtml}
         ${downloadHtml}
@@ -1076,8 +1153,11 @@ function editSoftware(id) {
   // Links wieder in "Label | URL" Format konvertieren
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
 
+  // Lokale Installationspfade
+  const installPathsStr = (item.installPaths || []).join('\n');
+
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="open-item-modal" data-id="${item.id}" title="Zurück">&times;</button>
+    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
@@ -1108,7 +1188,15 @@ function editSoftware(id) {
         <textarea id="editLinks" style="width:100%; height:80px;">${escapeHTML(linksStr)}</textarea>
       </div>
 
-      <!-- NEU: Gesplittete Drag & Drop Zonen (Flexbox) -->
+      <!-- Lokale Installationspfade -->
+      <div style="margin-top: 15px;">
+        <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
+          <span>Lokale Installationspfade (Einer pro Zeile):</span>
+          <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
+        </label>
+        <textarea id="editInstallPaths" style="width:100%; height:60px;" placeholder="z.B. C:\\Program Files\\VLC\\vlc.exe">${escapeHTML(installPathsStr)}</textarea>
+      </div>
+
       <div style="display: flex; gap: 15px; margin-top: 15px;">
         <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="icon" style="flex: 1; margin-top: 0; padding: 15px; border-color: var(--accent);">
           🖼️ <strong>Icon</strong> hier ablegen<br><small style="opacity: 0.7;">(Wird zu icon.* umbenannt)</small>
@@ -1153,6 +1241,11 @@ async function saveSoftware(id) {
       .filter(Boolean),
     // Nativer HTML String statt Array mit \n Umbrüchen
     description: document.getElementById('editDesc').innerHTML.trim(),
+    installPaths: document
+      .getElementById('editInstallPaths')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
     links: {},
   };
 

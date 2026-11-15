@@ -19,7 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectTargetDir: () => ipcRenderer.invoke('select-target-dir'),
   selectFile: (filters) => ipcRenderer.invoke('select-file', filters),
 
-  // Software hinzufügen & bearbeiten
+  // Launcher & Software Features
+  markAsInstalled: (id, version) => ipcRenderer.invoke('mark-as-installed', id, version),
   addSoftware: () => ipcRenderer.invoke('add-software'),
   addSoftwareFromPath: (path) => ipcRenderer.invoke('add-software-from-path', path),
   addMedia: (targetPath, filePaths) => ipcRenderer.invoke('add-media', targetPath, filePaths),

@@ -281,19 +281,35 @@ select {
   margin-bottom: 15px;
 }
 
-/* "NEU" Badge */
-.badge-new {
+/* Flexibles Badges System */
+.badges-container {
   position: absolute;
   top: 10px;
   left: 10px;
-  background: var(--accent);
-  color: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+.badge {
   font-size: 11px;
   font-weight: bold;
   padding: 3px 8px;
   border-radius: 12px;
   text-shadow: none;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+.badge-new {
+  background: var(--accent);
+  color: var(--bg);
+}
+.badge-installed {
+  background: #a6e3a1;
+  color: #1e1e2e;
+}
+.badge-update {
+  background: #fab387;
+  color: #1e1e2e;
 }
 
 .fav-btn {
