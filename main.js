@@ -238,14 +238,15 @@ if (!gotTheLock) {
 
     // Lokales Kopieren, Ausführen und Warten (Bypass für SMB-Probleme)
     ipcMain.handle('execute-temp-installer', async (_event, sourcePath) => {
-      return new Promise(async (resolve) => {
-        try {
-          const tempDir = app.getPath('temp');
-          const fileName = path.basename(sourcePath);
-          const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${fileName}`);
+      try {
+        const tempDir = app.getPath('temp');
+        const fileName = path.basename(sourcePath);
+        const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${fileName}`);
 
-          await fs.promises.copyFile(sourcePath, tempPath);
+        // Linter-Fix: async/await außerhalb des Promise-Konstruktors!
+        await fs.promises.copyFile(sourcePath, tempPath);
 
+        return new Promise((resolve) => {
           // Führt die Datei über die Windows-Kommandozeile aus und blockiert (wait), bis sie geschlossen wird
           const child = spawn(`start /wait "" "${tempPath}"`, { shell: true });
 
@@ -264,10 +265,10 @@ if (!gotTheLock) {
           child.on('error', (err) => {
             resolve({ success: false, error: err.message });
           });
-        } catch (err) {
-          resolve({ success: false, error: err.message });
-        }
-      });
+        });
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     });
 
     ipcMain.handle('download-files', async (_event, sourceFiles) => {

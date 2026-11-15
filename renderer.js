@@ -265,9 +265,9 @@ document.body.addEventListener('click', async (e) => {
     btn.disabled = true;
     try {
       const res = await window.electronAPI.executeTempInstaller(btn.dataset.path);
-      if (!res.success) alert('Fehler bei der Ausführung:\n' + res.error);
+      if (!res.success) alert(`Fehler bei der Ausführung:\n${res.error}`);
     } catch (err) {
-      alert('Fehler:\n' + err.message);
+      alert(`Fehler:\n${err.message}`);
     }
     btn.textContent = originalText;
     btn.disabled = false;
