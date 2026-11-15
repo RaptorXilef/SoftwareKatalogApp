@@ -213,6 +213,47 @@ select {
   margin-top: 10px;
 }
 
+/* Nativer Offline-Editor (WYSIWYG) */
+.editor-toolbar {
+  display: flex;
+  gap: 5px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+}
+.editor-toolbar button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  transition: 0.2s;
+}
+.editor-toolbar button:hover {
+  background: var(--border);
+}
+.rich-editor {
+  min-height: 120px;
+  padding: 12px 20px;
+  border-radius: 0 0 8px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  overflow-y: auto;
+  outline: none;
+  line-height: 1.5;
+}
+.rich-editor:focus {
+  border-color: var(--accent);
+}
+.rich-editor a {
+  color: var(--accent);
+}
+
 /* Grid */
 .grid {
   display: grid;

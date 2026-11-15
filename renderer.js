@@ -34,7 +34,7 @@ function escapeHTML(str) {
   );
 }
 
-// NEU: Globaler Error-Listener zum Ausblenden fehlender Bilder (eliminiert Hunderte CSP Warnungen durch onerror="")
+// Globaler Error-Listener zum Ausblenden fehlender Bilder (eliminiert Hunderte CSP Warnungen durch onerror="")
 document.addEventListener(
   'error',
   (e) => {
@@ -214,6 +214,20 @@ el.sortSelect.addEventListener('change', renderGrid); // Auf Sortieränderung re
 // EVENT DELEGATION (Clicks & Changes)
 // ==========================================
 document.body.addEventListener('click', async (e) => {
+  // Nativer Rich Text Editor Toolbar Handling
+  const cmdBtn = e.target.closest('.editor-toolbar button');
+  if (cmdBtn) {
+    e.preventDefault();
+    const cmd = cmdBtn.dataset.cmd;
+    if (cmd === 'createLink') {
+      const url = prompt('Link URL einfügen (z.B. https://):', 'https://');
+      if (url) document.execCommand(cmd, false, url);
+    } else {
+      document.execCommand(cmd, false, null);
+    }
+    return;
+  }
+
   // Grid Card click
   const card = e.target.closest('.card');
   if (card && !e.target.classList.contains('fav-btn')) {
@@ -235,7 +249,6 @@ document.body.addEventListener('click', async (e) => {
   }
 
   // Modal Actions
-  // FIX: Action "open-item-modal" hinzugefügt für Abbrechen-Button
   if (e.target.dataset.action === 'open-item-modal') openItemModal(e.target.dataset.id);
   if (e.target.dataset.action === 'close-modal') closeModal();
   if (e.target.dataset.action === 'open-explorer') openInExplorer(e.target.dataset.path);
@@ -303,7 +316,6 @@ document.body.addEventListener('change', (e) => {
     const selectedIdx = e.target.value;
     const activeItem = catalog.find((i) => i.id === currentOpenModalId);
 
-    // LINTER-FIX: Optional Chain "?."
     if (activeItem?.lastFiles[selectedIdx]) {
       const file = activeItem.lastFiles[selectedIdx];
       const installBtn = document.getElementById('dynamicInstallBtn');
@@ -680,7 +692,6 @@ function openItemModal(id) {
     // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
     if (item.lastFiles.length === 1) {
       const fileName = item.lastFiles[0].split('\\').pop().split('/').pop();
-      // FIX: execute-temp
       installHtml = `
         <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
                 data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">
@@ -701,7 +712,6 @@ function openItemModal(id) {
 
       versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
 
-      // FIX: execute-temp
       installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">▶️ Starten</button>`;
       downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
     }
@@ -748,6 +758,8 @@ function openItemModal(id) {
       `</div>`;
   }
 
+  // Wichtig für den Editor-Fallback (HTML darf nicht ent-escapt werden)
+  // Das Modal rendert item.description wie bisher 1:1, da wir es im Custom Editor als reines HTML speichern
   el.modalContent.innerHTML = `
     <button type="button" class="close-btn" data-action="close-modal" title="Schließen" aria-label="Schließen">&times;</button>
     <div style="display: flex; gap: 20px; align-items: flex-start;">
@@ -1031,9 +1043,8 @@ function editSoftware(id) {
   const item = catalog.find((i) => i.id === id);
   if (!item) return;
 
-  // Beschreibung wiederherstellen (von <br> zurück zu Zeilenumbrüchen)
-  let desc = item.description || '';
-  if (desc.includes('<br>')) desc = desc.split('<br>').join('\n');
+  // Description is now pure HTML from the rich text editor
+  const desc = item.description || '';
 
   // Links wieder in "Label | URL" Format konvertieren
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
@@ -1052,7 +1063,17 @@ function editSoftware(id) {
 
       <div style="margin-top: 15px;">
         <label style="display:block; margin-bottom:5px;">Beschreibung:</label>
-        <textarea id="editDesc" style="width:100%; height:120px;">${escapeHTML(desc)}</textarea>
+
+        <!-- Nativer Rich Text Editor -->
+        <div class="editor-toolbar" id="descToolbar">
+          <button type="button" data-cmd="bold" title="Fett"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Kursiv"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="Unterstrichen"><u>U</u></button>
+          <button type="button" data-cmd="insertUnorderedList" title="Aufzählung">• Liste</button>
+          <button type="button" data-cmd="createLink" title="Link einfügen">🔗 Link</button>
+        </div>
+        <div id="editDesc" class="rich-editor" contenteditable="true">${desc}</div>
+
       </div>
 
       <div style="margin-top: 15px;">
@@ -1076,7 +1097,7 @@ function editSoftware(id) {
   `;
 }
 
-// FIX: Optimiertes Speichern (ohne lahmen Scan)
+// FIX: Tags nach dem Laden wieder ans Array heften, um join() Crashes zu vermeiden
 async function saveSoftware(id) {
   const item = catalog.find((i) => i.id === id);
 
@@ -1099,10 +1120,8 @@ async function saveSoftware(id) {
       .value.split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    description: document
-      .getElementById('editDesc')
-      .value.split('\n')
-      .map((s) => s.replace('\r', '')),
+    // Nativer HTML String statt Array mit \n Umbrüchen
+    description: document.getElementById('editDesc').innerHTML.trim(),
     links: {},
   };
 
@@ -1118,8 +1137,14 @@ async function saveSoftware(id) {
   // Speichert meta.json UND aktualisiert die catalog.json im Main-Prozess
   const res = await window.electronAPI.saveMetaJson(item.path, data);
   if (res.success) {
-    // Einfach den Katalog neu in den RAM laden und rendern (Dauert 1 Millisekunde!)
+    // Katalog flink neu laden und die Tags für das Grid frisch generieren
     catalog = await window.electronAPI.loadCatalog();
+    catalog.forEach((cItem) => {
+      cItem.tags = [];
+      if (cItem.mainCategory) cItem.tags.push(cItem.mainCategory);
+      if (cItem.subCategories) cItem.tags.push(...cItem.subCategories);
+    });
+
     renderGrid();
     openItemModal(id);
   } else {
