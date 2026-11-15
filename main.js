@@ -193,8 +193,8 @@ if (!gotTheLock) {
               }
             }
 
-            // Hänge die gemerkte lokale Version an
-            item.installedVersion = installedVersions && installedVersions[item.id] ? installedVersions[item.id] : null;
+            // Hänge die gemerkte lokale Version an (Linter Fix: Optional Chaining)
+            item.installedVersion = installedVersions?.[item.id] ?? null;
 
             return item;
           });

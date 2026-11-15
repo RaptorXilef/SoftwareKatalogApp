@@ -652,7 +652,8 @@ function renderGrid() {
     el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
     // Hole konfigurierte Anzahl an Tagen (Standard: 14)
-    const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+    const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
+    const TIME_WINDOW = badgeDays * 24 * 60 * 60 * 1000;
     const now = Date.now();
 
     el.grid.innerHTML = filtered
@@ -680,9 +681,8 @@ function renderGrid() {
               '<div class="badge badge-installed" title="Programm ist auf diesem PC installiert">Installiert ✓</div>';
         }
 
-        // Badge anzeigen, wenn Option > 0 Tage und das Programm "jung" genug ist
-        const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
-        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < badgeDays * 24 * 60 * 60 * 1000) {
+        // Dynamisches NEU Badge
+        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW) {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
