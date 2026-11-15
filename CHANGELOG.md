@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.0...v1.13.1) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **updater:** Implement in-app download with progress bar and clean ZIP extraction ([16e1c54](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/16e1c546d7936f41e1f760e4657956a410abc722))
+* **updater:** Switch update script to safe copy-overwrite to protect NAS data ([e568694](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/e568694dd80827ace83e6c20265e0f5d57556df9))
+
 ## [1.13.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.12.0...v1.13.0) (2026-11-15)
 
 ### 🚀 Features
