@@ -165,7 +165,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
       const names = lEntries.filter((e) => e.isFile()).map((e) => e.name);
 
       // Absteigend sortieren (Z-A), damit höchste/neuste Version vorne steht (Index 0)
-      names.sort((a, b) => b.localeCompare(a, 'de', { sensitivity: 'base' }));
+      // FIX: numeric: true stellt sicher, dass "v.2.10" höher gewichtet wird als "v.2.9"
+      names.sort((a, b) => b.localeCompare(a, 'de', { numeric: true, sensitivity: 'base' }));
       lastFiles = names.map((e) => path.join(lastDir, e));
     } catch (e) {
       console.error(`Fehler beim Lesen des _last Ordners in ${softwareDir}: ${e.message}`);
@@ -188,7 +189,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
         const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
         if (matchingFiles.length > 0) {
           // Absteigend sortieren (Z-A), damit höchste/neuste Version vorne steht
-          matchingFiles.sort((a, b) => b.localeCompare(a, 'de', { sensitivity: 'base' }));
+          // FIX: numeric: true stellt sicher, dass "v.2.10" höher gewichtet wird als "v.2.9"
+          matchingFiles.sort((a, b) => b.localeCompare(a, 'de', { numeric: true, sensitivity: 'base' }));
           foundFiles.push(...matchingFiles);
         }
       }
@@ -296,7 +298,6 @@ async function run() {
         process.exit(1);
       }
     } catch (e) {
-      // Linter-Fix: e wird nun sinnvoll in der Fehlermeldung genutzt
       console.error(`LOCKED: Fehler beim Lesen der Lock-Datei! Details: ${e.message}`);
       process.exit(1);
     }

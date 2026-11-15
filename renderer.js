@@ -36,8 +36,9 @@ function escapeHTML(str) {
 
 // SemVer / Regex Logic for "Update" Badges
 function extractVersion(filename) {
-  // Erkennt Dinge wie "VLC_v3.0.1.exe" oder "App-2.0.0.zip"
-  const match = filename.match(/[_-]v?\.?(\d+(?:\.\d+)+)/i);
+  // FIX: Sucht ausschließlich nach dem ersten Zahl-Punkt-Zahl Block (z.B. 1.0 oder 2.8.0.0)
+  // Ignoriert Anhänge wie -Win64, -German oder Präfixe wie _v.
+  const match = filename.match(/(\d+(?:\.\d+)+)/);
   return match ? match[1] : null;
 }
 
@@ -45,6 +46,7 @@ function compareVersions(v1, v2) {
   if (!v1 || !v2) return 0;
   const p1 = v1.split('.').map(Number);
   const p2 = v2.split('.').map(Number);
+  // Vergleicht sicher 1.0.0.0 mit 1.0 (füllt kürzere Version dynamisch mit 0 auf)
   for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
     const n1 = p1[i] || 0;
     const n2 = p2[i] || 0;
