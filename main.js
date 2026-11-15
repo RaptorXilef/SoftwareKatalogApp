@@ -236,7 +236,40 @@ if (!gotTheLock) {
       });
     });
 
-    // Dateien aus _last herunterladen (kopieren)
+    // Lokales Kopieren, Ausführen und Warten (Bypass für SMB-Probleme)
+    ipcMain.handle('execute-temp-installer', async (_event, sourcePath) => {
+      return new Promise(async (resolve) => {
+        try {
+          const tempDir = app.getPath('temp');
+          const fileName = path.basename(sourcePath);
+          const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${fileName}`);
+
+          await fs.promises.copyFile(sourcePath, tempPath);
+
+          // Führt die Datei über die Windows-Kommandozeile aus und blockiert (wait), bis sie geschlossen wird
+          const child = spawn(`start /wait "" "${tempPath}"`, { shell: true });
+
+          child.on('exit', async () => {
+            // Wenn die Ausführung beendet ist, lösche die temporäre Datei
+            try {
+              if (fs.existsSync(tempPath)) {
+                await fs.promises.unlink(tempPath);
+              }
+            } catch (e) {
+              console.warn('Konnte Temp-Datei nicht bereinigen:', e);
+            }
+            resolve({ success: true });
+          });
+
+          child.on('error', (err) => {
+            resolve({ success: false, error: err.message });
+          });
+        } catch (err) {
+          resolve({ success: false, error: err.message });
+        }
+      });
+    });
+
     ipcMain.handle('download-files', async (_event, sourceFiles) => {
       // 1. Benutzer wählt Zielordner aus
       const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -537,7 +570,7 @@ if (!gotTheLock) {
       }
     });
 
-    // meta.json speichern
+    // Optimiert! Schreibt die JSON und aktualisiert catalog.json direkt, OHNE langen Scan!
     ipcMain.handle('save-meta-json', async (_event, targetPath, data) => {
       try {
         const config = getConfig();
@@ -560,6 +593,32 @@ if (!gotTheLock) {
         const metaFile = path.join(metaDir, 'meta.json');
 
         fs.writeFileSync(metaFile, JSON.stringify(data, null, 2), 'utf-8');
+
+        // catalog.json direkt aktualisieren (Performance Boost)
+        if (fs.existsSync(config.absJsonPath)) {
+          const relPath = path.relative(config.appFolder, resolvedTarget);
+          const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
+          const catIdx = catData.findIndex((i) => i.path === relPath);
+
+          if (catIdx > -1) {
+            catData[catIdx].name = data.name || path.basename(resolvedTarget);
+            catData[catIdx].description = Array.isArray(data.description)
+              ? data.description.join('<br>')
+              : data.description;
+            catData[catIdx].hiddenCategory = data.hiddenCategory ? data.hiddenCategory.trim() : '';
+            catData[catIdx].os = data.os || [];
+            catData[catIdx].mainCategory = data.category || '';
+            catData[catIdx].subCategories = data.tags || [];
+            catData[catIdx].formats = data.formats || [];
+            catData[catIdx].links = Object.entries(data.links || {}).map(([label, url]) => ({ label, url }));
+
+            // Atomares Schreiben für catalog.json
+            const tmpFile = `${config.absJsonPath}.tmp`;
+            fs.writeFileSync(tmpFile, JSON.stringify(catData, null, 2), 'utf-8');
+            fs.renameSync(tmpFile, config.absJsonPath);
+          }
+        }
+
         return { success: true };
       } catch (e) {
         console.error('Fehler beim Speichern der meta.json:', e);

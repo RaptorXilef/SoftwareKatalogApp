@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadCatalog: () => ipcRenderer.invoke('load-catalog'),
   runScan: (mode) => ipcRenderer.invoke('run-scan', mode), // mode: 'quick', 'full', 'update'
   downloadFiles: (files) => ipcRenderer.invoke('download-files', files),
+  executeTempInstaller: (path) => ipcRenderer.invoke('execute-temp-installer', path), // Installer via Temp ausführen
   openUrl: (url) => ipcRenderer.send('open-url', url),
   onScanStart: (callback) => ipcRenderer.on('scan-start', (_event, path) => callback(path)),
   onScanProgress: (callback) => ipcRenderer.on('scan-progress', (_event, path) => callback(path)),

@@ -34,6 +34,17 @@ function escapeHTML(str) {
   );
 }
 
+// NEU: Globaler Error-Listener zum Ausblenden fehlender Bilder (eliminiert Hunderte CSP Warnungen durch onerror="")
+document.addEventListener(
+  'error',
+  (e) => {
+    if (e.target.tagName === 'IMG') {
+      e.target.style.display = 'none';
+    }
+  },
+  true
+); // capturing phase!
+
 const el = {
   grid: document.getElementById('grid'),
   searchInput: document.getElementById('searchInput'),
@@ -224,6 +235,8 @@ document.body.addEventListener('click', async (e) => {
   }
 
   // Modal Actions
+  // FIX: Action "open-item-modal" hinzugefügt für Abbrechen-Button
+  if (e.target.dataset.action === 'open-item-modal') openItemModal(e.target.dataset.id);
   if (e.target.dataset.action === 'close-modal') closeModal();
   if (e.target.dataset.action === 'open-explorer') openInExplorer(e.target.dataset.path);
   if (e.target.dataset.action === 'edit-software') editSoftware(e.target.dataset.id);
@@ -243,6 +256,23 @@ document.body.addEventListener('click', async (e) => {
   if (e.target.dataset.action === 'install-update') {
     installUpdate(e.target.dataset.url, e.target.dataset.portable === 'true');
   }
+
+  // Installer via Temp-Ordner sicher ausführen
+  if (e.target.dataset.action === 'execute-temp') {
+    const btn = e.target;
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Kopiere & Starte...';
+    btn.disabled = true;
+    try {
+      const res = await window.electronAPI.executeTempInstaller(btn.dataset.path);
+      if (!res.success) alert('Fehler bei der Ausführung:\n' + res.error);
+    } catch (err) {
+      alert('Fehler:\n' + err.message);
+    }
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+
   if (e.target.dataset.action === 'start-download') {
     const btn = e.target;
     const originalText = btn.textContent;
@@ -273,6 +303,7 @@ document.body.addEventListener('change', (e) => {
     const selectedIdx = e.target.value;
     const activeItem = catalog.find((i) => i.id === currentOpenModalId);
 
+    // LINTER-FIX: Optional Chain "?."
     if (activeItem?.lastFiles[selectedIdx]) {
       const file = activeItem.lastFiles[selectedIdx];
       const installBtn = document.getElementById('dynamicInstallBtn');
@@ -554,11 +585,12 @@ function renderGrid() {
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
         const isNew = itemTimestamp > 0 && now - itemTimestamp < TWO_WEEKS;
 
+        // FIX: onerror entfernt für CSP Konformität. Fehlende Bilder werden über global error listener ausgeblendet
         return `
       <div class="card" data-id="${item.id}">
         ${isNew ? '<div class="badge-new">NEU</div>' : ''}
         <button class="fav-btn ${isFav ? 'active' : ''}" data-id="${item.id}" title="Favorit">★</button>
-        ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon" onerror="this.style.display='none'">` : ''}
+        ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon">` : ''}
         <h3>${escapeHTML(item.name)}</h3>
         <small>${escapeHTML(item.tags.join(', '))}</small>
       </div>
@@ -648,9 +680,10 @@ function openItemModal(id) {
     // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
     if (item.lastFiles.length === 1) {
       const fileName = item.lastFiles[0].split('\\').pop().split('/').pop();
+      // FIX: execute-temp
       installHtml = `
         <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
-                data-action="open-explorer" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Startet die Datei">
+                data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">
           ▶️ Starten / Installieren (${escapeHTML(fileName)})
         </button>`;
       downloadHtml = `
@@ -668,7 +701,8 @@ function openItemModal(id) {
 
       versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
 
-      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="open-explorer" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Startet die gewählte Datei">▶️ Starten</button>`;
+      // FIX: execute-temp
+      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-path="${item.lastFiles[0].replace(/\\/g, '\\\\')}" title="Kopiert die Datei lokal und führt sie aus">▶️ Starten</button>`;
       downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
     }
   }
@@ -720,12 +754,15 @@ function openItemModal(id) {
       ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" style="width: 80px; height: 80px; object-fit: contain;">` : ''}
       <div>
         <h2>${escapeHTML(item.name)}</h2>
-        ${osBadges} ${formatBadges} ${catText}
+        ${osBadges}
+        ${formatBadges}
+        ${catText}
       </div>
     </div>
     <div style="margin-top: 20px;">
       <p>${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</p>
-      ${linksHtml} ${mediaHtml}
+      ${linksHtml}
+      ${mediaHtml}
       <p><small style="color: gray;">Pfad: ${escapeHTML(item.path)}</small></p>
     </div>
     <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center; justify-content: space-between;">
@@ -1032,13 +1069,14 @@ function editSoftware(id) {
     <div style="margin-top: 25px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; justify-content: space-between; align-items: center;">
       <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border);" data-action="open-explorer" data-path="${item.path.replace(/\\/g, '\\\\')}\\\\_metadata">Bilderordner öffnen</button>
       <div>
-        <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border); margin-right: 10px;" onclick="openItemModal('${item.id}')">Abbrechen</button>
+        <button type="button" class="action-btn" style="margin-top:0; background: var(--surface); color: var(--text); border: 1px solid var(--border); margin-right: 10px;" data-action="open-item-modal" data-id="${item.id}">Abbrechen</button>
         <button type="button" class="action-btn" style="margin-top:0;" data-action="save-software" data-id="${item.id}">Speichern & Aktualisieren</button>
       </div>
     </div>
   `;
 }
 
+// FIX: Optimiertes Speichern (ohne lahmen Scan)
 async function saveSoftware(id) {
   const item = catalog.find((i) => i.id === id);
 
@@ -1077,10 +1115,12 @@ async function saveSoftware(id) {
     }
   }
 
+  // Speichert meta.json UND aktualisiert die catalog.json im Main-Prozess
   const res = await window.electronAPI.saveMetaJson(item.path, data);
   if (res.success) {
-    // Führt ein flottes Update aus, lädt den Katalog neu und öffnet das Modal wieder
-    await startScan('update');
+    // Einfach den Katalog neu in den RAM laden und rendern (Dauert 1 Millisekunde!)
+    catalog = await window.electronAPI.loadCatalog();
+    renderGrid();
     openItemModal(id);
   } else {
     alert(`Fehler beim Speichern:\n${res.error}`);
