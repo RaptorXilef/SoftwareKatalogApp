@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.13.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.2...v1.13.3) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **core/ui:** Fix explorer path parsing and ensure reliable detached PowerShell execution ([fcd7fce](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/fcd7fce104caa89baa7b7a3b53dd0acc4d73f4b1))
+
+### ⚡ Performance
+
+* **build:** Optimize Electron compression to reduce GitHub Actions build time ([d91f2e5](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d91f2e56e01114e94fd2cc2833a4a8a8b10c9843))
+
 ## [1.13.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.1...v1.13.2) (2026-11-15)
 
 ### 🐛 Bug Fixes
