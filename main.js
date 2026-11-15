@@ -451,6 +451,14 @@ if (!gotTheLock) {
             Remove-Item -Path "${extractPath}" -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path "${localFilePath}" -DestinationPath "${extractPath}" -Force
 
+            # Automatische Erkennung, ob die ZIP einen einzigen Stammordner hat (z.B. GitHub-Strukturen)
+            $sourceDir = "${extractPath}"
+            $subDirs = Get-ChildItem -Path "${extractPath}" -Directory
+            $filesInRoot = Get-ChildItem -Path "${extractPath}" -File
+            if ($subDirs.Count -eq 1 -and $filesInRoot.Count -eq 0) {
+                $sourceDir = $subDirs[0].FullName
+            }
+
             # 2. Katalog und Einstellungen ins Temp-Verzeichnis sichern
             New-Item -ItemType Directory -Force -Path "${backupDir}" | Out-Null
             $SafeItems = @("config.json", "state.json", "catalog.json", "_metadata")
@@ -463,7 +471,7 @@ if (!gotTheLock) {
 
             # 3. 100% SICHER: Die neue Version wird nur DRÜBERKOPIERT.
             # Es wird absolut NICHTS auf dem NAS gelöscht!
-            Copy-Item -Path "${extractPath}\\*" -Destination "${appPath}" -Recurse -Force
+            Copy-Item -Path "$sourceDir\\*" -Destination "${appPath}" -Recurse -Force
 
             # 4. Einstellungen und Katalog zurückspielen (überschreibt eventuelle leere Standard-Dateien aus der ZIP)
             Copy-Item -Path "${backupDir}\\*" -Destination "${appPath}" -Recurse -Force

@@ -17,6 +17,7 @@ let currentLightboxMedia = [];
 let currentLightboxIndex = 0;
 
 let currentOpenModalId = null; // Tracke das aktuell offene Modal für Dropdown Updates
+let isUpdating = false; // NEU: Merkt sich, ob gerade ein Update heruntergeladen wird
 
 // Security: XSS Helper
 function escapeHTML(str) {
@@ -247,7 +248,7 @@ el.clearSearchBtn.addEventListener('click', () => {
 el.sortSelect.addEventListener('change', renderGrid); // Auf Sortieränderung reagieren
 
 // ==========================================
-// EVENT DELEGATION (Clicks & Changes)
+// EVENT DELEGATION (Robuster Selector .closest)
 // ==========================================
 document.body.addEventListener('click', async (e) => {
   // Nativer Rich Text Editor Toolbar Handling
@@ -284,27 +285,33 @@ document.body.addEventListener('click', async (e) => {
     renderGrid();
   }
 
+  // FIX: Nutzt .closest('[data-action]'), damit auch Klicks auf Kind-Elemente (Text/Icons in Buttons) perfekt greifen!
+  const actionEl = e.target.closest('[data-action]');
+  if (!actionEl) return;
+
+  const action = actionEl.dataset.action;
+
   // Modal Actions
-  if (e.target.dataset.action === 'open-item-modal') openItemModal(e.target.dataset.id);
-  if (e.target.dataset.action === 'close-modal') closeModal();
-  if (e.target.dataset.action === 'open-explorer') openInExplorer(e.target.dataset.path);
-  if (e.target.dataset.action === 'edit-software') editSoftware(e.target.dataset.id);
-  if (e.target.dataset.action === 'save-software') saveSoftware(e.target.dataset.id);
-  if (e.target.dataset.action === 'open-url') {
+  if (action === 'open-item-modal') openItemModal(actionEl.dataset.id);
+  if (action === 'close-modal') closeModal();
+  if (action === 'open-explorer') openInExplorer(actionEl.dataset.path);
+  if (action === 'edit-software') editSoftware(actionEl.dataset.id);
+  if (action === 'save-software') saveSoftware(actionEl.dataset.id);
+  if (action === 'open-url') {
     e.preventDefault();
-    openExternalUrl(e.target.dataset.url);
+    openExternalUrl(actionEl.dataset.url);
   }
-  if (e.target.dataset.action === 'save-settings') saveSettings();
-  if (e.target.dataset.action === 'browse-file') {
-    const isDir = e.target.dataset.type === 'dir';
-    const filterExt = e.target.dataset.ext;
-    const inputId = e.target.dataset.target;
+  if (action === 'save-settings') saveSettings();
+  if (action === 'browse-file') {
+    const isDir = actionEl.dataset.type === 'dir';
+    const filterExt = actionEl.dataset.ext;
+    const inputId = actionEl.dataset.target;
     browseFile(inputId, isDir, filterExt ? [{ name: filterExt, extensions: [filterExt] }] : undefined);
   }
 
   // Hinzufügen lokaler Installationspfade im Edit-Modal
-  if (e.target.dataset.action === 'browse-install-path') {
-    const inputId = e.target.dataset.target;
+  if (action === 'browse-install-path') {
+    const inputId = actionEl.dataset.target;
     const selectedPath = await window.electronAPI.selectFile([
       { name: 'Ausführbare Dateien', extensions: ['exe', 'bat', 'cmd', 'ps1'] },
     ]);
@@ -314,17 +321,16 @@ document.body.addEventListener('click', async (e) => {
     }
   }
 
-  if (e.target.dataset.action === 'manual-update') checkForUpdatesUI();
-  if (e.target.dataset.action === 'install-update') {
-    installUpdate(e.target.dataset.url, e.target.dataset.portable === 'true');
+  if (action === 'manual-update') checkForUpdatesUI();
+  if (action === 'install-update') {
+    installUpdate(actionEl.dataset.url, actionEl.dataset.portable === 'true');
   }
 
   // Installer via Temp-Ordner sicher ausführen
-  if (e.target.dataset.action === 'execute-temp') {
-    const btn = e.target;
-    const originalText = btn.textContent;
-    const itemId = btn.dataset.id;
-    const filePath = btn.dataset.path;
+  if (action === 'execute-temp') {
+    const originalText = actionEl.textContent;
+    const itemId = actionEl.dataset.id;
+    const filePath = actionEl.dataset.path;
 
     // Markiere Programm als installiert & merke dir die Setup-Versionsnummer
     const version = extractVersion(path.basename(filePath));
@@ -338,34 +344,34 @@ document.body.addEventListener('click', async (e) => {
       }
     }
 
-    btn.textContent = '⏳ Kopiere & Starte...';
-    btn.disabled = true;
+    actionEl.textContent = '⏳ Kopiere & Starte...';
+    actionEl.disabled = true;
     try {
       const res = await window.electronAPI.executeTempInstaller(filePath);
       if (!res.success) alert(`Fehler bei der Ausführung:\n${res.error}`);
     } catch (err) {
       alert(`Fehler:\n${err.message}`);
     }
-    btn.textContent = originalText;
-    btn.disabled = false;
+    actionEl.textContent = originalText;
+    actionEl.disabled = false;
   }
 
-  if (e.target.dataset.action === 'start-download') {
-    const btn = e.target;
-    const originalText = btn.textContent;
-    btn.textContent = 'Kopiere...';
-    btn.disabled = true;
+  if (action === 'start-download') {
+    const originalText = actionEl.textContent;
+    actionEl.textContent = 'Kopiere...';
+    actionEl.disabled = true;
     try {
-      const parsedFiles = JSON.parse(btn.dataset.files);
+      const parsedFiles = JSON.parse(actionEl.dataset.files);
       const res = await window.electronAPI.downloadFiles(parsedFiles);
       if (res.success) alert(`Erfolgreich gespeichert unter:\n${res.dest}`);
       else if (res.error) alert(`Fehler beim Kopieren:\n${res.error}`);
     } catch (err) {
       alert(`Fehler: ${err.message}`);
     }
-    btn.textContent = originalText;
-    btn.disabled = false;
+    actionEl.textContent = originalText;
+    actionEl.disabled = false;
   }
+
   if (e.target.classList.contains('img-zoomable') || e.target.closest('.vid-container')) {
     const zoomTarget = e.target.classList.contains('img-zoomable') ? e.target : e.target.closest('.vid-container');
     if (zoomTarget.dataset.id) {
@@ -1030,12 +1036,34 @@ async function openSettings() {
   `;
   el.modalOverlay.style.display = 'flex';
 
-  // Starte die Update-Prüfung im Hintergrund
-  checkForUpdatesUI();
+  // Wenn bereits ein Download lief, re-initialisiere den UI-Fortschritt im Settings-Modal sofort!
+  if (isUpdating) {
+    renderUpdateProgressUI();
+  } else {
+    checkForUpdatesUI();
+  }
+}
+
+// Hilfsfunktion, um den Fortschrittsbalken im Settings-Modal dauerhaft zu halten
+function renderUpdateProgressUI() {
+  const container = document.getElementById('updateContainer');
+  const btn = document.getElementById('btnManualUpdate');
+  if (!container) return;
+
+  if (btn) btn.style.display = 'none';
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
+      <span style="color: #89b4fa; font-size: 0.9em; font-weight: bold;">Download: <span id="dlPercent">0</span>%</span>
+      <div style="width: 250px; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
+        <div id="dlBar" style="width: 0%; height: 100%; background: #89b4fa; transition: width 0.2s;"></div>
+      </div>
+    </div>`;
 }
 
 // Verbesserte Update-UI für One-Click Self-Update
 async function checkForUpdatesUI() {
+  if (isUpdating) return; // Wenn er bereits lädt, nicht überschreiben
+
   const container = document.getElementById('updateContainer');
   const btn = document.getElementById('btnManualUpdate');
   if (!container || !window.electronAPI) return;
@@ -1068,16 +1096,8 @@ async function checkForUpdatesUI() {
 }
 
 async function installUpdate(assetUrl, isPortable) {
-  const container = document.getElementById('updateContainer');
-
-  // UI für Download-Fortschritt
-  container.innerHTML = `
-    <div style="display:flex; flex-direction:column; gap:5px; align-items:flex-end;">
-      <span style="color: #89b4fa; font-size: 0.9em; font-weight: bold;">Download: <span id="dlPercent">0</span>%</span>
-      <div style="width: 250px; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; border: 1px solid var(--border);">
-        <div id="dlBar" style="width: 0%; height: 100%; background: #89b4fa; transition: width 0.2s;"></div>
-      </div>
-    </div>`;
+  isUpdating = true;
+  renderUpdateProgressUI();
 
   if (window.electronAPI) {
     window.electronAPI.onUpdateProgress((pct) => {
@@ -1094,14 +1114,19 @@ async function installUpdate(assetUrl, isPortable) {
     if (!res.success) throw new Error(res.error);
 
     // 2. PowerShell Austausch & Neustart
-    container.innerHTML = `
-      <span style="color: #fab387; font-weight: bold; font-size: 0.95em;">
-        Installiere Update & Neustart...
-      </span>`;
+    const container = document.getElementById('updateContainer');
+    if (container) {
+      container.innerHTML = `
+        <span style="color: #fab387; font-weight: bold; font-size: 0.95em;">
+          Installiere Update & Neustart...
+        </span>`;
+    }
     await window.electronAPI.installUpdate(res.filePath, isPortable);
   } catch (err) {
+    isUpdating = false;
     alert(`Fehler beim Update: ${err.message}`);
-    container.innerHTML = `<span style="color: red;">Fehler!</span>`;
+    const container = document.getElementById('updateContainer');
+    if (container) container.innerHTML = `<span style="color: red;">Fehler!</span>`;
   }
 }
 
@@ -1183,7 +1208,7 @@ function editSoftware(id) {
   const installPathsStr = (item.installPaths || []).join('\n');
 
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
+    <button type="button" class="close-btn" data-action="open-item-modal" data-id="${item.id}" title="Zurück">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
