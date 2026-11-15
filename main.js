@@ -294,6 +294,9 @@ if (!gotTheLock) {
 
     // Führt das Auto-Update via PowerShell aus
     ipcMain.handle('install-update', async (event, assetUrl, isPortable) => {
+      // Linter-Fix: Nutze das event Objekt für nützliches Logging
+      console.log(`Update-Installation angefordert von WebContents ID: ${event.sender.id}`);
+
       return new Promise((resolve) => {
         const tempDir = app.getPath('temp');
         const updateScriptPath = path.join(tempDir, 'sk_update.ps1');
@@ -426,6 +429,49 @@ if (!gotTheLock) {
         return { success: true, path: targetDir };
       } catch (e) {
         console.error('Fehler beim Hinzufügen der Software:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
+    // Neue Software hinzufügen (Pfad wird durch Drag & Drop direkt übergeben)
+    ipcMain.handle('add-software-from-path', async (event, targetDir) => {
+      // Linter-Fix: Nutze das event Objekt für nützliches Logging
+      console.log(`Ordner-Drop registriert von WebContents ID: ${event.sender.id}`);
+
+      const config = getConfig();
+      const resolvedRoot = path.normalize(
+        path.isAbsolute(config.targetPath) ? config.targetPath : path.resolve(getAppFolder(), config.targetPath)
+      );
+      const ensureTrailingSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+
+      if (!ensureTrailingSlash(path.normalize(targetDir)).startsWith(ensureTrailingSlash(resolvedRoot))) {
+        return {
+          success: false,
+          error: 'Sicherheitsverletzung: Ordner liegt außerhalb des konfigurierten Software-Verzeichnisses.',
+        };
+      }
+
+      const metaDir = path.join(targetDir, '_metadata');
+      const metaFile = path.join(metaDir, 'meta.json');
+
+      try {
+        if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+        if (!fs.existsSync(metaFile)) {
+          const template = {
+            name: path.basename(targetDir),
+            category: '',
+            hiddenCategory: '',
+            tags: [],
+            formats: [],
+            os: ['Windows 10', 'Windows 11'],
+            description: ['Hier eine kurze Beschreibung einfügen...'],
+            links: {},
+          };
+          fs.writeFileSync(metaFile, JSON.stringify(template, null, 2), 'utf-8');
+        }
+        return { success: true, path: targetDir };
+      } catch (e) {
+        console.error('Fehler beim Hinzufügen der Software via Drop:', e);
         return { success: false, error: e.message };
       }
     });

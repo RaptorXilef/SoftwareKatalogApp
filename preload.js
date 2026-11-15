@@ -20,5 +20,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Software hinzufügen & bearbeiten
   addSoftware: () => ipcRenderer.invoke('add-software'),
+  addSoftwareFromPath: (path) => ipcRenderer.invoke('add-software-from-path', path),
   saveMetaJson: (targetPath, data) => ipcRenderer.invoke('save-meta-json', targetPath, data),
 });

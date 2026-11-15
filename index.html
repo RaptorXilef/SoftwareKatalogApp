@@ -98,9 +98,21 @@
     .scan-status { background: var(--bg); border-radius: 8px; border: 1px solid var(--border); padding: 12px 20px; margin: 0; }
     .spinner { border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Drag & Drop Overlay */
+    #dropOverlay {
+      position: fixed; inset: 0; background: rgba(30, 30, 46, 0.9); z-index: 9999;
+      display: none; justify-content: center; align-items: center;
+      border: 4px dashed var(--accent); margin: 10px; border-radius: 12px;
+    }
+    #dropOverlay h2 { color: var(--accent); font-size: 32px; pointer-events: none; }
   </style>
 </head>
 <body>
+  <div id="dropOverlay">
+    <h2>Ordner hier ablegen zum Hinzufügen</h2>
+  </div>
+
   <div class="header">
     <h1>Software Katalog <span class="subtitle">by © Felix Maywald <span id="appVersion"></span></span></h1>
     <button type="button" class="icon-btn" onclick="_openSettings()" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
@@ -182,7 +194,39 @@
     let currentLightboxMedia = [];
     let currentLightboxIndex = 0;
 
-    // Hilfsfunktion gegen XSS (Cross-Site Scripting) in manipulieren meta.json Dateien
+    // Drag & Drop Event Listener
+    document.body.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropOverlay').style.display = 'flex';
+    });
+
+    document.getElementById('dropOverlay').addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropOverlay').style.display = 'none';
+    });
+
+    document.body.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById('dropOverlay').style.display = 'none';
+      if (!window.electronAPI) return;
+
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        const filePath = files[0].path;
+        const res = await window.electronAPI.addSoftwareFromPath(filePath);
+        if (res.success) {
+          await _startScan('quick');
+          alert(`Der Ordner wurde erfolgreich hinzugefügt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".`);
+        } else if (res.error) {
+          alert(`Fehler beim Hinzufügen:\n${res.error}`);
+        }
+      }
+    });
+
+    // Hilfsfunktion gegen XSS (Cross-Site Scripting) in manipulierten meta.json Dateien
     function escapeHTML(str) {
       if (typeof str !== 'string') return str;
       return str.replace(/[&<>'"]/g, tag => ({
@@ -567,14 +611,14 @@
             if (isVid) {
               // #t=1 springt bei der Vorschau auf Sekunde 1 (überspringt schwarze Anfangsbilder)
               return `
-                <div style="position:relative; display:inline-block; cursor:pointer;" onclick="_openLightbox('${item.id}',${idx})" title="Video abspielen">
+                <div style="position:relative; display:inline-block; cursor:pointer;" onclick="_openLightbox('${item.id}', ${idx})" title="Video abspielen">
                   <video src="${fileUrl}#t=1" class="img-zoomable" style="height: 120px; min-width: 150px; max-width: 250px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;" muted preload="metadata"></video>
                   <div style="position:absolute; inset:0; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.3); border-radius:8px; pointer-events:none;">
                     <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
                   </div>
                 </div>`;
             } else {
-              return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${item.id}',${idx})" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+              return `<img src="${fileUrl}" class="img-zoomable" onclick="_openLightbox('${item.id}', ${idx})" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
             }
           }).join('') +
         `</div>`;
@@ -662,7 +706,7 @@
         ? '<p style="color: gray; font-size: 0.9em;">Bisher wurden keine versteckten Kategorien gefunden.</p>'
         : availableHiddenCats.map(cat => {
             const isChecked = s.visibleHiddenCats?.includes(cat) ? 'checked' : '';
-            return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${escapeHTML(cat)}" ${isChecked}>${escapeHTML(cat)}</label>`;
+            return `<label class="checkbox-lbl"><input type="checkbox" name="hiddenCatCheck" value="${escapeHTML(cat)}" ${isChecked}> ${escapeHTML(cat)}</label>`;
           }).join('');
 
       document.getElementById('modalContent').innerHTML = `
@@ -773,7 +817,7 @@
         if (res.updateAssetUrl) {
           container.innerHTML = `
             <button type="button" class="action-btn" style="margin-top: 0; background: #a6e3a1; color: var(--bg);"
-                    onclick="_installUpdate('${res.updateAssetUrl}',${res.isPortable})">
+                    onclick="_installUpdate('${res.updateAssetUrl}', ${res.isPortable})">
               Auf v${res.latestVersion} aktualisieren (Neustart)
             </button>`;
         } else {
@@ -796,7 +840,7 @@
       try {
         await window.electronAPI.installUpdate(assetUrl, isPortable);
       } catch (err) {
-        alert("Fehler beim Vorbereiten des Updates: " + err.message);
+        alert(`Fehler beim Vorbereiten des Updates: ${err.message}`);
         container.innerHTML = `<span style="color: red;">Fehler!</span>`;
       }
     }
@@ -862,7 +906,7 @@
         <div class="settings-group" style="border: none; padding: 0; margin: 0;">
           <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${escapeHTML(item.name)}"></div>
           <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}"></div>
-          <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', ' дослід))}"></div>
+          <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}"></div>
           <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}"></div>
           <div class="settings-row"><label style="width:150px;">OS (Komma):</label><input type="text" id="editOS" value="${escapeHTML((item.os || []).join(', '))}"></div>
           <div class="settings-row"><label style="width:150px;">Versteckt-Kat.:</label><input type="text" id="editHidden" value="${escapeHTML(item.hiddenCategory || '')}" placeholder="Leer lassen für Standard"></div>
