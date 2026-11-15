@@ -41,9 +41,10 @@ function getConfig() {
     autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download
   };
 
-  // Lokaler State (pro PC, z.B. wann zuletzt nach Updates gesucht wurde)
+  // Lokaler State (pro PC, z.B. Favoriten und wann zuletzt nach Updates gesucht wurde)
   const state = {
     lastUpdateCheck: 0,
+    favorites: [],
   };
 
   if (fs.existsSync(configPath)) {
@@ -71,6 +72,7 @@ function getConfig() {
   // Für das Frontend führen wir beide Objekte transparent zusammen
   return {
     appFolder,
+    statePath, // Wird dem Frontend übergeben, damit der Nutzer die Datei im Explorer öffnen kann
     ...config,
     ...state,
     absJsonPath: path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(appFolder, config.jsonPath),
@@ -88,13 +90,13 @@ function saveConfig(newSettings) {
   Object.assign(currentFullConfig, newSettings);
 
   // Saubere Trennung: Welche Eigenschaft gehört wohin?
-  const stateKeys = ['lastUpdateCheck'];
+  const stateKeys = ['lastUpdateCheck', 'favorites'];
 
   const newState = {};
   const newConfig = {};
 
   for (const key in currentFullConfig) {
-    if (['appFolder', 'absJsonPath', 'absScriptPath'].includes(key)) continue; // Ignorieren
+    if (['appFolder', 'statePath', 'absJsonPath', 'absScriptPath'].includes(key)) continue; // Ignorieren
 
     if (stateKeys.includes(key)) {
       newState[key] = currentFullConfig[key];
@@ -323,7 +325,6 @@ if (!gotTheLock) {
 
     // Führt das Auto-Update via PowerShell aus
     ipcMain.handle('install-update', async (event, assetUrl, isPortable) => {
-      // Linter-Fix: Nutze das event Objekt für nützliches Logging
       console.log(`Update-Installation angefordert von WebContents ID: ${event.sender.id}`);
 
       return new Promise((resolve) => {
@@ -357,9 +358,9 @@ if (!gotTheLock) {
             $source = "${tempDir}\\sk_update_extract"
             $dest = "${appPath}"
             Get-ChildItem -Path $source -Recurse | Where-Object {
-                $_.FullName -notmatch '\\\\config\\.json$' -and
-                $_.FullName -notmatch '\\\\catalog\\.json$' -and
-                $_.FullName -notmatch '\\\\_metadata\\\\'
+              $_.FullName -notmatch '\\\\config\\.json$' -and
+              $_.FullName -notmatch '\\\\catalog\\.json$' -and
+              $_.FullName -notmatch '\\\\_metadata\\\\'
             } | Copy-Item -Destination { $_.FullName.Replace($source, $dest) } -Force
 
             Start-Process "$dest\\SoftwareKatalog.exe"
@@ -464,7 +465,6 @@ if (!gotTheLock) {
 
     // Neue Software hinzufügen (Pfad wird durch Drag & Drop direkt übergeben)
     ipcMain.handle('add-software-from-path', async (event, targetDir) => {
-      // Linter-Fix: Nutze das event Objekt für nützliches Logging
       console.log(`Ordner-Drop registriert von WebContents ID: ${event.sender.id}`);
 
       const config = getConfig();
@@ -501,6 +501,38 @@ if (!gotTheLock) {
         return { success: true, path: targetDir };
       } catch (e) {
         console.error('Fehler beim Hinzufügen der Software via Drop:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
+    // Medien (Bilder, Videos) via Drag & Drop ins _metadata kopieren
+    ipcMain.handle('add-media', async (event, targetPath, filePaths) => {
+      console.log(`Media-Drop registriert von WebContents ID: ${event.sender.id}`);
+
+      try {
+        const config = getConfig();
+        const resolvedRoot = path.normalize(
+          path.isAbsolute(config.targetPath) ? config.targetPath : path.resolve(getAppFolder(), config.targetPath)
+        );
+        const resolvedTarget = path.normalize(targetPath);
+        const ensureTrailingSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+
+        if (!ensureTrailingSlash(resolvedTarget).startsWith(ensureTrailingSlash(resolvedRoot))) {
+          throw new Error('Sicherheitsverletzung: Zielpfad liegt außerhalb des zulässigen Software-Verzeichnisses.');
+        }
+
+        const metaDir = path.join(resolvedTarget, '_metadata');
+        if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+
+        for (const file of filePaths) {
+          const fileName = path.basename(file);
+          // Einfaches Kopieren (Bilder und Videos behalten ihren Dateinamen)
+          await fs.promises.copyFile(file, path.join(metaDir, fileName));
+        }
+
+        return { success: true };
+      } catch (e) {
+        console.error('Fehler beim Hinzufügen von Medien:', e);
         return { success: false, error: e.message };
       }
     });

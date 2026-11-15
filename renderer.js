@@ -16,14 +16,6 @@ let scanInterval = null;
 let currentLightboxMedia = [];
 let currentLightboxIndex = 0;
 
-// Init Local Favorites
-try {
-  const storedFavs = localStorage.getItem('sk_favorites');
-  if (storedFavs) localFavorites = JSON.parse(storedFavs);
-} catch (e) {
-  localFavorites = [];
-}
-
 // Security: XSS Helper
 function escapeHTML(str) {
   if (typeof str !== 'string') return str;
@@ -67,10 +59,31 @@ const el = {
 document.body.addEventListener('dragover', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  el.dropOverlay.style.display = 'flex';
+
+  // Unterscheide: Geht der Drop ans Media-Feld (im Modal) oder ins Fenster (Neues Programm)?
+  const dropzone = e.target.closest('.media-dropzone');
+  if (dropzone) {
+    dropzone.classList.add('dragover');
+    el.dropOverlay.style.display = 'none'; // Verstecke das große Overlay
+  } else {
+    // Nur anzeigen, wenn das Modal geschlossen ist
+    if (el.modalOverlay.style.display !== 'flex') {
+      el.dropOverlay.style.display = 'flex';
+    }
+  }
 });
 
-el.dropOverlay.addEventListener('dragleave', (e) => {
+document.body.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const dropzone = e.target.closest('.media-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('dragover');
+  }
+});
+
+document.getElementById('dropOverlay').addEventListener('dragleave', (e) => {
   e.preventDefault();
   e.stopPropagation();
   el.dropOverlay.style.display = 'none';
@@ -82,8 +95,31 @@ document.body.addEventListener('drop', async (e) => {
   el.dropOverlay.style.display = 'none';
   if (!window.electronAPI) return;
 
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length === 0) return;
+
+  // 1. Fall: Drop ins Media-Feld des Edit-Modals (Bilder, Icons, Videos)
+  const dropzone = e.target.closest('.media-dropzone');
+  if (dropzone) {
+    dropzone.classList.remove('dragover');
+    const filePaths = files.map((f) => f.path);
+    const targetPath = dropzone.dataset.path;
+    const softwareId = dropzone.dataset.id;
+
+    const res = await window.electronAPI.addMedia(targetPath, filePaths);
+    if (res.success) {
+      // Flottes Update anstoßen, um das kopierte Bild sofort einzulesen
+      await startScan('update');
+      editSoftware(softwareId); // Modal mit neuen Bildern neu laden
+    } else {
+      alert(`Fehler beim Hinzufügen der Medien:\n${res.error}`);
+    }
+    return;
+  }
+
+  // 2. Fall: Globaler Drop (Neues Programm-Verzeichnis hinzufügen)
+  // Greift nur, wenn kein Modal offen ist
+  if (el.modalOverlay.style.display !== 'flex') {
     const res = await window.electronAPI.addSoftwareFromPath(files[0].path);
     if (res.success) {
       await startScan('quick');
@@ -280,6 +316,10 @@ async function init() {
     if (window.electronAPI) {
       catalog = await window.electronAPI.loadCatalog();
       appSettings = await window.electronAPI.getSettings();
+      // Synchronisiere Favoriten sauber aus der PC-lokalen state.json ins Array
+      if (!appSettings.favorites) appSettings.favorites = [];
+      localFavorites = appSettings.favorites;
+
       const info = await window.electronAPI.getAppInfo();
       el.appVersion.textContent = `(v${escapeHTML(info.version)})`;
     } else {
@@ -420,11 +460,16 @@ function fuzzyMatch(searchWord, fullText) {
   return false;
 }
 
-function toggleFav(id) {
+async function toggleFav(id) {
   const idx = localFavorites.indexOf(id);
   if (idx > -1) localFavorites.splice(idx, 1);
   else localFavorites.push(id);
-  localStorage.setItem('sk_favorites', JSON.stringify(localFavorites));
+
+  // Speichere die Favoriten nun sauber in der lokalen state.json
+  if (window.electronAPI) {
+    await window.electronAPI.saveSettings({ favorites: localFavorites });
+  }
+
   renderGrid();
 }
 
@@ -750,13 +795,16 @@ async function openSettings() {
     </div>
 
     <div class="settings-group">
-      <h3>Über (About)</h3>
+      <h3>Über & Daten</h3>
       <p style="margin-top: 5px; margin-bottom: 15px;">
         <strong>Software Katalog</strong> v${escapeHTML(info.version)}<br>
         Entwickelt von <strong>Felix Maywald / RaptorXilef</strong>
       </p>
-      <div class="settings-row" style="align-items: center; justify-content: flex-start;">
+      <div class="settings-row" style="align-items: center; justify-content: flex-start; flex-wrap: wrap;">
         <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="open-url" data-url="https://github.com/RaptorXilef/SoftwareKatalogApp">GitHub Repository</button>
+        <!-- Explorer Shortcut für Favoriten (state.json) -->
+        <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="open-explorer" data-path="${escapeHTML(s.statePath)}">Lokal (Favoriten) im Explorer öffnen</button>
+
         <button type="button" id="btnManualUpdate" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="manual-update">Nach Updates suchen</button>
         <span id="updateContainer" style="margin-left: 10px;"></span>
       </div>
@@ -901,6 +949,11 @@ function editSoftware(id) {
       <div style="margin-top: 15px;">
         <label style="display:block; margin-bottom:5px;">Links (Format: Name | https://...):</label>
         <textarea id="editLinks" style="width:100%; height:80px;">${escapeHTML(linksStr)}</textarea>
+      </div>
+
+      <!-- Drag & Drop Feld für Bilder und Videos -->
+      <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}">
+        📷 Bilder, Icons oder Videos hierhin ziehen, um sie anzuhängen...
       </div>
     </div>
 
