@@ -26,8 +26,10 @@ function getAppFolder() {
 function getConfig() {
   const appFolder = getAppFolder();
   const configPath = path.join(appFolder, 'config.json');
+  // Neuer lokaler State, wird NICHT auf's NAS synchronisiert, verhindert unnötige Schreibzugriffe
+  const statePath = path.join(app.getPath('userData'), 'state.json');
 
-  // Erweiterte Standard-Werte
+  // Kern-Einstellungen (werden auf dem NAS für alle geteilt)
   const config = {
     targetPath: '../software',
     jsonPath: 'catalog.json',
@@ -36,9 +38,12 @@ function getConfig() {
     nestedDepth: 1,
     visibleHiddenCats: [],
     updateInterval: 24, // Sucht alle 24 Stunden nach Updates
-    lastUpdateCheck: 0, // Zeitstempel der letzten Prüfung
-    autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download (mit Priorität)
-    favorites: [], // Favoriten-Speicher
+    autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download
+  };
+
+  // Lokaler State (pro PC, z.B. wann zuletzt nach Updates gesucht wurde)
+  const state = {
+    lastUpdateCheck: 0,
   };
 
   if (fs.existsSync(configPath)) {
@@ -55,9 +60,19 @@ function getConfig() {
     }
   }
 
+  if (fs.existsSync(statePath)) {
+    try {
+      Object.assign(state, JSON.parse(fs.readFileSync(statePath, 'utf-8')));
+    } catch (e) {
+      console.error('Fehler beim Lesen der state.json:', e);
+    }
+  }
+
+  // Für das Frontend führen wir beide Objekte transparent zusammen
   return {
     appFolder,
     ...config,
+    ...state,
     absJsonPath: path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(appFolder, config.jsonPath),
     absScriptPath: path.isAbsolute(config.scriptPath) ? config.scriptPath : path.resolve(appFolder, config.scriptPath),
   };
@@ -66,17 +81,31 @@ function getConfig() {
 function saveConfig(newSettings) {
   const appFolder = getAppFolder();
   const configPath = path.join(appFolder, 'config.json');
-  const currentConfig = getConfig();
+  const statePath = path.join(app.getPath('userData'), 'state.json');
+  const currentFullConfig = getConfig();
 
-  // Neue Einstellungen zusammenführen
-  Object.assign(currentConfig, newSettings);
+  // Alle neuen Einstellungen zusammenführen
+  Object.assign(currentFullConfig, newSettings);
 
-  // Hilfs-Attribute entfernen, bevor in JSON geschrieben wird
-  delete currentConfig.appFolder;
-  delete currentConfig.absJsonPath;
-  delete currentConfig.absScriptPath;
+  // Saubere Trennung: Welche Eigenschaft gehört wohin?
+  const stateKeys = ['lastUpdateCheck'];
 
-  fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2), 'utf-8');
+  const newState = {};
+  const newConfig = {};
+
+  for (const key in currentFullConfig) {
+    if (['appFolder', 'absJsonPath', 'absScriptPath'].includes(key)) continue; // Ignorieren
+
+    if (stateKeys.includes(key)) {
+      newState[key] = currentFullConfig[key];
+    } else {
+      newConfig[key] = currentFullConfig[key];
+    }
+  }
+
+  // Schreiben in die jeweiligen Dateien
+  fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf-8');
+  fs.writeFileSync(statePath, JSON.stringify(newState, null, 2), 'utf-8');
 }
 
 let mainWindow = null;
