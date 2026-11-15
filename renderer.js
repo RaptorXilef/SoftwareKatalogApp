@@ -601,15 +601,17 @@ function renderGrid() {
   if (filtered.length === 0) {
     el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
-    // Zeitstempel für "NEU"-Badge (alles was in den letzten 14 Tagen hinzugefügt/bearbeitet wurde)
-    const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+    // Hole konfigurierte Anzahl an Tagen (Standard: 14)
+    const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
+    const TIME_WINDOW = badgeDays * 24 * 60 * 60 * 1000;
     const now = Date.now();
 
     el.grid.innerHTML = filtered
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
-        const isNew = itemTimestamp > 0 && now - itemTimestamp < TWO_WEEKS;
+        // Badge anzeigen, wenn Option > 0 Tage und das Programm "jung" genug ist
+        const isNew = itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW;
 
         // FIX: onerror entfernt für CSP Konformität. Fehlende Bilder werden über global error listener ausgeblendet
         return `
@@ -880,6 +882,15 @@ async function openSettings() {
         <button type="button" class="action-btn" style="margin-top: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="browse-file" data-type="file" data-ext="js" data-target="cfgScript">Wählen</button>
       </div>
     </div>
+
+    <div class="settings-group">
+      <h3>Darstellung</h3>
+      <div class="settings-row">
+        <label style="width: 250px;">"NEU" Badge anzeigen für (Tage):</label>
+        <input type="number" id="cfgNewBadgeDays" value="${s.newBadgeDays !== undefined ? s.newBadgeDays : 14}" min="0" style="width: 80px; flex: none;">
+      </div>
+    </div>
+
     <div class="settings-group">
       <h3>Scanner-Tiefe</h3>
       <label class="checkbox-lbl">
@@ -891,6 +902,7 @@ async function openSettings() {
         <input type="number" id="cfgNestedDepth" value="${s.nestedDepth || 1}" min="1" max="5" style="width: 80px; flex: none;">
       </div>
     </div>
+
     <div class="settings-group">
       <h3>Auto-Download & Installation</h3>
       <p style="font-size: 0.9em; margin-top: 0;">Wenn kein <code>_last</code>-Ordner existiert, sucht der Scanner im Hauptordner des Programms nach diesen Dateitypen.</p>
@@ -1017,6 +1029,7 @@ async function saveSettings() {
       .map((s) => s.trim())
       .filter(Boolean)
       .map((s) => (s.startsWith('.') ? s : `.${s}`)), // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
+    newBadgeDays: parseInt(document.getElementById('cfgNewBadgeDays').value, 10) || 0,
   };
 
   // Überprüfen, ob sich Pfade oder Ext-Listen im Vergleich zum alten State geändert haben

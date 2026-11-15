@@ -39,6 +39,7 @@ function getConfig() {
     visibleHiddenCats: [],
     updateInterval: 24, // Sucht alle 24 Stunden nach Updates
     autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download
+    newBadgeDays: 14, // Dauer des NEU-Badges in Tagen
   };
 
   // Lokaler State (pro PC, z.B. Favoriten und wann zuletzt nach Updates gesucht wurde)
