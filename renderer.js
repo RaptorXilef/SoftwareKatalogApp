@@ -300,6 +300,16 @@ document.body.addEventListener('click', async (e) => {
     return;
   }
 
+  // FIX: Bilder (Lightbox) müssen HIER abgefangen werden, VOR dem "Klick auf die Karte"!
+  if (e.target.classList.contains('img-zoomable') || e.target.closest('.vid-container')) {
+    e.stopPropagation(); // Verhindert, dass das Klick-Event andere Aktionen auslöst
+    const zoomTarget = e.target.classList.contains('img-zoomable') ? e.target : e.target.closest('.vid-container');
+    if (zoomTarget.dataset.id) {
+      openLightbox(zoomTarget.dataset.id, parseInt(zoomTarget.dataset.idx, 10));
+    }
+    return;
+  }
+
   // Grid Card click
   const card = e.target.closest('.card');
   if (card && !e.target.classList.contains('fav-btn')) {
@@ -320,7 +330,6 @@ document.body.addEventListener('click', async (e) => {
     renderGrid();
   }
 
-  // FIX: Nutzt .closest('[data-action]'), damit auch Klicks auf Kind-Elemente (Text/Icons in Buttons) perfekt greifen!
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
 
@@ -405,13 +414,6 @@ document.body.addEventListener('click', async (e) => {
     }
     actionEl.textContent = originalText;
     actionEl.disabled = false;
-  }
-
-  if (e.target.classList.contains('img-zoomable') || e.target.closest('.vid-container')) {
-    const zoomTarget = e.target.classList.contains('img-zoomable') ? e.target : e.target.closest('.vid-container');
-    if (zoomTarget.dataset.id) {
-      openLightbox(zoomTarget.dataset.id, parseInt(zoomTarget.dataset.idx, 10));
-    }
   }
 });
 
@@ -725,8 +727,7 @@ function renderGrid() {
   });
 
   if (filtered.length === 0) {
-    el.grid.innerHTML =
-      '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>';
+    el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
     // Hole konfigurierte Anzahl an Tagen (Standard: 14)
     const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
@@ -738,7 +739,6 @@ function renderGrid() {
         const isFav = localFavorites.includes(item.id);
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
 
-        // FIX: Nutzt ausschließlich den sicheren, einheitlichen Helfer!
         const { status, nasVersion, localVersion } = getItemStatus(item);
 
         let badgesHtml = '';
@@ -757,8 +757,7 @@ function renderGrid() {
         }
 
         // Dynamisches NEU Badge
-        const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
-        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < badgeDays * 24 * 60 * 60 * 1000) {
+        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW) {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
