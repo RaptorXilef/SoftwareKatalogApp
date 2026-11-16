@@ -307,6 +307,67 @@ if (!gotTheLock) {
       }
     });
 
+    // Liest die Windows-Dateiversionen aller lokal gefundenen Programme via PowerShell aus
+    ipcMain.handle('scan-local-versions', async () => {
+      try {
+        const { absJsonPath, appFolder, installedVersions } = getConfig();
+        if (!fs.existsSync(absJsonPath)) return { success: false, error: 'Katalog nicht gefunden.' };
+
+        const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
+        const updatedVersions = { ...(installedVersions || {}) };
+        const targets = [];
+
+        for (const item of data) {
+          const itemId = item.id || Buffer.from(item.path).toString('base64url');
+          if (item.installPaths && Array.isArray(item.installPaths)) {
+            for (const p of item.installPaths) {
+              if (fs.existsSync(p) && p.toLowerCase().endsWith('.exe')) {
+                targets.push({ id: itemId, path: p });
+                break;
+              }
+            }
+          }
+        }
+
+        if (targets.length === 0) return { success: true, count: 0 };
+
+        // Baut ein kompaktes PowerShell-Skript für alle lokalen EXEs in einem Rutsch (sehr schnell)
+        const psLines = targets.map((t) => {
+          const safePath = t.path.replace(/'/g, "''");
+          return `$v = (Get-Item -LiteralPath '${safePath}' -ErrorAction SilentlyContinue).VersionInfo; if ($v) { $ver = if ($v.FileVersion) { $v.FileVersion } else { $v.ProductVersion }; Write-Output "${t.id}|$ver" }`;
+        });
+
+        const output = await new Promise((resolve) => {
+          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psLines.join('; ')]);
+          let out = '';
+          child.stdout.on('data', (d) => {
+            out += d.toString();
+          });
+          child.on('exit', () => resolve(out));
+          child.on('error', () => resolve(''));
+        });
+
+        let updatedCount = 0;
+        for (const line of output.split(/\r?\n/)) {
+          const [id, rawVer] = line.split('|');
+          if (id && rawVer) {
+            // Bereinigt Strings wie "3.0.24.0 (64-bit)" oder Kommas "3, 0, 24, 0" zu "3.0.24.0"
+            const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+            if (cleaned) {
+              updatedVersions[id.trim()] = cleaned[1];
+              updatedCount++;
+            }
+          }
+        }
+
+        saveConfig({ installedVersions: updatedVersions });
+        return { success: true, count: updatedCount };
+      } catch (e) {
+        console.error('Fehler beim Auslesen der lokalen Versionen:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
     ipcMain.handle('download-files', async (_event, sourceFiles) => {
       // 1. Benutzer wählt Zielordner aus
       const { canceled, filePaths } = await dialog.showOpenDialog({

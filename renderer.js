@@ -258,6 +258,7 @@ document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnAddSoftware') addSoftwareFolder();
   if (e.target.id === 'btnScan') startScan('quick');
   if (e.target.id === 'btnUpdate') startScan('update');
+  if (e.target.id === 'btnLocalVersions') scanLocalVersionsUI();
   if (e.target.id === 'btnFullScan') startScan('full');
 });
 
@@ -571,6 +572,30 @@ async function startScan(mode) {
     });
     // Verstecke den Banner wieder
     el.scanStatus.style.display = 'none';
+  }
+}
+
+async function scanLocalVersionsUI() {
+  if (!window.electronAPI) return;
+  const btn = document.getElementById('btnLocalVersions');
+  const origText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Prüfe PC...';
+  }
+
+  try {
+    const res = await window.electronAPI.scanLocalVersions();
+    if (res.success) {
+      await init();
+    } else if (res.error) {
+      alert(`Fehler beim Auslesen der lokalen Versionen:\n${res.error}`);
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   }
 }
 
@@ -1354,6 +1379,9 @@ async function saveSoftware(id) {
   // Speichert meta.json UND aktualisiert die catalog.json im Main-Prozess
   const res = await window.electronAPI.saveMetaJson(item.path, data);
   if (res.success) {
+    // Liest eventuelle neue lokale Installationspfade sofort aus
+    await window.electronAPI.scanLocalVersions();
+
     // Katalog flink neu laden und die Tags für das Grid frisch generieren
     catalog = await window.electronAPI.loadCatalog();
     catalog.forEach((cItem) => {
