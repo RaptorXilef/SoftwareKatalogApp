@@ -40,6 +40,7 @@ function getConfig() {
     updateInterval: 24, // Sucht alle 24 Stunden nach Updates
     autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download
     newBadgeDays: 14, // Dauer des NEU-Badges in Tagen
+    versionCompareDepth: 3, // Vergleicht standardmäßig nur die ersten 3 Stellen (X.X.X)
   };
 
   // Lokaler State (pro PC, z.B. Favoriten, Update-Check und installierte Versionen)
@@ -310,7 +311,7 @@ if (!gotTheLock) {
     // Liest die Windows-Dateiversionen aller lokal gefundenen Programme via PowerShell aus
     ipcMain.handle('scan-local-versions', async () => {
       try {
-        const { absJsonPath, appFolder, installedVersions } = getConfig();
+        const { absJsonPath, installedVersions } = getConfig();
         if (!fs.existsSync(absJsonPath)) return { success: false, error: 'Katalog nicht gefunden.' };
 
         const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));

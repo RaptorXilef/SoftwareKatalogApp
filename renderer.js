@@ -49,12 +49,15 @@ function extractVersion(filename) {
   return match ? match[1] : null;
 }
 
-function compareVersions(v1, v2) {
+function compareVersions(v1, v2, maxDepth = 3) {
   if (!v1 || !v2) return 0;
   const p1 = v1.split('.').map(Number);
   const p2 = v2.split('.').map(Number);
-  // Vergleicht sicher 1.0.0.0 mit 1.0 (füllt kürzere Version dynamisch mit 0 auf)
-  for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+
+  // Bestimmt, wie viele Stellen verglichen werden sollen
+  const depth = maxDepth > 0 ? maxDepth : Math.max(p1.length, p2.length);
+
+  for (let i = 0; i < depth; i++) {
     const n1 = p1[i] || 0;
     const n2 = p2[i] || 0;
     if (n1 > n2) return 1;
@@ -73,7 +76,10 @@ function getItemStatus(item) {
   if (item.isInstalled) {
     status = 'installed';
     if (nasVersion && localVersion) {
-      const cmp = compareVersions(nasVersion, localVersion);
+      // Konfigurierte Vergleichstiefe auslesen
+      const depth = appSettings.versionCompareDepth !== undefined ? appSettings.versionCompareDepth : 3;
+      const cmp = compareVersions(nasVersion, localVersion, depth);
+
       if (cmp > 0) status = 'update';
       else if (cmp < 0) status = 'newer';
     }
@@ -731,11 +737,14 @@ function renderGrid() {
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
+
+        // FIX: Nutzt ausschließlich den sicheren, einheitlichen Helfer!
         const { status, nasVersion, localVersion } = getItemStatus(item);
 
         let badgesHtml = '';
         let cardStatusClass = '';
 
+        // Status Rendering
         if (status === 'update') {
           cardStatusClass = 'status-update';
           badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
@@ -748,7 +757,8 @@ function renderGrid() {
         }
 
         // Dynamisches NEU Badge
-        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW) {
+        const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
+        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < badgeDays * 24 * 60 * 60 * 1000) {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
@@ -1040,6 +1050,10 @@ async function openSettings() {
         <label style="width: 250px;">"NEU" Badge anzeigen für (Tage):</label>
         <input type="number" id="cfgNewBadgeDays" value="${s.newBadgeDays !== undefined ? s.newBadgeDays : 14}" min="0" style="width: 80px; flex: none;">
       </div>
+      <div class="settings-row">
+        <label style="width: 250px;">Versionsvergleich (Stellen):</label>
+        <input type="number" id="cfgVersionCompareDepth" value="${s.versionCompareDepth !== undefined ? s.versionCompareDepth : 3}" min="1" max="10" style="width: 80px; flex: none;" title="Wie viele Stellen sollen verglichen werden? (z.B. 3 für X.X.X)">
+      </div>
     </div>
 
     <div class="settings-group">
@@ -1225,6 +1239,7 @@ async function saveSettings() {
       .filter(Boolean)
       .map((s) => (s.startsWith('.') ? s : `.${s}`)), // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
     newBadgeDays: parseInt(document.getElementById('cfgNewBadgeDays').value, 10) || 0,
+    versionCompareDepth: parseInt(document.getElementById('cfgVersionCompareDepth').value, 10) || 3,
   };
 
   // Überprüfen, ob sich Pfade oder Ext-Listen im Vergleich zum alten State geändert haben
