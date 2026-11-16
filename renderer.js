@@ -35,6 +35,12 @@ function escapeHTML(str) {
   );
 }
 
+// Browser-sicheres Extrahieren des Dateinamens (ersetzt Node path.basename)
+function getBaseName(filePath) {
+  if (!filePath) return '';
+  return filePath.split('\\').pop().split('/').pop();
+}
+
 // SemVer / Regex Logic for "Update" Badges
 function extractVersion(filename) {
   // FIX: Sucht ausschließlich nach dem ersten Zahl-Punkt-Zahl Block (z.B. 1.0 oder 2.8.0.0)
@@ -55,6 +61,25 @@ function compareVersions(v1, v2) {
     if (n1 < n2) return -1;
   }
   return 0;
+}
+
+// Ermittelt Status, NAS-Version und installierte Version eines Programms
+function getItemStatus(item) {
+  const nasVersion =
+    item.lastFiles && item.lastFiles.length > 0 ? extractVersion(getBaseName(item.lastFiles[0])) : null;
+  const localVersion = item.installedVersion || null;
+
+  let status = 'none'; // 'none' | 'installed' | 'update' | 'newer'
+  if (item.isInstalled) {
+    status = 'installed';
+    if (nasVersion && localVersion) {
+      const cmp = compareVersions(nasVersion, localVersion);
+      if (cmp > 0) status = 'update';
+      else if (cmp < 0) status = 'newer';
+    }
+  }
+
+  return { status, nasVersion, localVersion };
 }
 
 // Globaler Error-Listener zum Ausblenden fehlender Bilder
@@ -101,11 +126,9 @@ document.body.addEventListener('dragover', (e) => {
   if (dropzone) {
     dropzone.classList.add('dragover');
     el.dropOverlay.style.display = 'none'; // Verstecke das große Overlay
-  } else {
     // Nur anzeigen, wenn das Modal geschlossen ist
-    if (el.modalOverlay.style.display !== 'flex') {
-      el.dropOverlay.style.display = 'flex';
-    }
+  } else if (el.modalOverlay.style.display !== 'flex') {
+    el.dropOverlay.style.display = 'flex';
   }
 });
 
@@ -169,7 +192,7 @@ document.body.addEventListener('drop', async (e) => {
     if (res.success) {
       await startScan('quick');
       alert(
-        `Der Ordner wurde erfolgreich hinzugefügt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".`
+        'Der Ordner wurde erfolgreich hinzugefügt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".'
       );
     } else if (res.error) {
       alert(`Fehler beim Hinzufügen:\n${res.error}`);
@@ -338,7 +361,7 @@ document.body.addEventListener('click', async (e) => {
     const filePath = actionEl.dataset.path;
 
     // Markiere Programm als installiert & merke dir die Setup-Versionsnummer
-    const version = extractVersion(path.basename(filePath));
+    const version = extractVersion(getBaseName(filePath));
     if (version && itemId) {
       await window.electronAPI.markAsInstalled(itemId, version);
       const catItem = catalog.find((i) => i.id === itemId);
@@ -643,6 +666,8 @@ function renderGrid() {
     return matchesSearch && matchesTag;
   });
 
+  const sortMode = el.sortSelect.value;
+
   // Erweiterte Sortierung anwenden
   filtered.sort((a, b) => {
     // Favoriten immer ganz oben
@@ -651,16 +676,26 @@ function renderGrid() {
     if (aFav && !bFav) return -1;
     if (!aFav && bFav) return 1;
 
-    const sortMode = el.sortSelect.value;
-    if (sortMode === 'newest') return (b.addedAt || 0) - (a.addedAt || 0);
-    if (sortMode === 'updated') return (b.updatedAt || 0) - (a.updatedAt || 0);
+    if (sortMode === 'update') {
+      const aHasUpdate = getItemStatus(a).status === 'update';
+      const bHasUpdate = getItemStatus(b).status === 'update';
+      if (aHasUpdate && !bHasUpdate) return -1;
+      if (!aHasUpdate && bHasUpdate) return 1;
+    } else if (sortMode === 'installed') {
+      if (a.isInstalled && !b.isInstalled) return -1;
+      if (!a.isInstalled && b.isInstalled) return 1;
+    } else if (sortMode === 'newest') {
+      return (b.addedAt || 0) - (a.addedAt || 0);
+    } else if (sortMode === 'updated') {
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    }
 
-    // Standard: A-Z
     return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' });
   });
 
   if (filtered.length === 0) {
-    el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
+    el.grid.innerHTML =
+      '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>';
   } else {
     // Hole konfigurierte Anzahl an Tagen (Standard: 14)
     const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
@@ -671,25 +706,20 @@ function renderGrid() {
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
         const itemTimestamp = item.updatedAt || item.addedAt || 0;
+        const { status, nasVersion, localVersion } = getItemStatus(item);
 
         let badgesHtml = '';
+        let cardStatusClass = '';
 
-        // Update- oder Install-Badge Rendering
-        if (item.isInstalled) {
-          let hasUpdate = false;
-          // Wenn wir eine Setup-Datei haben und eine lokale Version registriert ist, vergleichen
-          if (item.lastFiles && item.lastFiles.length > 0 && item.installedVersion) {
-            const latestFile = path.basename(item.lastFiles[0]);
-            const latestNasVersion = extractVersion(latestFile);
-            if (latestNasVersion && compareVersions(latestNasVersion, item.installedVersion) > 0) {
-              hasUpdate = true;
-            }
-          }
-          if (hasUpdate)
-            badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
-          else
-            badgesHtml +=
-              '<div class="badge badge-installed" title="Programm ist auf diesem PC installiert">Installiert ✓</div>';
+        if (status === 'update') {
+          cardStatusClass = 'status-update';
+          badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
+        } else if (status === 'newer') {
+          cardStatusClass = 'status-newer';
+          badgesHtml += '<div class="badge badge-newer" title="Installierte Version ist neuer als auf dem NAS">✓</div>';
+        } else if (status === 'installed') {
+          cardStatusClass = 'status-installed';
+          badgesHtml += '<div class="badge badge-installed" title="Programm ist auf diesem PC installiert">✓</div>';
         }
 
         // Dynamisches NEU Badge
@@ -697,13 +727,20 @@ function renderGrid() {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
+        // Versionsanzeige für die Karte
+        const versionTags = [];
+        if (localVersion) versionTags.push(`<span>PC: v${escapeHTML(localVersion)}</span>`);
+        if (nasVersion) versionTags.push(`<span>NAS: v${escapeHTML(nasVersion)}</span>`);
+        const versionsHtml = versionTags.length > 0 ? `<div class="card-versions">${versionTags.join('')}</div>` : '';
+
         return `
-      <div class="card" data-id="${item.id}">
+      <div class="card ${cardStatusClass}" data-id="${item.id}">
         <div class="badges-container">${badgesHtml}</div>
         <button class="fav-btn ${isFav ? 'active' : ''}" data-id="${item.id}" title="Favorit">★</button>
         ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon">` : ''}
         <h3>${escapeHTML(item.name)}</h3>
         <small>${escapeHTML(item.tags.join(', '))}</small>
+        ${versionsHtml}
       </div>
     `;
       })
@@ -796,7 +833,7 @@ function openItemModal(id) {
   if (item.lastFiles && item.lastFiles.length > 0) {
     // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
     if (item.lastFiles.length === 1) {
-      const fileName = item.lastFiles[0].split('\\').pop().split('/').pop();
+      const fileName = getBaseName(item.lastFiles[0]);
       installHtml = `
         <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
                 data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">
@@ -810,7 +847,7 @@ function openItemModal(id) {
       // Versionsauswahl Dropdown, wenn es mehrere Installer/Dateien gibt!
       const optionsHtml = item.lastFiles
         .map((f, i) => {
-          const name = f.split('\\').pop().split('/').pop();
+          const name = getBaseName(f);
           return `<option value="${i}">${escapeHTML(name)}</option>`;
         })
         .join('');
@@ -826,21 +863,21 @@ function openItemModal(id) {
   let linksHtml = '';
   if (item.links && item.links.length > 0) {
     linksHtml =
-      `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">` +
+      '<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">' +
       item.links
         .map(
           (l) =>
             `<li><a href="#" style="color: var(--accent);" data-action="open-url" data-url="${escapeHTML(l.url)}">${escapeHTML(l.label)}</a></li>`
         )
         .join('') +
-      `</ul></div>`;
+      '</ul></div>';
   }
 
   // Generierung der Thumbnails (Bilder + Videos mit Play-Overlay)
   let mediaHtml = '';
   if (item.screenshots && item.screenshots.length > 0) {
     mediaHtml =
-      `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">` +
+      '<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">' +
       item.screenshots
         .map((s, idx) => {
           const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
@@ -855,12 +892,11 @@ function openItemModal(id) {
                 <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
               </div>
             </div>`;
-          } else {
-            return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
           }
+          return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
         })
         .join('') +
-      `</div>`;
+      '</div>';
   }
 
   // Wichtig für den Editor-Fallback (HTML darf nicht ent-escapt werden)
@@ -1080,7 +1116,8 @@ async function checkForUpdatesUI() {
   if (btn) btn.disabled = false;
 
   if (res.error) {
-    container.innerHTML = `<span style="color: var(--text); opacity: 0.7; font-size: 0.9em;">Update-Prüfung fehlgeschlagen.</span>`;
+    container.innerHTML =
+      '<span style="color: var(--text); opacity: 0.7; font-size: 0.9em;">Update-Prüfung fehlgeschlagen.</span>';
   } else if (res.updateAvailable) {
     // Prüfen, ob wir die App direkt aktualisieren können (Asset URL vorhanden)
     if (res.updateAssetUrl) {
@@ -1131,7 +1168,7 @@ async function installUpdate(assetUrl, isPortable) {
     isUpdating = false;
     alert(`Fehler beim Update: ${err.message}`);
     const container = document.getElementById('updateContainer');
-    if (container) container.innerHTML = `<span style="color: red;">Fehler!</span>`;
+    if (container) container.innerHTML = '<span style="color: red;">Fehler!</span>';
   }
 }
 
@@ -1192,7 +1229,7 @@ async function addSoftwareFolder() {
   if (res.success) {
     await startScan('quick');
     alert(
-      `Der Ordner wurde erfolgreich hinzugefügt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".`
+      'Der Ordner wurde erfolgreich hinzugefügt!\n\nSuche das Programm nun in der Liste und klicke auf "Bearbeiten".'
     );
   } else if (res.error) {
     alert(`Fehler beim Hinzufügen:\n${res.error}`);
@@ -1213,7 +1250,7 @@ function editSoftware(id) {
   const installPathsStr = (item.installPaths || []).join('\n');
 
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
+    <button type="button" class="close-btn" data-action="open-item-modal" data-id="${item.id}" title="Zurück">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">

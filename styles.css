@@ -254,7 +254,7 @@ select {
   color: var(--accent);
 }
 
-/* Grid */
+/* Grid & Cards */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -268,7 +268,13 @@ select {
   cursor: pointer;
   text-align: center;
   border: 1px solid var(--border);
-  transition: transform 0.2s;
+  transition:
+    transform 0.2s,
+    background-color 0.2s,
+    border-color 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 .card:hover {
   transform: translateY(-5px);
@@ -279,6 +285,53 @@ select {
   height: 64px;
   object-fit: contain;
   margin-bottom: 15px;
+}
+.card h3 {
+  margin: 0 0 8px 0;
+}
+
+/* Status-Farben für die Karten */
+.card.status-installed {
+  background-color: rgba(166, 227, 161, 0.08);
+  border-color: rgba(166, 227, 161, 0.35);
+}
+.card.status-installed:hover {
+  border-color: #a6e3a1;
+}
+
+.card.status-update {
+  background-color: rgba(250, 179, 135, 0.1);
+  border-color: rgba(250, 179, 135, 0.45);
+}
+.card.status-update:hover {
+  border-color: #fab387;
+}
+
+.card.status-newer {
+  background-color: rgba(137, 180, 250, 0.1);
+  border-color: rgba(137, 180, 250, 0.45);
+}
+.card.status-newer:hover {
+  border-color: #89b4fa;
+}
+
+/* Versionsanzeige auf der Karte */
+.card-versions {
+  margin-top: auto;
+  padding-top: 12px;
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.75;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.card-versions span {
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
 }
 
 /* Flexibles Badges System */
@@ -309,6 +362,10 @@ select {
 }
 .badge-update {
   background: #fab387;
+  color: #1e1e2e;
+}
+.badge-newer {
+  background: #89b4fa;
   color: #1e1e2e;
 }
 
