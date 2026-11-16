@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.3...v1.14.0) (2026-11-16)
+
+### 🚀 Features
+
+* **launcher:** Read local executable file versions via PowerShell ([96a2535](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/96a25351422b987ba475eadd23ff3bdc2d840765))
+* **ui:** Add status card coloring, install/update sorting, and version display ([9da7c0e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9da7c0ebd1d25bac26ec216f9a4afd3bbf77d375))
+
+### 🐛 Bug Fixes
+
+* **core/ui:** Resolve unused variable linter warning and add version comparison depth setting ([2fcadae](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2fcadaef12d7ab0a8c2ba9e2cc8063db7f21fb85))
+* **ui:** Restore version display on cards, fix lightbox triggers, and resolve linter errors ([b2e0e86](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/b2e0e86baad932621e9c1b70443b69f26750f7d2))
+
 ## [1.13.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.2...v1.13.3) (2026-11-15)
 
 ### 🐛 Bug Fixes
