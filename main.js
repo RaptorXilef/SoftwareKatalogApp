@@ -372,45 +372,72 @@ if (!gotTheLock) {
     // Auto-Detect Handler via PowerShell Registry Scan (unterstützt mehrere Namen)
     ipcMain.handle('auto-detect-path', async (_event, namesArray) => {
       try {
-        // PowerShell-Array aus den übergebenen Namen bauen (maskiert doppelte Anführungszeichen)
         const psNames = namesArray
           .filter(Boolean)
           .map((n) => `"${n.replace(/"/g, '""')}"`)
           .join(',');
         if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
 
+        // Wir schreiben das Skript sauber formatiert und encodieren es danach.
+        // Das ist 100% sicher gegen Zeilenumbrüche, Sonderzeichen und Quotes!
         const psScript = `
+          $ErrorActionPreference = 'SilentlyContinue'
           $names = @(${psNames})
-          $paths = @("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")
+          $paths = @(
+              'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKCU:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+          )
+
+          # Alle Einträge vorladen (massiver Performance-Boost)
+          $allItems = Get-ItemProperty -Path $paths | Where-Object { $_.DisplayName }
           $found = $null
+
           foreach ($name in $names) {
               if ([string]::IsNullOrWhiteSpace($name)) { continue }
-              $escapedName = [regex]::Escape($name)
-              foreach ($p in $paths) {
-                  # Tolerante Suche via -match (Case-Insensitive Substring Match)
-                  $items = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $escapedName }
-                  foreach ($item in $items) {
-                      if ($item.DisplayIcon -and $item.DisplayIcon -match '\\.exe') {
-                          $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"', ''
-                          if (Test-Path $icon) { $found = $icon; break }
-                      }
-                      if ($item.InstallLocation) {
-                          $loc = $item.InstallLocation -replace '^"', '' -replace '"$', ''
-                          if (Test-Path $loc) {
-                              $exe = Get-ChildItem -Path $loc -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-                              if ($exe) { $found = $exe.FullName; break }
-                          }
+              $search = [regex]::Escape($name.Trim())
+
+              # Zwei-Wege-Match: Entweder enthält die Registry unseren Namen, ODER unser Name enthält den Registry-Eintrag
+              $matchedItems = $allItems | Where-Object {
+                  ([string]$_.DisplayName -match $search) -or ($name -match [regex]::Escape([string]$_.DisplayName))
+              }
+
+              foreach ($item in $matchedItems) {
+                  # 1. Fallback: Icon
+                  if ($item.DisplayIcon -match '\\.exe') {
+                      $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"|"$', ''
+                      if (Test-Path -LiteralPath $icon) { $found = $icon; break }
+                  }
+                  # 2. Fallback: Installationspfad
+                  if ($item.InstallLocation) {
+                      $loc = $item.InstallLocation -replace '^"|"$', ''
+                      if (Test-Path -LiteralPath $loc) {
+                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Select-Object -First 1
+                          if ($exe) { $found = $exe.FullName; break }
                       }
                   }
-                  if ($found) { break }
+                  # 3. Fallback (Die Geheimwaffe): Uninstall-String parsen
+                  if ($item.UninstallString -match '(?i)([a-z]:\\\\[^"]+\\.exe)') {
+                      $uninst = $matches[1]
+                      if (Test-Path -LiteralPath $uninst) {
+                          $dir = Split-Path $uninst
+                          # Sucht nach einer Exe im gleichen Ordner, ignoriert aber Deinstallations-Programme
+                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove' } | Select-Object -First 1
+                          if ($exe) { $found = $exe.FullName; break } else { $found = $uninst; break }
+                      }
+                  }
               }
               if ($found) { break }
           }
-          Write-Output $found
-        `.replace(/\n/g, ' ');
+          if ($found) { Write-Output $found.Trim() }
+        `;
+
+        // Magie: Konvertiert das Skript in Base64 (Windows verlangt UTF-16LE für EncodedCommands)
+        const encodedScript = Buffer.from(psScript, 'utf16le').toString('base64');
 
         const output = await new Promise((resolve) => {
-          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript]);
+          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript]);
           let out = '';
           child.stdout.on('data', (d) => {
             out += d.toString();
