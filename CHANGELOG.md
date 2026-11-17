@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.16.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.15.0...v1.16.0) (2026-11-17)
+
+### 🚀 Features
+
+* **launcher/ui:** Split manual and auto-detected install paths with configurable origin badges ([dacc0fe](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/dacc0fe66c17368c6a41e7615917e8c337265090))
+* **launcher:** Global Auto-Detect, native EXE icon extraction, and missing path badges ([f254d4b](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f254d4be9824dd8e802e0ae94dab619f51e43d06))
+
+### 🐛 Bug Fixes
+
+* **launcher/ui:** Improve Auto-Detect accuracy via Start Menu shortcuts and fix Linter warning ([52e231d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/52e231de96c24d0b9d2cba90d586431b9036b743))
+* **launcher:** Enhance Start Menu shortcut detection to resolve parallel folder structures ([e810626](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/e8106265d5f3a14d04613e18e4d691b3a4f4b03f))
+* **launcher:** Implement smart Start Menu shortcut ranking to resolve ambiguous targets ([cfd3263](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/cfd32638d16b409a3eddec6b872162d0c038b2f8))
+* **launcher:** Improve Auto-Detect path precision with smart Start Menu shortcut ranking and direct EXE search ([f1d7bb6](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f1d7bb6d0892d03399e521fa9765316db80c9d77))
+* **launcher:** Resolve 8GadgetPack detection and add dedicated icon extraction button ([4bb3a68](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4bb3a68a56e64d6bb471c64d337d868c40cda2ce))
+
 ## [1.15.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.14.0...v1.15.0) (2026-11-17)
 
 ### 🚀 Features
