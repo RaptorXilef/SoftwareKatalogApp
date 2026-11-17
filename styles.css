@@ -368,6 +368,10 @@ select {
   background: #89b4fa;
   color: #1e1e2e;
 }
+.badge-nopath {
+  background: #f38ba8;
+  color: #1e1e2e;
+}
 
 .fav-btn {
   position: absolute;

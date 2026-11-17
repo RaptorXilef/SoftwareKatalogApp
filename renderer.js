@@ -264,6 +264,7 @@ document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnScan') startScan('quick');
   if (e.target.id === 'btnUpdate') startScan('update');
   if (e.target.id === 'btnLocalVersions') scanLocalVersionsUI();
+  if (e.target.id === 'btnAutoDetectAll') autoDetectAllPaths(); // NEU: Globaler Batch Run
   if (e.target.id === 'btnFullScan') startScan('full');
 });
 
@@ -357,6 +358,7 @@ document.body.addEventListener('click', async (e) => {
   if (action === 'auto-detect-path') {
     const inputId = actionEl.dataset.target;
     const origText = actionEl.textContent;
+    const itemId = actionEl.dataset.id;
 
     // Lies den Haupt-Namen und die optionalen Such-Namen in Echtzeit aus den Input-Feldern
     const mainName = document.getElementById('editName').value.trim();
@@ -376,6 +378,13 @@ document.body.addEventListener('click', async (e) => {
         if (!textarea.value.includes(res.path)) {
           textarea.value = textarea.value ? `${textarea.value}\n${res.path}` : res.path;
         }
+
+        // Extrahiert Icon vollautomatisch, wenn noch keins existiert
+        const item = catalog.find((i) => i.id === itemId);
+        if (item && !item.icon) {
+          await window.electronAPI.extractExeIcon(res.path, item.path);
+        }
+
         actionEl.textContent = '✓ Gefunden!';
         setTimeout(() => {
           actionEl.textContent = origText;
@@ -576,6 +585,8 @@ async function startScan(mode) {
     document.getElementById('btnScan'),
     document.getElementById('btnUpdate'),
     document.getElementById('btnFullScan'),
+    document.getElementById('btnAutoDetectAll'),
+    document.getElementById('btnLocalVersions'),
   ];
   btns.forEach((b) => {
     if (b) b.disabled = true;
@@ -645,6 +656,73 @@ async function scanLocalVersionsUI() {
       btn.textContent = origText;
     }
   }
+}
+
+// Globaler Auto-Detect Batch-Lauf
+async function autoDetectAllPaths() {
+  if (!window.electronAPI) return;
+
+  const itemsToProcess = catalog.filter((i) => !i.installPaths || i.installPaths.length === 0);
+  if (itemsToProcess.length === 0) return alert('Alle Programme haben bereits einen Installationspfad!');
+
+  if (
+    !confirm(
+      `Sollen ${itemsToProcess.length} Programme jetzt automatisch auf diesem PC gesucht werden?\n(Das kann einige Zeit dauern)`
+    )
+  )
+    return;
+
+  const btn = document.getElementById('btnAutoDetectAll');
+  const origText = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+
+  el.scanStatus.style.display = 'block';
+  el.scanTargetText.textContent = 'Auto-Detect läuft...';
+
+  let processed = 0;
+  let foundCount = 0;
+
+  for (const item of itemsToProcess) {
+    processed++;
+    el.scanPathText.textContent = `Prüfe: ${item.name}`;
+    currentPct = Math.round((processed / itemsToProcess.length) * 100);
+    updateProgressUI();
+
+    const namesToSearch = [item.name, ...(item.searchNames || [])];
+    const res = await window.electronAPI.autoDetectPath(namesToSearch);
+    if (res.success && res.path) {
+      if (!item.icon) {
+        await window.electronAPI.extractExeIcon(res.path, item.path);
+      }
+
+      const data = {
+        name: item.name,
+        searchNames: item.searchNames || [],
+        category: item.mainCategory || '',
+        hiddenCategory: item.hiddenCategory || '',
+        tags: item.subCategories || [],
+        formats: item.formats || [],
+        os: item.os || [],
+        description: item.description || '',
+        installPaths: [res.path],
+        links: item.links ? item.links.reduce((acc, l) => ({ ...acc, [l.label]: l.url }), {}) : {},
+      };
+
+      await window.electronAPI.saveMetaJson(item.path, data);
+      foundCount++;
+    }
+  }
+
+  el.scanPathText.textContent = 'Speichere neue Versionen...';
+  await window.electronAPI.scanLocalVersions();
+  await init();
+
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+  el.scanStatus.style.display = 'none';
+  alert(`Auto-Detect abgeschlossen! Pfade gefunden: ${foundCount} von ${itemsToProcess.length}`);
 }
 
 function renderTags() {
@@ -801,7 +879,12 @@ function renderGrid() {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
-        // Versionsanzeige für die Karte
+        // NEU: Warnung, wenn gar kein Pfad konfiguriert wurde
+        if (!item.installPaths || item.installPaths.length === 0) {
+          badgesHtml +=
+            '<div class="badge badge-nopath" title="Installationspfad fehlt. Klicke auf Bearbeiten, um ihn automatisch zu suchen.">Pfad fehlt ⚠️</div>';
+        }
+
         const versionTags = [];
         if (localVersion) versionTags.push(`<span>PC: v${escapeHTML(localVersion)}</span>`);
         if (nasVersion) versionTags.push(`<span>NAS: v${escapeHTML(nasVersion)}</span>`);
@@ -1330,7 +1413,7 @@ function editSoftware(id) {
   const installPathsStr = (item.installPaths || []).join('\n');
 
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
+    <button type="button" class="close-btn" data-action="close-modal" data-id="${item.id}" title="Zurück">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
@@ -1367,7 +1450,7 @@ function editSoftware(id) {
         <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
           <span>Lokale Installationspfade (Einer pro Zeile):</span>
           <div style="display: flex; gap: 10px;">
-            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-target="editInstallPaths">✨ Auto-Detect</button>
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-id="${item.id}" data-target="editInstallPaths">✨ Auto-Detect</button>
             <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
           </div>
         </label>

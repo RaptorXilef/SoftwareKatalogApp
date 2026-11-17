@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   markAsInstalled: (id, version) => ipcRenderer.invoke('mark-as-installed', id, version),
   scanLocalVersions: () => ipcRenderer.invoke('scan-local-versions'),
   autoDetectPath: (namesArray) => ipcRenderer.invoke('auto-detect-path', namesArray),
+  extractExeIcon: (exePath, targetPath) => ipcRenderer.invoke('extract-exe-icon', exePath, targetPath),
   addSoftware: () => ipcRenderer.invoke('add-software'),
   addSoftwareFromPath: (path) => ipcRenderer.invoke('add-software-from-path', path),
   addMedia: (targetPath, filePaths) => ipcRenderer.invoke('add-media', targetPath, filePaths),

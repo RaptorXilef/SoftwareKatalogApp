@@ -378,8 +378,6 @@ if (!gotTheLock) {
           .join(',');
         if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
 
-        // Wir schreiben das Skript sauber formatiert und encodieren es danach.
-        // Das ist 100% sicher gegen Zeilenumbrüche, Sonderzeichen und Quotes!
         const psScript = `
           $ErrorActionPreference = 'SilentlyContinue'
           $names = @(${psNames})
@@ -390,7 +388,6 @@ if (!gotTheLock) {
               'HKCU:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
           )
 
-          # Alle Einträge vorladen (massiver Performance-Boost)
           $allItems = Get-ItemProperty -Path $paths | Where-Object { $_.DisplayName }
           $found = $null
 
@@ -398,33 +395,41 @@ if (!gotTheLock) {
               if ([string]::IsNullOrWhiteSpace($name)) { continue }
               $search = [regex]::Escape($name.Trim())
 
-              # Zwei-Wege-Match: Entweder enthält die Registry unseren Namen, ODER unser Name enthält den Registry-Eintrag
               $matchedItems = $allItems | Where-Object {
                   ([string]$_.DisplayName -match $search) -or ($name -match [regex]::Escape([string]$_.DisplayName))
               }
 
               foreach ($item in $matchedItems) {
-                  # 1. Fallback: Icon
                   if ($item.DisplayIcon -match '\\.exe') {
                       $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $icon) { $found = $icon; break }
                   }
-                  # 2. Fallback: Installationspfad
                   if ($item.InstallLocation) {
                       $loc = $item.InstallLocation -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $loc) {
-                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Select-Object -First 1
+                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
                           if ($exe) { $found = $exe.FullName; break }
                       }
                   }
-                  # 3. Fallback (Die Geheimwaffe): Uninstall-String parsen
                   if ($item.UninstallString -match '(?i)([a-z]:\\\\[^"]+\\.exe)') {
                       $uninst = $matches[1]
                       if (Test-Path -LiteralPath $uninst) {
                           $dir = Split-Path $uninst
-                          # Sucht nach einer Exe im gleichen Ordner, ignoriert aber Deinstallations-Programme
-                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove' } | Select-Object -First 1
+                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
                           if ($exe) { $found = $exe.FullName; break } else { $found = $uninst; break }
+                      }
+                  }
+
+                  # 4. Fallback für MSIs ohne Keys (wie 8GadgetPack)
+                  if (-not $found) {
+                      $pfs = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Select-Object -Unique
+                      foreach ($pf in $pfs) {
+                          $dirs = Get-ChildItem -Path $pf -Filter "*$search*" -Directory
+                          foreach ($d in $dirs) {
+                              $exe = Get-ChildItem -LiteralPath $d.FullName -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
+                              if ($exe) { $found = $exe.FullName; break }
+                          }
+                          if ($found) { break }
                       }
                   }
               }
@@ -450,6 +455,33 @@ if (!gotTheLock) {
           return { success: true, path: output };
         }
         return { success: false, error: 'Kein Eintrag gefunden' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    // Extrahiert Icon aus einer nativen .exe und speichert es als icon.png
+    ipcMain.handle('extract-exe-icon', async (_event, exePath, targetSoftwareDir) => {
+      try {
+        const resolvedTarget = path.resolve(getAppFolder(), targetSoftwareDir);
+        const metaDir = path.join(resolvedTarget, '_metadata');
+        if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+
+        const icon = await app.getFileIcon(exePath, { size: 'normal' });
+        if (!icon.isEmpty()) {
+          const pngBuf = icon.toPNG();
+          const iconPath = path.join(metaDir, 'icon.png');
+
+          // Alte Icons löschen
+          const existing = await fs.promises.readdir(metaDir);
+          for (const f of existing) {
+            if (f.toLowerCase().startsWith('icon.')) await fs.promises.unlink(path.join(metaDir, f));
+          }
+
+          await fs.promises.writeFile(iconPath, pngBuf);
+          return { success: true };
+        }
+        return { success: false, error: 'Kein Icon in Datei gefunden.' };
       } catch (e) {
         return { success: false, error: e.message };
       }
@@ -572,7 +604,6 @@ if (!gotTheLock) {
       }
     });
 
-    // FIX 2: Bulletproof PowerShell Execution via native .cmd wrapper
     ipcMain.handle('install-update', async (event, localFilePath, isPortable) => {
       console.log(`Update-Skript gestartet von WebContents ID: ${event.sender.id}`);
 
