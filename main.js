@@ -446,6 +446,8 @@ if (!gotTheLock) {
         if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
 
         const psScript = `
+          # Zwingt PowerShell, Pfade mit Umlauten fehlerfrei an Node zu senden
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $ErrorActionPreference = 'SilentlyContinue'
 
           # Hilfsfunktion: Findet die Haupt-Exe per Startmenü-Verknüpfung oder Dateigröße
@@ -522,11 +524,12 @@ if (!gotTheLock) {
               if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -lt 2) { continue }
               $search = [regex]::Escape($name.Trim())
 
-              # Genialer PWA-Schutz: Verhindert, dass Edge/Chrome-Webapps als Hauptprogramm erkannt werden!
+              # Genialer PWA-Schutz (Jetzt mit 80% Hürde)
+              # PWA-Schutz: Verhindert, dass Edge/Chrome-Webapps als Hauptprogramm erkannt werden!
               $matchedItems = $allItems | Where-Object {
                   $disp = [string]$_.DisplayName
                   $match1 = $disp -match $search
-                  $match2 = ($disp.Length -ge 5) -and ($disp.Length -ge ($name.Length * 0.4)) -and ($name -match [regex]::Escape($disp))
+                  $match2 = ($disp.Length -ge 5) -and ($disp.Length -ge ($name.Length * 0.8)) -and ($name -match [regex]::Escape($disp))
                   $match1 -or $match2
               }
 
@@ -556,7 +559,7 @@ if (!gotTheLock) {
                       $cleanName = $name.Trim() -replace '[\\*\\?]', ''
                       $pfs = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Select-Object -Unique
 
-                      # NEU 4a: Direkte EXE Suche (Löst das Problem generischer Ordner wie "Windows Sidebar")
+                      # 4a: Direkte EXE Suche (Löst das Problem generischer Ordner wie "Windows Sidebar")
                       foreach ($pf in $pfs) {
                           $exes = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' }
                           if ($exes) {
@@ -565,7 +568,7 @@ if (!gotTheLock) {
                           }
                       }
 
-                      # 4b: Ordnersuche als allerletzter Fallback
+                      # 4b: Ordnersuche als letzter Fallback
                       if (-not $found) {
                           foreach ($pf in $pfs) {
                               $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
@@ -589,12 +592,20 @@ if (!gotTheLock) {
         const output = await new Promise((resolve) => {
           const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript]);
           let out = '';
-          child.stdout.on('data', (d) => {
-            out += d.toString();
-          });
+          // WICHTIG: Node liest die Ausgabe jetzt explizit als UTF-8!
+          child.stdout.on('data', (d) => { out += d.toString('utf8'); });
           child.on('exit', () => resolve(out.trim()));
           child.on('error', () => resolve(''));
         });
+
+        if (output && output.length > 3) {
+          return { success: true, path: output };
+        }
+        return { success: false, error: 'Kein Eintrag gefunden' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
 
         if (output && output.length > 3) {
           return { success: true, path: output };
