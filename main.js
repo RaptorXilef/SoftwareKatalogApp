@@ -378,6 +378,8 @@ if (!gotTheLock) {
           .join(',');
         if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
 
+        // Die Startmenü-Suche prüft nun auch den übergeordneten Hersteller-Ordner,
+        // um gesplittete Installationen (wie bei Bitdefender) perfekt zu erfassen!
         const psScript = `
           $ErrorActionPreference = 'SilentlyContinue'
 
@@ -385,19 +387,33 @@ if (!gotTheLock) {
           function Get-MainExeFromFolder($dir) {
               $wsh = New-Object -ComObject WScript.Shell
               $smPaths = @([Environment]::GetFolderPath('CommonPrograms'), [Environment]::GetFolderPath('Programs'))
+
+              $dir = $dir -replace '^"|"$', ''
+              $parentDir = $dir
+
+              # Geht eine Ebene nach oben (z.B. "Bitdefender"), sofern es nicht direkt C:\\Program Files ist
+              try {
+                  $parent = [System.IO.Directory]::GetParent($dir)
+                  if ($parent -and $parent.Name -notmatch '(?i)^Program Files|^Programme|^Windows|^Appdata|^Local|^Roaming') {
+                      $parentDir = $parent.FullName
+                  }
+              } catch {}
+
               foreach ($sm in $smPaths) {
                   $lnks = Get-ChildItem -LiteralPath $sm -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
                   foreach ($lnkFile in $lnks) {
-                      $shortcut = $wsh.CreateShortcut($lnkFile.FullName)
-                      $target = $shortcut.TargetPath
-                      # Prüft, ob die Verknüpfung auf eine Exe in UNSEREM Installationsordner zeigt
-                      if ($target -match '(?i)\\.exe$' -and $target.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $target)) {
-                          return $target
+                      $target = $wsh.CreateShortcut($lnkFile.FullName).TargetPath
+                      if ($target -match '(?i)\\.exe$' -and (Test-Path -LiteralPath $target)) {
+                          # Prüft, ob das Verknüpfungs-Ziel im Registry-Ordner ODER im übergeordneten Hersteller-Ordner liegt!
+                          if ($target.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($parentDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+                              return $target
+                          }
                       }
                   }
               }
-              # Fallback: Die größte EXE im Ordner ist fast immer das Hauptprogramm
-              $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Sort-Object Length -Descending | Select-Object -First 1
+
+              # Fallback: Die größte EXE im Ordner
+              $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' } | Sort-Object Length -Descending | Select-Object -First 1
               if ($exe) { return $exe.FullName }
               return $null
           }
