@@ -898,85 +898,106 @@ del "%~f0"
         const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
         let updatedCount = 0;
 
-        for (const item of catData) {
-          if (item.webVersionUrl) {
-            // Szenario A: GitHub API (Pfeilschnell, ~1 KB)
-            if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
-              // Schneidet Repository sicher aus (ignoriert .git am Ende)
-              const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
-              if (repoMatch) {
-                const repo = repoMatch[1].replace(/\.git$/i, '');
-                try {
-                  // Holt das letzte Release extrem ressourcenschonend (ca. 1-2 KB JSON)
-                  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-                    headers: { 'User-Agent': 'SoftwareKatalogApp' },
-                  });
-                  if (res.ok) {
-                    const data = await res.json();
-                    let latestVer = data.tag_name || '';
+        // Die Kern-Logik für ein einzelnes Programm
+        async function checkSingleWebItem(item) {
+          if (!item.webVersionUrl) return false;
+          let updated = false;
 
-                    // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
-                    const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
-                    if (cleaned) {
-                      latestVer = cleaned[1];
-                      // Hat sich die Version geändert?
-                      if (item.webVersion !== latestVer) {
-                        item.webVersion = latestVer;
-
-                        // Schreibe physisch in die meta.json des Programms
-                        const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
-                        if (fs.existsSync(metaPath)) {
-                          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-                          meta.webVersion = latestVer;
-                          fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-                        }
-                        updatedCount++;
-                      }
-                    }
-                  }
-                } catch (err) {
-                  console.warn(`Fehler bei GitHub Abfrage für ${item.name}: ${err.message}`);
-                }
-              }
-            }
-            // Szenario B: Davor/Danach (Prefix/Suffix) HTML-Scraper
-            else if (item.webVersionPrefix && item.webVersionSuffix) {
+          // Szenario A: GitHub API (Pfeilschnell, ~1 KB)
+          if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
+            // Schneidet Repository sicher aus (ignoriert .git am Ende)
+            const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+            if (repoMatch) {
+              const repo = repoMatch[1].replace(/\.git$/i, '');
               try {
-                // Lädt nur reinen Quelltext (Keine Bilder/CSS = kaum Datenvolumen)
-                const res = await fetch(item.webVersionUrl, {
-                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                // Holt das letzte Release extrem ressourcenschonend (ca. 1-2 KB JSON)
+                const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+                  headers: { 'User-Agent': 'SoftwareKatalogApp' },
                 });
                 if (res.ok) {
-                  const html = await res.text();
-                  const preIdx = html.indexOf(item.webVersionPrefix);
-                  if (preIdx !== -1) {
-                    const startIdx = preIdx + item.webVersionPrefix.length;
-                    const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
-                    if (sufIdx !== -1) {
-                      const rawVer = html.substring(startIdx, sufIdx).trim();
-                      const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
-                      if (cleaned) {
-                        const latestVer = cleaned[1];
-                        if (item.webVersion !== latestVer) {
-                          item.webVersion = latestVer;
-                          const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
-                          if (fs.existsSync(metaPath)) {
-                            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-                            meta.webVersion = latestVer;
-                            fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-                          }
-                          updatedCount++;
-                        }
-                      }
+                  const data = await res.json();
+                  let latestVer = data.tag_name || '';
+
+                  // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
+                  const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                  if (cleaned) {
+                    latestVer = cleaned[1];
+                    // Hat sich die Version geändert?
+                    if (item.webVersion !== latestVer) {
+                      item.webVersion = latestVer;
+                      updated = true;
                     }
                   }
                 }
               } catch (err) {
-                console.warn(`Fehler bei HTML-Abfrage für ${item.name}: ${err.message}`);
+                console.warn(`Fehler bei GitHub Abfrage für ${item.name}: ${err.message}`);
               }
             }
           }
+          // Szenario B: Davor/Danach (Prefix/Suffix) HTML-Scraper
+          else if (item.webVersionPrefix && item.webVersionSuffix) {
+            try {
+              // Lädt nur reinen Quelltext (Keine Bilder/CSS = kaum Datenvolumen)
+              const res = await fetch(item.webVersionUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              });
+              if (res.ok) {
+                const html = await res.text();
+                const preIdx = html.indexOf(item.webVersionPrefix);
+                if (preIdx !== -1) {
+                  const startIdx = preIdx + item.webVersionPrefix.length;
+                  const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
+                  if (sufIdx !== -1) {
+                    const rawVer = html.substring(startIdx, sufIdx).trim();
+                    const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                    if (cleaned) {
+                      const latestVer = cleaned[1];
+                      if (item.webVersion !== latestVer) {
+                        item.webVersion = latestVer;
+                        updated = true;
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn(`Fehler bei HTML-Abfrage für ${item.name}: ${err.message}`);
+            }
+          }
+
+          // Physisch in der meta.json des Programms speichern, falls es neu ist
+          if (updated) {
+            // Schreibe physisch in die meta.json des Programms
+            const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+            if (fs.existsSync(metaPath)) {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              meta.webVersion = item.webVersion;
+              fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+            }
+          }
+          return updated;
         }
+
+        // Steuert die parallele Verarbeitung (Max. 10 gleichzeitige Abfragen)
+        const limit = 10;
+        const executing = new Set();
+        const itemsToCheck = catData.filter((i) => i.webVersionUrl);
+
+        for (const item of itemsToCheck) {
+          const p = Promise.resolve()
+            .then(() => checkSingleWebItem(item))
+            .then((wasUpdated) => {
+              if (wasUpdated) updatedCount++;
+            });
+          executing.add(p);
+          p.then(() => executing.delete(p));
+
+          if (executing.size >= limit) {
+            await Promise.race(executing);
+          }
+        }
+        // Warten, bis die allerletzten Requests fertig sind
+        await Promise.all(executing);
 
         // Aktualisiert die globale JSON-Datei für das UI
         if (updatedCount > 0) {
