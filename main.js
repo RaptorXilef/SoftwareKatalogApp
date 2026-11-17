@@ -369,6 +369,52 @@ if (!gotTheLock) {
       }
     });
 
+    // Auto-Detect Handler via PowerShell Registry Scan
+    ipcMain.handle('auto-detect-path', async (_event, softwareName) => {
+      try {
+        const psScript = `
+          $name = "${softwareName.replace(/"/g, '""')}"
+          $paths = @("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")
+          $found = $null
+          foreach ($p in $paths) {
+              $items = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match [regex]::Escape($name) }
+              foreach ($item in $items) {
+                  if ($item.DisplayIcon -and $item.DisplayIcon -match '\\.exe') {
+                      $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"', ''
+                      if (Test-Path $icon) { $found = $icon; break }
+                  }
+                  if ($item.InstallLocation) {
+                      $loc = $item.InstallLocation -replace '^"', '' -replace '"$', ''
+                      if (Test-Path $loc) {
+                          $exe = Get-ChildItem -Path $loc -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                          if ($exe) { $found = $exe.FullName; break }
+                      }
+                  }
+              }
+              if ($found) { break }
+          }
+          Write-Output $found
+        `.replace(/\n/g, ' ');
+
+        const output = await new Promise((resolve) => {
+          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript]);
+          let out = '';
+          child.stdout.on('data', (d) => {
+            out += d.toString();
+          });
+          child.on('exit', () => resolve(out.trim()));
+          child.on('error', () => resolve(''));
+        });
+
+        if (output && output.length > 3) {
+          return { success: true, path: output };
+        }
+        return { success: false, error: 'Kein Eintrag gefunden' };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
     ipcMain.handle('download-files', async (_event, sourceFiles) => {
       // 1. Benutzer wählt Zielordner aus
       const { canceled, filePaths } = await dialog.showOpenDialog({
