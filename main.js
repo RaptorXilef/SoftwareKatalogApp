@@ -841,6 +841,8 @@ del "%~f0"
     ipcMain.handle('get-installed-apps', async () => {
       try {
         const psScript = `
+          # Zwingt PowerShell dazu, Umlaute (ä, ö, ü, ß) sauber als UTF-8 an Node.js zu senden
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $ErrorActionPreference = 'SilentlyContinue'
           $paths = @(
               'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
@@ -857,8 +859,9 @@ del "%~f0"
         const output = await new Promise((resolve) => {
           const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript]);
           let out = '';
+          // d.toString('utf8') stellt sicher, dass Node die Daten exakt so liest, wie PS sie nun sendet
           child.stdout.on('data', (d) => {
-            out += d.toString();
+            out += d.toString('utf8');
           });
           child.on('exit', () => resolve(out.trim()));
           child.on('error', () => resolve(''));
