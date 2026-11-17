@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.18.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.17.0...v1.18.0) (2026-11-17)
+
+### 🚀 Features
+
+* **launcher/ui:** Add dynamic installed apps list to populate search names ([0c01c3a](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0c01c3a413055d6d69a8ef97ab5a8bcf793d29e0))
+
+### 🐛 Bug Fixes
+
+* **launcher:** Enforce UTF-8 encoding for Auto-Detect output to support paths with umlauts ([777005e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/777005e9f4c8abb47f587e20ac66273c9b084735))
+* **launcher:** Fix character encoding for umlauts in installed apps list ([db1cf84](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/db1cf84c82352bd99c1d6e48afcad0e16d8caba8))
+
+### ⚙️ Refactoring
+
+* Fix Biome linter warnings and implement proper error handling ([bb6b9ea](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/bb6b9ea2dfab6fe561bb08fd45c7f80ec778ec56))
+
 ## [1.17.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.16.0...v1.17.0) (2026-11-17)
 
 ### 🚀 Features
