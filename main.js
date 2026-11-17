@@ -407,7 +407,7 @@ if (!gotTheLock) {
                   if ($item.InstallLocation) {
                       $loc = $item.InstallLocation -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $loc) {
-                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
+                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
                           if ($exe) { $found = $exe.FullName; break }
                       }
                   }
@@ -415,18 +415,23 @@ if (!gotTheLock) {
                       $uninst = $matches[1]
                       if (Test-Path -LiteralPath $uninst) {
                           $dir = Split-Path $uninst
-                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
+                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
                           if ($exe) { $found = $exe.FullName; break } else { $found = $uninst; break }
                       }
                   }
 
-                  # 4. Fallback für MSIs ohne Keys (wie 8GadgetPack)
                   if (-not $found) {
+                      $cleanName = $name.Trim() -replace '[*?]', ''
                       $pfs = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Select-Object -Unique
                       foreach ($pf in $pfs) {
-                          $dirs = Get-ChildItem -Path $pf -Filter "*$search*" -Directory
+                          # a) Heißt die EXE so wie das gesuchte Programm?
+                          $exe = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
+                          if ($exe) { $found = $exe.FullName; break }
+
+                          # b) Heißt der Ordner so wie das gesuchte Programm?
+                          $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
                           foreach ($d in $dirs) {
-                              $exe = Get-ChildItem -LiteralPath $d.FullName -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash' } | Select-Object -First 1
+                              $exe = Get-ChildItem -LiteralPath $d.FullName -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
                               if ($exe) { $found = $exe.FullName; break }
                           }
                           if ($found) { break }

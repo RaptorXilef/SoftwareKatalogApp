@@ -358,9 +358,7 @@ document.body.addEventListener('click', async (e) => {
   if (action === 'auto-detect-path') {
     const inputId = actionEl.dataset.target;
     const origText = actionEl.textContent;
-    const itemId = actionEl.dataset.id;
 
-    // Lies den Haupt-Namen und die optionalen Such-Namen in Echtzeit aus den Input-Feldern
     const mainName = document.getElementById('editName').value.trim();
     const searchNamesInput = document
       .getElementById('editSearchNames')
@@ -378,13 +376,6 @@ document.body.addEventListener('click', async (e) => {
         if (!textarea.value.includes(res.path)) {
           textarea.value = textarea.value ? `${textarea.value}\n${res.path}` : res.path;
         }
-
-        // Extrahiert Icon vollautomatisch, wenn noch keins existiert
-        const item = catalog.find((i) => i.id === itemId);
-        if (item && !item.icon) {
-          await window.electronAPI.extractExeIcon(res.path, item.path);
-        }
-
         actionEl.textContent = '✓ Gefunden!';
         setTimeout(() => {
           actionEl.textContent = origText;
@@ -399,6 +390,42 @@ document.body.addEventListener('click', async (e) => {
       alert(`Fehler:\n${err.message}`);
       actionEl.textContent = origText;
       actionEl.disabled = false;
+    }
+  }
+
+  // Manueller Icon-Extraktor
+  if (action === 'extract-icon') {
+    const inputId = actionEl.dataset.target;
+    const installPaths = document
+      .getElementById(inputId)
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const itemId = actionEl.dataset.id;
+    const item = catalog.find((i) => i.id === itemId);
+
+    if (installPaths.length > 0 && installPaths[0].toLowerCase().endsWith('.exe')) {
+      const origText = actionEl.textContent;
+      actionEl.textContent = '⏳ Lade...';
+      actionEl.disabled = true;
+      try {
+        const res = await window.electronAPI.extractExeIcon(installPaths[0], item.path);
+        if (res.success) {
+          // Um das Icon sofort anzuzeigen, speichern wir kurz zwischen und laden das UI neu
+          await startScan('update');
+          editSoftware(itemId);
+        } else {
+          alert(`Fehler beim Extrahieren:\n${res.error}`);
+          actionEl.textContent = origText;
+          actionEl.disabled = false;
+        }
+      } catch (err) {
+        alert(`Fehler:\n${err.message}`);
+        actionEl.textContent = origText;
+        actionEl.disabled = false;
+      }
+    } else {
+      alert('Bitte trage zuerst einen gültigen .exe Installationspfad ein!');
     }
   }
 
@@ -1459,7 +1486,8 @@ function editSoftware(id) {
 
       <div style="display: flex; gap: 15px; margin-top: 15px;">
         <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="icon" style="flex: 1; margin-top: 0; padding: 15px; border-color: var(--accent);">
-          🖼️ <strong>Icon</strong> hier ablegen<br><small style="opacity: 0.7;">(Wird zu icon.* umbenannt)</small>
+          🖼️ <strong>Icon</strong> hier ablegen<br><small style="opacity: 0.7;">(Wird zu icon.* umbenannt)</small><br>
+          <button type="button" class="action-btn" style="margin-top:15px; padding:6px 12px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="extract-icon" data-id="${item.id}" data-target="editInstallPaths">🪄 Aus .exe extrahieren</button>
         </div>
         <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="media" style="flex: 2; margin-top: 0; padding: 15px;">
           📷 <strong>Bilder oder Videos</strong> hier ablegen...
