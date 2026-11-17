@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.17.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.16.0...v1.17.0) (2026-11-17)
+
+### 🚀 Features
+
+* **launcher:** Prioritize Registry DisplayVersion over executable metadata during local version scans ([a2f5856](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/a2f58560a45d25eb8ae0edda3209d05d78f53b52))
+* **settings/debug:** Add comprehensive Debug & Backup utilities ([689c3cf](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/689c3cf286c2282751b63fa47a5903d7e28a9e2d))
+* **ui:** Organize toolbar with collapsible advanced actions menu ([7823cdb](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7823cdb0f8c2a1ab7070d8dff98e22badd167f51))
+
+### 🐛 Bug Fixes
+
+* **launcher:** Prevent PWA false positives by enforcing dynamic length thresholds on reverse name matches ([2af3f6f](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2af3f6fad4093c8aebd5075b7fd91e228afeb91c))
+
 ## [1.16.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.15.0...v1.16.0) (2026-11-17)
 
 ### 🚀 Features
