@@ -586,10 +586,58 @@ document.body.addEventListener('click', async (e) => {
     actionEl.textContent = originalText;
     actionEl.disabled = false;
   }
+
+  // Lädt die Liste aller installierten PC Programme für das Dropdown
+  if (action === 'fetch-installed-apps') {
+    actionEl.textContent = '⏳ Lade PC-Liste...';
+    actionEl.disabled = true;
+    try {
+      const apps = await window.electronAPI.getInstalledApps();
+      if (apps && apps.length > 0) {
+        const selectHtml = `
+          <select id="installedAppsSelect" class="version-selector" style="margin: 0; max-width: 250px; background:var(--surface); border:1px solid var(--border);">
+            <option value="">-- Programm hinzufügen --</option>
+            ${apps.map((a) => `<option value="${escapeHTML(a)}">${escapeHTML(a)}</option>`).join('')}
+          </select>
+        `;
+        // Ersetzt den Button durch das Dropdown-Menü
+        actionEl.outerHTML = selectHtml;
+      } else {
+        alert('Keine installierten Programme gefunden.');
+        actionEl.textContent = '📋 Liste laden';
+        actionEl.disabled = false;
+      }
+    } catch (e) {
+      alert(e.message);
+      actionEl.textContent = '📋 Liste laden';
+      actionEl.disabled = false;
+    }
+  }
 });
 
 // Reagiert auf die VersionSelector-Änderung (um die Buttons im Modal dynamisch anzupassen)
 document.body.addEventListener('change', (e) => {
+  // Wenn ein Programm aus dem Dropdown gewählt wird, ab in das Such-Namen Feld!
+  if (e.target.id === 'installedAppsSelect') {
+    const val = e.target.value;
+    if (val) {
+      const input = document.getElementById('editSearchNames');
+      // Bisherige Einträge holen, aufsplitten und putzen
+      const current = input.value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // Nur hinzufügen, wenn es noch nicht in der Liste steht
+      if (!current.includes(val)) {
+        current.push(val);
+        input.value = current.join(', ');
+      }
+      // Dropdown wieder zurücksetzen
+      e.target.value = '';
+    }
+  }
+
+  // VersionSelector Logik
   if (e.target.id === 'versionSelector') {
     const selectedIdx = e.target.value;
     const activeItem = catalog.find((i) => i.id === currentOpenModalId);
@@ -1575,7 +1623,13 @@ function editSoftware(id) {
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
       <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${escapeHTML(item.name)}"></div>
-      <div class="settings-row"><label style="width:150px;">Such-Namen (Komma):</label><input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="z.B. Bitdefender Antivirus Free"></div>
+      <div class="settings-row">
+        <label style="width:150px;">Such-Namen (Komma):</label>
+        <div style="display:flex; flex:1; gap:10px;">
+          <input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="z.B. Bitdefender Antivirus Free" style="flex:1;">
+          <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="fetch-installed-apps">📋 Liste laden</button>
+        </div>
+      </div>
       <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}"></div>
       <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}"></div>
       <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}"></div>

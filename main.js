@@ -836,6 +836,46 @@ del "%~f0"
     });
 
     // ==========================================
+    // INSTALLIERTE APPS AUSLESEN (Für das Dropdown im Modal)
+    // ==========================================
+    ipcMain.handle('get-installed-apps', async () => {
+      try {
+        const psScript = `
+          $ErrorActionPreference = 'SilentlyContinue'
+          $paths = @(
+              'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+              'HKCU:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+          )
+          # Holt alle Namen, entfernt Duplikate, leere Einträge und sortiert sie alphabetisch
+          $items = Get-ItemProperty -Path $paths | Select-Object -ExpandProperty DisplayName -Unique | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          $items | Sort-Object | ForEach-Object { Write-Output $_.Trim() }
+        `;
+
+        const encodedScript = Buffer.from(psScript, 'utf16le').toString('base64');
+        const output = await new Promise((resolve) => {
+          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript]);
+          let out = '';
+          child.stdout.on('data', (d) => {
+            out += d.toString();
+          });
+          child.on('exit', () => resolve(out.trim()));
+          child.on('error', () => resolve(''));
+        });
+
+        // Wandelt den Text-Output in ein sauberes Array um
+        return output
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } catch (e) {
+        console.error('Fehler beim Laden der App-Liste:', e);
+        return [];
+      }
+    });
+
+    // ==========================================
     // DEBUG & BACKUP HANDLER
     // ==========================================
 

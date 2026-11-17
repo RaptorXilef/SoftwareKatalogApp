@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   markAsInstalled: (id, version) => ipcRenderer.invoke('mark-as-installed', id, version),
   scanLocalVersions: () => ipcRenderer.invoke('scan-local-versions'),
 
+  // Installierte Programme auflisten
+  getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
+
   // Debug & Backup Funktionen
   resetPaths: (type) => ipcRenderer.invoke('reset-paths', type),
   resetVersions: (type) => ipcRenderer.invoke('reset-versions', type),
