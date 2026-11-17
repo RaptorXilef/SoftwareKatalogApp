@@ -899,42 +899,80 @@ del "%~f0"
         let updatedCount = 0;
 
         for (const item of catData) {
-          if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
-            // Schneidet Repository sicher aus (ignoriert .git am Ende)
-            const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
-            if (repoMatch) {
-              const repo = repoMatch[1].replace(/\.git$/i, '');
+          if (item.webVersionUrl) {
+            // Szenario A: GitHub API (Pfeilschnell, ~1 KB)
+            if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
+              // Schneidet Repository sicher aus (ignoriert .git am Ende)
+              const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+              if (repoMatch) {
+                const repo = repoMatch[1].replace(/\.git$/i, '');
+                try {
+                  // Holt das letzte Release extrem ressourcenschonend (ca. 1-2 KB JSON)
+                  const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+                    headers: { 'User-Agent': 'SoftwareKatalogApp' },
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    let latestVer = data.tag_name || '';
 
+                    // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
+                    const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                    if (cleaned) {
+                      latestVer = cleaned[1];
+                      // Hat sich die Version geändert?
+                      if (item.webVersion !== latestVer) {
+                        item.webVersion = latestVer;
+
+                        // Schreibe physisch in die meta.json des Programms
+                        const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+                        if (fs.existsSync(metaPath)) {
+                          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                          meta.webVersion = latestVer;
+                          fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+                        }
+                        updatedCount++;
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn(`Fehler bei GitHub Abfrage für ${item.name}: ${err.message}`);
+                }
+              }
+            }
+            // Szenario B: Davor/Danach (Prefix/Suffix) HTML-Scraper
+            else if (item.webVersionPrefix && item.webVersionSuffix) {
               try {
-                // Holt das letzte Release extrem ressourcenschonend (ca. 1-2 KB JSON)
-                const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-                  headers: { 'User-Agent': 'SoftwareKatalogApp' },
+                // Lädt nur reinen Quelltext (Keine Bilder/CSS = kaum Datenvolumen)
+                const res = await fetch(item.webVersionUrl, {
+                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
                 });
                 if (res.ok) {
-                  const data = await res.json();
-                  let latestVer = data.tag_name || '';
-
-                  // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
-                  const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
-                  if (cleaned) {
-                    latestVer = cleaned[1];
-                    // Hat sich die Version geändert?
-                    if (item.webVersion !== latestVer) {
-                      item.webVersion = latestVer;
-
-                      // Schreibe physisch in die meta.json des Programms
-                      const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
-                      if (fs.existsSync(metaPath)) {
-                        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-                        meta.webVersion = latestVer;
-                        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+                  const html = await res.text();
+                  const preIdx = html.indexOf(item.webVersionPrefix);
+                  if (preIdx !== -1) {
+                    const startIdx = preIdx + item.webVersionPrefix.length;
+                    const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
+                    if (sufIdx !== -1) {
+                      const rawVer = html.substring(startIdx, sufIdx).trim();
+                      const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                      if (cleaned) {
+                        const latestVer = cleaned[1];
+                        if (item.webVersion !== latestVer) {
+                          item.webVersion = latestVer;
+                          const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+                          if (fs.existsSync(metaPath)) {
+                            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                            meta.webVersion = latestVer;
+                            fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+                          }
+                          updatedCount++;
+                        }
                       }
-                      updatedCount++;
                     }
                   }
                 }
               } catch (err) {
-                console.warn(`Fehler bei GitHub Abfrage für ${item.name}: ${err.message}`);
+                console.warn(`Fehler bei HTML-Abfrage für ${item.name}: ${err.message}`);
               }
             }
           }
@@ -954,38 +992,92 @@ del "%~f0"
       const config = getConfig();
       // Ermittelt den absoluten Zielordner auf dem NAS
       const targetAbs = path.resolve(config.appFolder, targetFolder);
-      const defaultPath = path.join(targetAbs, defaultName || 'setup.exe');
 
-      // Native Windows "Speichern unter"-Dialogbox öffnet sich DIREKT im NAS-Ordner!
-      const { canceled, filePath } = await dialog.showSaveDialog({
-        title: 'Web-Download im NAS speichern',
-        defaultPath: defaultPath,
-      });
+      const ext = url.split('?')[0].toLowerCase().split('.').pop();
+      const directExts = ['exe', 'msi', 'zip', '7z', 'rar', 'tar', 'gz'];
 
-      if (canceled || !filePath) return { success: false, canceled: true };
+      // Fall 1: Direkte Datei - Streamen ohne Browser
+      if (directExts.includes(ext)) {
+        const defaultPath = path.join(targetAbs, defaultName || 'setup.exe');
 
-      try {
-        const res = await fetch(url, { redirect: 'follow' });
-        if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+        // Native Windows "Speichern unter"-Dialogbox öffnet sich DIREKT im NAS-Ordner!
+        const { canceled, filePath } = await dialog.showSaveDialog({
+          title: 'Web-Download im NAS speichern',
+          defaultPath: defaultPath,
+        });
 
-        const fileStream = fs.createWriteStream(filePath);
-        const total = parseInt(res.headers.get('content-length') || '0', 10);
-        let downloaded = 0;
+        if (canceled || !filePath) return { success: false, canceled: true };
 
-        // Streamt den Download direkt auf die Festplatte (ohne den RAM vollzumüllen)
-        for await (const chunk of res.body) {
-          fileStream.write(chunk);
-          downloaded += chunk.length;
-          if (total > 0) {
-            const percent = Math.round((downloaded / total) * 100);
-            // Sendet Live-Prozente an den richtigen Button im UI!
-            event.sender.send('web-download-progress', { id: itemId, pct: percent });
+        try {
+          const res = await fetch(url, { redirect: 'follow' });
+          if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+          const fileStream = fs.createWriteStream(filePath);
+          const total = parseInt(res.headers.get('content-length') || '0', 10);
+          let downloaded = 0;
+
+          // Streamt den Download direkt auf die Festplatte (ohne den RAM vollzumüllen)
+          for await (const chunk of res.body) {
+            fileStream.write(chunk);
+            downloaded += chunk.length;
+            if (total > 0) {
+              const percent = Math.round((downloaded / total) * 100);
+              // Sendet Live-Prozente an den richtigen Button im UI!
+              event.sender.send('web-download-progress', { id: itemId, pct: percent });
+            }
           }
+          await new Promise((r) => fileStream.end(r));
+          return { success: true, filePath };
+        } catch (e) {
+          return { success: false, error: e.message };
         }
-        await new Promise((r) => fileStream.end(r));
-        return { success: true, filePath };
-      } catch (e) {
-        return { success: false, error: e.message };
+      }
+      // Fall 2: In-App Browser Interceptor für Klick-Webseiten (Wie UniGetUI / GitHub Releases)
+      else {
+        return new Promise((resolve) => {
+          const dlWin = new BrowserWindow({
+            width: 1000,
+            height: 750,
+            title: 'Web-Download (Bitte klicke auf der Webseite auf Herunterladen)',
+            autoHideMenuBar: true,
+            webPreferences: { nodeIntegration: false, contextIsolation: true },
+          });
+
+          dlWin.loadURL(url);
+
+          // Fängt den Download rigoros ab, sobald du auf der Webseite klickst!
+          dlWin.webContents.session.on('will-download', (dlEvent, item, webContents) => {
+            // Zwingt den Windows "Speichern"-Dialog in deinen NAS-Ordner und lässt dich den Namen ändern!
+            const suggestPath = path.join(targetAbs, item.getFilename());
+            item.setSaveDialogOptions({
+              title: 'Setup auf dem NAS speichern',
+              defaultPath: suggestPath,
+            });
+
+            item.on('updated', (updateEvent, state) => {
+              if (state === 'progressing') {
+                const total = item.getTotalBytes();
+                if (total > 0) {
+                  const pct = Math.round((item.getReceivedBytes() / total) * 100);
+                  event.sender.send('web-download-progress', { id: itemId, pct });
+                }
+              }
+            });
+
+            item.once('done', (doneEvent, state) => {
+              dlWin.close();
+              if (state === 'completed') {
+                resolve({ success: true, filePath: item.getSavePath() });
+              } else {
+                resolve({ success: false, error: `Download abgebrochen (${state})` });
+              }
+            });
+          });
+
+          dlWin.on('closed', () => {
+            resolve({ success: false, canceled: true });
+          });
+        });
       }
     });
 
@@ -1308,6 +1400,8 @@ del "%~f0"
             catData[catIdx].mainCategory = data.category || '';
             catData[catIdx].softwareType = data.softwareType || 'default';
             catData[catIdx].webVersionUrl = data.webVersionUrl || '';
+            catData[catIdx].webVersionPrefix = data.webVersionPrefix || '';
+            catData[catIdx].webVersionSuffix = data.webVersionSuffix || '';
             catData[catIdx].downloadUrl = data.downloadUrl || '';
             catData[catIdx].webVersion = data.webVersion || '';
             catData[catIdx].subCategories = data.tags || [];

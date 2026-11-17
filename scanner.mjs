@@ -67,6 +67,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     autoPaths = [],
     softwareType = 'default',
     webVersionUrl = '',
+    webVersionPrefix = '',
+    webVersionSuffix = '',
     downloadUrl = '',
     webVersion = '',
     hiddenCategory = '';
@@ -166,6 +168,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
 
         // Web-Variablen auslesen
         if (data.webVersionUrl) webVersionUrl = data.webVersionUrl.trim();
+        if (data.webVersionPrefix) webVersionPrefix = data.webVersionPrefix;
+        if (data.webVersionSuffix) webVersionSuffix = data.webVersionSuffix;
         if (data.downloadUrl) downloadUrl = data.downloadUrl.trim();
         if (data.webVersion) webVersion = data.webVersion.trim();
 
@@ -249,6 +253,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     autoPaths,
     softwareType,
     webVersionUrl,
+    webVersionPrefix,
+    webVersionSuffix,
     downloadUrl,
     webVersion,
     links,

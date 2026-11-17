@@ -1764,8 +1764,20 @@ function editSoftware(id) {
 
       <div class="settings-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
         <h3 style="margin-bottom: 10px; margin-top: 0; font-size: 14px; color: #cba6f7;">🌐 Web-Erkennung & Download</h3>
-        <div class="settings-row"><label style="width:150px;">Prüf-URL (URL1):</label><input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt."></div>
-        <div class="settings-row"><label style="width:150px;">Download (URL2):</label><input type="text" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Direkter Link zur aktuellsten .exe / .zip"></div>
+
+        <div class="settings-row">
+          <label style="width:150px;">Prüf-URL (URL1):</label>
+          <input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt." oninput="document.getElementById('webScrapeOpts').style.display = this.value.toLowerCase().includes('github.com') ? 'none' : 'block'">
+        </div>
+
+        <!-- Klappt sich dynamisch auf, wenn es KEIN GitHub Link ist -->
+        <div id="webScrapeOpts" style="display: ${(item.webVersionUrl || '').toLowerCase().includes('github.com') ? 'none' : 'block'}; margin-left: 20px; padding-left: 15px; border-left: 2px solid #cba6f7; margin-top: 10px; margin-bottom: 15px; background: rgba(0,0,0,0.1); border-radius: 0 8px 8px 0; padding-top: 10px; padding-bottom: 10px;">
+          <p style="margin-top:0; font-size:12px; color:var(--text); opacity:0.8; margin-bottom:10px;">Da dies keine GitHub URL ist, trage bitte den Text direkt vor und nach der Versionsnummer ein, um sie auf der Webseite zu finden:</p>
+          <div class="settings-row" style="margin-top:0;"><label style="width:130px; font-size:13px;">Davor (Präfix):</label><input type="text" id="editWebPrefix" value="${escapeHTML(item.webVersionPrefix || '')}" placeholder="z.B. Version <span id='v'>"></div>
+          <div class="settings-row"><label style="width:130px; font-size:13px;">Danach (Suffix):</label><input type="text" id="editWebSuffix" value="${escapeHTML(item.webVersionSuffix || '')}" placeholder="z.B. </span>"></div>
+        </div>
+
+        <div class="settings-row"><label style="width:150px;">Download (URL2):</label><input type="text" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Direkter Link oder Download-Seite"></div>
         <div class="settings-row"><label style="width:150px;">Zuletzt erkannt:</label><input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Wird beim Klick auf 'Web-Versionen prüfen' automatisch gefüllt" readonly style="opacity:0.7;"></div>
       </div>
 
@@ -1820,6 +1832,8 @@ async function saveSoftware(id) {
     name: document.getElementById('editName').value.trim(),
     softwareType: document.getElementById('editSoftwareType').value,
     webVersionUrl: document.getElementById('editWebVersionUrl').value.trim(),
+    webVersionPrefix: document.getElementById('editWebPrefix').value, // (trim entfernt, da Leerzeichen bei Prefix wichtig sein könnten!)
+    webVersionSuffix: document.getElementById('editWebSuffix').value,
     downloadUrl: document.getElementById('editDownloadUrl').value.trim(),
     webVersion: document.getElementById('editWebVersion').value.trim(),
     searchNames: document
