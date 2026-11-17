@@ -358,11 +358,18 @@ if (!gotTheLock) {
           psScript += `
             $ver = $null
             $names = @(${psNames})
-            # Priorität 1: Registry-Check ("Apps & Features")
+            # Priorität 1: Registry-Check ("Apps & Features") mit PWA-Schutz
             foreach ($name in $names) {
                 if ([string]::IsNullOrWhiteSpace($name)) { continue }
                 $escName = [regex]::Escape($name.Trim())
-                $match = $allReg | Where-Object { ([string]$_.DisplayName -match $escName) -or ($name -match [regex]::Escape([string]$_.DisplayName)) } | Select-Object -First 1
+                $match = $allReg | Where-Object {
+                    $disp = [string]$_.DisplayName
+                    $m1 = $disp -match $escName
+                    # Schutz: Der gefundene Name muss mind. 5 Zeichen und mind. 40% so lang sein wie der Katalogname!
+                    $m2 = ($disp.Length -ge 5) -and ($disp.Length -ge ($name.Length * 0.8)) -and ($name -match [regex]::Escape($disp))
+                    $m1 -or $m2
+                } | Select-Object -First 1
+
                 if ($match) { $ver = $match.DisplayVersion; break }
             }
             # Priorität 2: EXE Metadaten Fallback (für Portable Apps oder wenn Registry fehlschlägt)
@@ -512,11 +519,15 @@ if (!gotTheLock) {
           $found = $null
 
           foreach ($name in $names) {
-              if ([string]::IsNullOrWhiteSpace($name)) { continue }
+              if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -lt 2) { continue }
               $search = [regex]::Escape($name.Trim())
 
+              # Genialer PWA-Schutz: Verhindert, dass Edge/Chrome-Webapps als Hauptprogramm erkannt werden!
               $matchedItems = $allItems | Where-Object {
-                  ([string]$_.DisplayName -match $search) -or ($name -match [regex]::Escape([string]$_.DisplayName))
+                  $disp = [string]$_.DisplayName
+                  $match1 = $disp -match $search
+                  $match2 = ($disp.Length -ge 5) -and ($disp.Length -ge ($name.Length * 0.4)) -and ($name -match [regex]::Escape($disp))
+                  $match1 -or $match2
               }
 
               foreach ($item in $matchedItems) {
