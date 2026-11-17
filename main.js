@@ -378,20 +378,20 @@ if (!gotTheLock) {
           .join(',');
         if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
 
-        // Die Startmenü-Suche prüft nun auch den übergeordneten Hersteller-Ordner,
-        // um gesplittete Installationen (wie bei Bitdefender) perfekt zu erfassen!
         const psScript = `
           $ErrorActionPreference = 'SilentlyContinue'
 
           # Hilfsfunktion: Findet die Haupt-Exe per Startmenü-Verknüpfung oder Dateigröße
-          function Get-MainExeFromFolder($dir) {
+          function Get-MainExeFromFolder($dir, $appName) {
               $wsh = New-Object -ComObject WScript.Shell
               $smPaths = @([Environment]::GetFolderPath('CommonPrograms'), [Environment]::GetFolderPath('Programs'))
 
               $dir = $dir -replace '^"|"$', ''
               $parentDir = $dir
+              $cleanAppName = $appName.Trim() -replace '[\\*\\?]', ''
+              $searchEscaped = [regex]::Escape($cleanAppName)
 
-              # Geht eine Ebene nach oben (z.B. "Bitdefender"), sofern es nicht direkt C:\\Program Files ist
+              # Geht eine Ebene nach oben, sofern es nicht direkt Program Files ist
               try {
                   $parent = [System.IO.Directory]::GetParent($dir)
                   if ($parent -and $parent.Name -notmatch '(?i)^Program Files|^Programme|^Windows|^Appdata|^Local|^Roaming') {
@@ -399,22 +399,44 @@ if (!gotTheLock) {
                   }
               } catch {}
 
+              # Sammelt alle passenden Verknüpfungen (inkl. Name der Verknüpfung für das Ranking)
+              $validTargets = @()
               foreach ($sm in $smPaths) {
                   $lnks = Get-ChildItem -LiteralPath $sm -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
                   foreach ($lnkFile in $lnks) {
                       $target = $wsh.CreateShortcut($lnkFile.FullName).TargetPath
                       if ($target -match '(?i)\\.exe$' -and (Test-Path -LiteralPath $target)) {
-                          # Prüft, ob das Verknüpfungs-Ziel im Registry-Ordner ODER im übergeordneten Hersteller-Ordner liegt!
                           if ($target.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) -or $target.StartsWith($parentDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-                              return $target
+                              $validTargets += [PSCustomObject]@{ LnkName = $lnkFile.Name; Target = $target }
                           }
                       }
                   }
               }
 
-              # Fallback: Die größte EXE im Ordner
-              $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' } | Sort-Object Length -Descending | Select-Object -First 1
-              if ($exe) { return $exe.FullName }
+              # Intelligentes Ranking, falls es mehrere Verknüpfungen gibt (wie bei 8GadgetPack)
+              if ($validTargets.Count -gt 0) {
+                  # Prio 1: Der Name der .exe enthält unseren Suchbegriff (z.B. 8GadgetPack.exe)
+                  $bestByExe = $validTargets | Where-Object { [System.IO.Path]::GetFileName($_.Target) -match "(?i)$searchEscaped" } | Select-Object -First 1
+                  if ($bestByExe) { return $bestByExe.Target }
+
+                  # Prio 2: Der Name der Verknüpfung im Startmenü enthält den Suchbegriff
+                  $bestByLnk = $validTargets | Where-Object { $_.LnkName -match "(?i)$searchEscaped" } | Select-Object -First 1
+                  if ($bestByLnk) { return $bestByLnk.Target }
+
+                  # Prio 3: Nimm einfach die erste Verknüpfung, die in den Ordner zeigt
+                  return $validTargets[0].Target
+              }
+
+              # Fallback: Ordner nach der echten EXE durchsuchen (falls keine Startmenü-Einträge existieren)
+              $exes = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' }
+              if ($exes) {
+                  # Prio 1: EXE Name enthält den Suchbegriff, ansonsten die mit der größten Dateigröße
+                  $bestExe = $exes | Where-Object { $_.Name -match "(?i)$searchEscaped" } | Sort-Object Length -Descending | Select-Object -First 1
+                  if ($bestExe) { return $bestExe.FullName }
+
+                  $largestExe = $exes | Sort-Object Length -Descending | Select-Object -First 1
+                  if ($largestExe) { return $largestExe.FullName }
+              }
               return $null
           }
 
@@ -445,7 +467,7 @@ if (!gotTheLock) {
                   if ($item.InstallLocation) {
                       $loc = $item.InstallLocation -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $loc) {
-                          $found = Get-MainExeFromFolder $loc
+                          $found = Get-MainExeFromFolder $loc $name
                           if ($found) { break }
                       }
                   }
@@ -453,7 +475,7 @@ if (!gotTheLock) {
                       $uninst = $matches[1]
                       if (Test-Path -LiteralPath $uninst) {
                           $dir = Split-Path $uninst
-                          $found = Get-MainExeFromFolder $dir
+                          $found = Get-MainExeFromFolder $dir $name
                           if ($found) { break } else { $found = $uninst; break }
                       }
                   }
@@ -464,7 +486,7 @@ if (!gotTheLock) {
                       foreach ($pf in $pfs) {
                           $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
                           foreach ($d in $dirs) {
-                              $found = Get-MainExeFromFolder $d.FullName
+                              $found = Get-MainExeFromFolder $d.FullName $name
                               if ($found) { break }
                           }
                           if ($found) { break }
