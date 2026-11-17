@@ -399,7 +399,7 @@ if (!gotTheLock) {
                   }
               } catch {}
 
-              # Sammelt alle passenden Verknüpfungen (inkl. Name der Verknüpfung für das Ranking)
+              # Sammelt alle passenden Verknüpfungen
               $validTargets = @()
               foreach ($sm in $smPaths) {
                   $lnks = Get-ChildItem -LiteralPath $sm -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
@@ -413,7 +413,7 @@ if (!gotTheLock) {
                   }
               }
 
-              # Intelligentes Ranking, falls es mehrere Verknüpfungen gibt (wie bei 8GadgetPack)
+              # Intelligentes Ranking, falls es mehrere Verknüpfungen gibt
               if ($validTargets.Count -gt 0) {
                   # Prio 1: Der Name der .exe enthält unseren Suchbegriff (z.B. 8GadgetPack.exe)
                   $bestByExe = $validTargets | Where-Object { [System.IO.Path]::GetFileName($_.Target) -match "(?i)$searchEscaped" } | Select-Object -First 1
@@ -427,7 +427,7 @@ if (!gotTheLock) {
                   return $validTargets[0].Target
               }
 
-              # Fallback: Ordner nach der echten EXE durchsuchen (falls keine Startmenü-Einträge existieren)
+              # Fallback: Ordner nach der echten EXE durchsuchen
               $exes = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' }
               if ($exes) {
                   # Prio 1: EXE Name enthält den Suchbegriff, ansonsten die mit der größten Dateigröße
@@ -480,16 +480,30 @@ if (!gotTheLock) {
                       }
                   }
 
+                  # 4. Fallback für MSIs ohne Keys (wie 8GadgetPack)
                   if (-not $found) {
                       $cleanName = $name.Trim() -replace '[\\*\\?]', ''
                       $pfs = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Select-Object -Unique
+
+                      # NEU 4a: Direkte EXE Suche (Löst das Problem generischer Ordner wie "Windows Sidebar")
                       foreach ($pf in $pfs) {
-                          $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
-                          foreach ($d in $dirs) {
-                              $found = Get-MainExeFromFolder $d.FullName $name
+                          $exes = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup|agent' }
+                          if ($exes) {
+                              $found = ($exes | Sort-Object Length -Descending | Select-Object -First 1).FullName
+                              break
+                          }
+                      }
+
+                      # 4b: Ordnersuche als allerletzter Fallback
+                      if (-not $found) {
+                          foreach ($pf in $pfs) {
+                              $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
+                              foreach ($d in $dirs) {
+                                  $found = Get-MainExeFromFolder $d.FullName $name
+                                  if ($found) { break }
+                              }
                               if ($found) { break }
                           }
-                          if ($found) { break }
                       }
                   }
               }
