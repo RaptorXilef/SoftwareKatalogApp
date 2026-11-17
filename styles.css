@@ -570,3 +570,52 @@ select {
   background: rgba(137, 180, 250, 0.1);
   opacity: 1;
 }
+
+/* ========================================= */
+/* Erweitertes Menü (Ausklappbare Buttons)   */
+/* ========================================= */
+.advanced-actions {
+  display: flex;
+  gap: 15px;
+  overflow: hidden;
+  max-width: 0; /* Standardmäßig komplett zusammengeklappt */
+  opacity: 0;
+  transition:
+    max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s ease;
+  white-space: nowrap; /* Verhindert, dass die Buttons während der Animation umbrechen */
+  pointer-events: none; /* Klicks blockieren, solange unsichtbar */
+}
+.advanced-actions.expanded {
+  max-width: 800px; /* Groß genug für alle 3 Buttons */
+  opacity: 1;
+  pointer-events: auto;
+}
+.toggle-arrow {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    transform 0.4s ease,
+    background 0.2s,
+    border-color 0.2s;
+  font-size: 12px;
+  margin: 0;
+  padding: 0 0 0 3px; /* Den Pfeil optisch in die Mitte rücken */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+.toggle-arrow:hover {
+  background: var(--border);
+  border-color: var(--accent);
+}
+.toggle-arrow.expanded {
+  transform: rotate(180deg);
+  padding: 0 3px 0 0;
+}

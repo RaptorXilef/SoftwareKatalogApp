@@ -266,6 +266,13 @@ document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnLocalVersions') scanLocalVersionsUI();
   if (e.target.id === 'btnAutoDetectAll') autoDetectAllPaths();
   if (e.target.id === 'btnFullScan') startScan('full');
+
+  // Toggle für die versteckten Buttons
+  const toggleBtn = e.target.closest('#btnToggleAdvanced');
+  if (toggleBtn) {
+    document.getElementById('advancedActionsWrapper').classList.toggle('expanded');
+    toggleBtn.classList.toggle('expanded');
+  }
 });
 
 el.searchInput.addEventListener('input', () => {
