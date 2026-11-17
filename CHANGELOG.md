@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.19.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.18.0...v1.19.0) (2026-11-17)
+
+### 🚀 Features
+
+* **catalog/ui:** Introduce software types (Portable/Driver) to bypass path requirements ([c1e7027](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c1e7027b2cf12cbc66260d185ebb26cd7a0cf303))
+
 ## [1.18.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.17.0...v1.18.0) (2026-11-17)
 
 ### 🚀 Features
