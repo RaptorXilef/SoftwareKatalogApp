@@ -380,6 +380,28 @@ if (!gotTheLock) {
 
         const psScript = `
           $ErrorActionPreference = 'SilentlyContinue'
+
+          # Hilfsfunktion: Findet die Haupt-Exe per Startmenü-Verknüpfung oder Dateigröße
+          function Get-MainExeFromFolder($dir) {
+              $wsh = New-Object -ComObject WScript.Shell
+              $smPaths = @([Environment]::GetFolderPath('CommonPrograms'), [Environment]::GetFolderPath('Programs'))
+              foreach ($sm in $smPaths) {
+                  $lnks = Get-ChildItem -LiteralPath $sm -Filter "*.lnk" -Recurse -ErrorAction SilentlyContinue
+                  foreach ($lnkFile in $lnks) {
+                      $shortcut = $wsh.CreateShortcut($lnkFile.FullName)
+                      $target = $shortcut.TargetPath
+                      # Prüft, ob die Verknüpfung auf eine Exe in UNSEREM Installationsordner zeigt
+                      if ($target -match '(?i)\\.exe$' -and $target.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $target)) {
+                          return $target
+                      }
+                  }
+              }
+              # Fallback: Die größte EXE im Ordner ist fast immer das Hauptprogramm
+              $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Sort-Object Length -Descending | Select-Object -First 1
+              if ($exe) { return $exe.FullName }
+              return $null
+          }
+
           $names = @(${psNames})
           $paths = @(
               'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
@@ -400,39 +422,34 @@ if (!gotTheLock) {
               }
 
               foreach ($item in $matchedItems) {
-                  if ($item.DisplayIcon -match '\\.exe') {
+                  if ($item.DisplayIcon -match '(?i)\\.exe') {
                       $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $icon) { $found = $icon; break }
                   }
                   if ($item.InstallLocation) {
                       $loc = $item.InstallLocation -replace '^"|"$', ''
                       if (Test-Path -LiteralPath $loc) {
-                          $exe = Get-ChildItem -LiteralPath $loc -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
-                          if ($exe) { $found = $exe.FullName; break }
+                          $found = Get-MainExeFromFolder $loc
+                          if ($found) { break }
                       }
                   }
                   if ($item.UninstallString -match '(?i)([a-z]:\\\\[^"]+\\.exe)') {
                       $uninst = $matches[1]
                       if (Test-Path -LiteralPath $uninst) {
                           $dir = Split-Path $uninst
-                          $exe = Get-ChildItem -LiteralPath $dir -Filter "*.exe" | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
-                          if ($exe) { $found = $exe.FullName; break } else { $found = $uninst; break }
+                          $found = Get-MainExeFromFolder $dir
+                          if ($found) { break } else { $found = $uninst; break }
                       }
                   }
 
                   if (-not $found) {
-                      $cleanName = $name.Trim() -replace '[*?]', ''
+                      $cleanName = $name.Trim() -replace '[\\*\\?]', ''
                       $pfs = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Select-Object -Unique
                       foreach ($pf in $pfs) {
-                          # a) Heißt die EXE so wie das gesuchte Programm?
-                          $exe = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*.exe" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
-                          if ($exe) { $found = $exe.FullName; break }
-
-                          # b) Heißt der Ordner so wie das gesuchte Programm?
                           $dirs = Get-ChildItem -LiteralPath $pf -Filter "*$cleanName*" -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue
                           foreach ($d in $dirs) {
-                              $exe = Get-ChildItem -LiteralPath $d.FullName -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)unins|uninstall|remove|update|crash|setup' } | Select-Object -First 1
-                              if ($exe) { $found = $exe.FullName; break }
+                              $found = Get-MainExeFromFolder $d.FullName
+                              if ($found) { break }
                           }
                           if ($found) { break }
                       }

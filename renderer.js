@@ -732,7 +732,7 @@ async function autoDetectAllPaths() {
         os: item.os || [],
         description: item.description || '',
         installPaths: [res.path],
-        links: item.links ? item.links.reduce((acc, l) => ({ ...acc, [l.label]: l.url }), {}) : {},
+        links: item.links ? Object.fromEntries(item.links.map((l) => [l.label, l.url])) : {},
       };
 
       await window.electronAPI.saveMetaJson(item.path, data);
