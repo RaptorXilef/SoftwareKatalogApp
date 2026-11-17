@@ -43,7 +43,7 @@ function getBaseName(filePath) {
 
 // SemVer / Regex Logic for "Update" Badges
 function extractVersion(filename) {
-  // FIX: Sucht ausschließlich nach dem ersten Zahl-Punkt-Zahl Block (z.B. 1.0 oder 2.8.0.0)
+  // Sucht ausschließlich nach dem ersten Zahl-Punkt-Zahl Block (z.B. 1.0 oder 2.8.0.0)
   // Ignoriert Anhänge wie -Win64, -German oder Präfixe wie _v.
   const match = filename.match(/(\d+(?:\.\d+)+)/);
   return match ? match[1] : null;
@@ -257,8 +257,7 @@ document.getElementById('lightboxBtnRight').addEventListener('click', (e) => {
   lightboxNext();
 });
 
-// FIX: Verwende für die Haupt-Buttons auch Delegation, ist konsistenter
-// Wir haben sie aber im HTML teils noch mit id="btnScan".
+// Toolbar Buttons
 document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnSettingsToggle') openSettings();
   if (e.target.id === 'btnAddSoftware') addSoftwareFolder();
@@ -300,7 +299,7 @@ document.body.addEventListener('click', async (e) => {
     return;
   }
 
-  // FIX: Bilder (Lightbox) müssen HIER abgefangen werden, VOR dem "Klick auf die Karte"!
+  // Bilder (Lightbox) abfangen, VOR dem "Klick auf die Karte"
   if (e.target.classList.contains('img-zoomable') || e.target.closest('.vid-container')) {
     e.stopPropagation(); // Verhindert, dass das Klick-Event andere Aktionen auslöst
     const zoomTarget = e.target.classList.contains('img-zoomable') ? e.target : e.target.closest('.vid-container');
@@ -330,6 +329,7 @@ document.body.addEventListener('click', async (e) => {
     renderGrid();
   }
 
+  // Action Buttons
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
 
@@ -351,6 +351,46 @@ document.body.addEventListener('click', async (e) => {
     const filterExt = actionEl.dataset.ext;
     const inputId = actionEl.dataset.target;
     browseFile(inputId, isDir, filterExt ? [{ name: filterExt, extensions: [filterExt] }] : undefined);
+  }
+
+  // Auto-Detect Trigger mit dynamischen Namen aus dem UI
+  if (action === 'auto-detect-path') {
+    const inputId = actionEl.dataset.target;
+    const origText = actionEl.textContent;
+
+    // Lies den Haupt-Namen und die optionalen Such-Namen in Echtzeit aus den Input-Feldern
+    const mainName = document.getElementById('editName').value.trim();
+    const searchNamesInput = document
+      .getElementById('editSearchNames')
+      .value.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const namesArray = [mainName, ...searchNamesInput].filter(Boolean);
+
+    actionEl.textContent = '⏳ Suche...';
+    actionEl.disabled = true;
+    try {
+      const res = await window.electronAPI.autoDetectPath(namesArray);
+      if (res.success && res.path) {
+        const textarea = document.getElementById(inputId);
+        if (!textarea.value.includes(res.path)) {
+          textarea.value = textarea.value ? `${textarea.value}\n${res.path}` : res.path;
+        }
+        actionEl.textContent = '✓ Gefunden!';
+        setTimeout(() => {
+          actionEl.textContent = origText;
+          actionEl.disabled = false;
+        }, 2000);
+      } else {
+        alert('Kein passender Registry-Eintrag gefunden. Bitte Such-Namen anpassen oder manuell suchen!');
+        actionEl.textContent = origText;
+        actionEl.disabled = false;
+      }
+    } catch (err) {
+      alert(`Fehler:\n${err.message}`);
+      actionEl.textContent = origText;
+      actionEl.disabled = false;
+    }
   }
 
   // Hinzufügen lokaler Installationspfade im Edit-Modal
@@ -1289,11 +1329,12 @@ function editSoftware(id) {
   const installPathsStr = (item.installPaths || []).join('\n');
 
   el.modalContent.innerHTML = `
-    <button type="button" class="close-btn" data-action="open-item-modal" data-id="${item.id}" title="Zurück">&times;</button>
+    <button type="button" class="close-btn" data-action="close-modal" title="Schließen">&times;</button>
     <h2>Software bearbeiten: <span style="color: var(--accent);">${escapeHTML(item.name)}</span></h2>
 
     <div class="settings-group" style="border: none; padding: 0; margin: 0;">
       <div class="settings-row"><label style="width:150px;">Name:</label><input type="text" id="editName" value="${escapeHTML(item.name)}"></div>
+      <div class="settings-row"><label style="width:150px;">Such-Namen (Komma):</label><input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="z.B. Bitdefender Antivirus Free"></div>
       <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}"></div>
       <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}"></div>
       <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}"></div>
@@ -1324,7 +1365,10 @@ function editSoftware(id) {
       <div style="margin-top: 15px;">
         <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
           <span>Lokale Installationspfade (Einer pro Zeile):</span>
-          <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
+          <div style="display: flex; gap: 10px;">
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-name="${escapeHTML(item.name)}" data-target="editInstallPaths">✨ Auto-Detect</button>
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
+          </div>
         </label>
         <textarea id="editInstallPaths" style="width:100%; height:60px;" placeholder="z.B. C:\\Program Files\\VLC\\vlc.exe">${escapeHTML(installPathsStr)}</textarea>
       </div>
@@ -1354,6 +1398,11 @@ async function saveSoftware(id) {
 
   const data = {
     name: document.getElementById('editName').value.trim(),
+    searchNames: document
+      .getElementById('editSearchNames')
+      .value.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     category: document.getElementById('editCat').value.trim(),
     hiddenCategory: document.getElementById('editHidden').value.trim(),
     tags: document

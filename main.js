@@ -369,27 +369,40 @@ if (!gotTheLock) {
       }
     });
 
-    // Auto-Detect Handler via PowerShell Registry Scan
-    ipcMain.handle('auto-detect-path', async (_event, softwareName) => {
+    // Auto-Detect Handler via PowerShell Registry Scan (unterstützt mehrere Namen)
+    ipcMain.handle('auto-detect-path', async (_event, namesArray) => {
       try {
+        // PowerShell-Array aus den übergebenen Namen bauen (maskiert doppelte Anführungszeichen)
+        const psNames = namesArray
+          .filter(Boolean)
+          .map((n) => `"${n.replace(/"/g, '""')}"`)
+          .join(',');
+        if (!psNames) return { success: false, error: 'Keine Namen zum Suchen übergeben.' };
+
         const psScript = `
-          $name = "${softwareName.replace(/"/g, '""')}"
+          $names = @(${psNames})
           $paths = @("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*")
           $found = $null
-          foreach ($p in $paths) {
-              $items = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match [regex]::Escape($name) }
-              foreach ($item in $items) {
-                  if ($item.DisplayIcon -and $item.DisplayIcon -match '\\.exe') {
-                      $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"', ''
-                      if (Test-Path $icon) { $found = $icon; break }
-                  }
-                  if ($item.InstallLocation) {
-                      $loc = $item.InstallLocation -replace '^"', '' -replace '"$', ''
-                      if (Test-Path $loc) {
-                          $exe = Get-ChildItem -Path $loc -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-                          if ($exe) { $found = $exe.FullName; break }
+          foreach ($name in $names) {
+              if ([string]::IsNullOrWhiteSpace($name)) { continue }
+              $escapedName = [regex]::Escape($name)
+              foreach ($p in $paths) {
+                  # Tolerante Suche via -match (Case-Insensitive Substring Match)
+                  $items = Get-ItemProperty -Path $p -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match $escapedName }
+                  foreach ($item in $items) {
+                      if ($item.DisplayIcon -and $item.DisplayIcon -match '\\.exe') {
+                          $icon = $item.DisplayIcon -replace '",?\\d*$', '' -replace '^"', ''
+                          if (Test-Path $icon) { $found = $icon; break }
+                      }
+                      if ($item.InstallLocation) {
+                          $loc = $item.InstallLocation -replace '^"', '' -replace '"$', ''
+                          if (Test-Path $loc) {
+                              $exe = Get-ChildItem -Path $loc -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                              if ($exe) { $found = $exe.FullName; break }
+                          }
                       }
                   }
+                  if ($found) { break }
               }
               if ($found) { break }
           }
@@ -855,6 +868,7 @@ del "%~f0"
             catData[catIdx].mainCategory = data.category || '';
             catData[catIdx].subCategories = data.tags || [];
             catData[catIdx].formats = data.formats || [];
+            catData[catIdx].searchNames = data.searchNames || [];
             catData[catIdx].installPaths = data.installPaths || [];
             catData[catIdx].links = Object.entries(data.links || {}).map(([label, url]) => ({ label, url }));
 

@@ -62,6 +62,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     subCategories = [],
     links = [],
     formats = [],
+    searchNames = [],
     installPaths = [],
     hiddenCategory = '';
 
@@ -135,6 +136,16 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
             : String(data.formats)
                 .split(',')
                 .map((s) => s.trim());
+
+        // Alternative Such-Namen auslesen
+        if (data.searchNames) {
+          searchNames = Array.isArray(data.searchNames)
+            ? data.searchNames.filter(Boolean)
+            : String(data.searchNames)
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
 
         // Lade die Liste möglicher lokaler Installationspfade
         if (data.installPaths) {
@@ -218,6 +229,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     mainCategory,
     subCategories,
     lastFiles: lastFiles.map(toRel),
+    searchNames,
     installPaths,
     links,
     formats,
