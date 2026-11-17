@@ -1067,7 +1067,8 @@ del "%~f0"
           dlWin.loadURL(url);
 
           // Fängt den Download rigoros ab, sobald du auf der Webseite klickst!
-          dlWin.webContents.session.on('will-download', (dlEvent, item, webContents) => {
+          // LINTER FIX: Ungenutzte Parameter mit "_" präfixt
+          dlWin.webContents.session.on('will-download', (_dlEvent, item, _webContents) => {
             // Zwingt den Windows "Speichern"-Dialog in deinen NAS-Ordner und lässt dich den Namen ändern!
             const suggestPath = path.join(targetAbs, item.getFilename());
             item.setSaveDialogOptions({
@@ -1075,7 +1076,7 @@ del "%~f0"
               defaultPath: suggestPath,
             });
 
-            item.on('updated', (updateEvent, state) => {
+            item.on('updated', (_updateEvent, state) => {
               if (state === 'progressing') {
                 const total = item.getTotalBytes();
                 if (total > 0) {
@@ -1085,7 +1086,7 @@ del "%~f0"
               }
             });
 
-            item.once('done', (doneEvent, state) => {
+            item.once('done', (_doneEvent, state) => {
               dlWin.close();
               if (state === 'completed') {
                 resolve({ success: true, filePath: item.getSavePath() });
