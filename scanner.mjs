@@ -64,6 +64,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     formats = [],
     searchNames = [],
     installPaths = [],
+    autoPaths = [],
     hiddenCategory = '';
 
   let addedAt = 0,
@@ -154,6 +155,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
             : [data.installPaths].filter(Boolean);
         }
 
+        if (data.autoPaths) {
+          autoPaths = Array.isArray(data.autoPaths) ? data.autoPaths.filter(Boolean) : [data.autoPaths].filter(Boolean);
+        }
+
         if (data.links && typeof data.links === 'object') {
           links = Array.isArray(data.links)
             ? data.links
@@ -231,6 +236,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     lastFiles: lastFiles.map(toRel),
     searchNames,
     installPaths,
+    autoPaths,
     links,
     formats,
     hiddenCategory,

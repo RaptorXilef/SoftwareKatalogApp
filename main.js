@@ -41,6 +41,7 @@ function getConfig() {
     autoExtensions: ['.exe', '.msi', '.zip'], // Dateiendungen für Auto-Download
     newBadgeDays: 14, // Dauer des NEU-Badges in Tagen
     versionCompareDepth: 3, // Vergleicht standardmäßig nur die ersten 3 Stellen (X.X.X)
+    showPathOriginBadges: false, // Standardmäßig deaktiviert
   };
 
   // Lokaler State (pro PC, z.B. Favoriten, Update-Check und installierte Versionen)
@@ -188,13 +189,12 @@ if (!gotTheLock) {
             // Dynamische Prüfung, ob das Programm lokal installiert ist
             item.isInstalled = false;
             item.validInstallPath = null;
-            if (item.installPaths && Array.isArray(item.installPaths)) {
-              for (const p of item.installPaths) {
-                if (fs.existsSync(p)) {
-                  item.isInstalled = true;
-                  item.validInstallPath = p; // Der erste gefundene Pfad wird unser Start-Pfad
-                  break;
-                }
+            const allPaths = [...(item.autoPaths || []), ...(item.installPaths || [])];
+            for (const p of allPaths) {
+              if (fs.existsSync(p)) {
+                item.isInstalled = true;
+                item.validInstallPath = p; // Der erste gefundene Pfad wird unser Start-Pfad
+                break;
               }
             }
 
@@ -320,12 +320,12 @@ if (!gotTheLock) {
 
         for (const item of data) {
           const itemId = item.id || Buffer.from(item.path).toString('base64url');
-          if (item.installPaths && Array.isArray(item.installPaths)) {
-            for (const p of item.installPaths) {
-              if (fs.existsSync(p) && p.toLowerCase().endsWith('.exe')) {
-                targets.push({ id: itemId, path: p });
-                break;
-              }
+          // Beide Arrays durchsuchen
+          const allPaths = [...(item.autoPaths || []), ...(item.installPaths || [])];
+          for (const p of allPaths) {
+            if (fs.existsSync(p) && p.toLowerCase().endsWith('.exe')) {
+              targets.push({ id: itemId, path: p });
+              break;
             }
           }
         }
@@ -966,6 +966,7 @@ del "%~f0"
             catData[catIdx].formats = data.formats || [];
             catData[catIdx].searchNames = data.searchNames || [];
             catData[catIdx].installPaths = data.installPaths || [];
+            catData[catIdx].autoPaths = data.autoPaths || [];
             catData[catIdx].links = Object.entries(data.links || {}).map(([label, url]) => ({ label, url }));
 
             // Atomares Schreiben für catalog.json

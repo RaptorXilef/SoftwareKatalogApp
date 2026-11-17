@@ -264,7 +264,7 @@ document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnScan') startScan('quick');
   if (e.target.id === 'btnUpdate') startScan('update');
   if (e.target.id === 'btnLocalVersions') scanLocalVersionsUI();
-  if (e.target.id === 'btnAutoDetectAll') autoDetectAllPaths(); // NEU: Globaler Batch Run
+  if (e.target.id === 'btnAutoDetectAll') autoDetectAllPaths();
   if (e.target.id === 'btnFullScan') startScan('full');
 });
 
@@ -358,6 +358,7 @@ document.body.addEventListener('click', async (e) => {
   if (action === 'auto-detect-path') {
     const inputId = actionEl.dataset.target;
     const origText = actionEl.textContent;
+    const itemId = actionEl.dataset.id;
 
     const mainName = document.getElementById('editName').value.trim();
     const searchNamesInput = document
@@ -376,6 +377,12 @@ document.body.addEventListener('click', async (e) => {
         if (!textarea.value.includes(res.path)) {
           textarea.value = textarea.value ? `${textarea.value}\n${res.path}` : res.path;
         }
+
+        const item = catalog.find((i) => i.id === itemId);
+        if (item && !item.icon) {
+          await window.electronAPI.extractExeIcon(res.path, item.path);
+        }
+
         actionEl.textContent = '✓ Gefunden!';
         setTimeout(() => {
           actionEl.textContent = origText;
@@ -395,21 +402,28 @@ document.body.addEventListener('click', async (e) => {
 
   // Manueller Icon-Extraktor
   if (action === 'extract-icon') {
-    const inputId = actionEl.dataset.target;
-    const installPaths = document
-      .getElementById(inputId)
-      .value.split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
     const itemId = actionEl.dataset.id;
     const item = catalog.find((i) => i.id === itemId);
 
-    if (installPaths.length > 0 && installPaths[0].toLowerCase().endsWith('.exe')) {
+    // Icon kann aus manuellen ODER automatischen Pfaden extrahiert werden
+    const installPaths = document
+      .getElementById('editInstallPaths')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const autoPaths = document
+      .getElementById('editAutoPaths')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const allPaths = [...autoPaths, ...installPaths];
+
+    if (allPaths.length > 0 && allPaths[0].toLowerCase().endsWith('.exe')) {
       const origText = actionEl.textContent;
       actionEl.textContent = '⏳ Lade...';
       actionEl.disabled = true;
       try {
-        const res = await window.electronAPI.extractExeIcon(installPaths[0], item.path);
+        const res = await window.electronAPI.extractExeIcon(allPaths[0], item.path);
         if (res.success) {
           // Um das Icon sofort anzuzeigen, speichern wir kurz zwischen und laden das UI neu
           await startScan('update');
@@ -425,7 +439,7 @@ document.body.addEventListener('click', async (e) => {
         actionEl.disabled = false;
       }
     } else {
-      alert('Bitte trage zuerst einen gültigen .exe Installationspfad ein!');
+      alert('Bitte trage zuerst einen gültigen .exe Installationspfad in eines der beiden Felder ein!');
     }
   }
 
@@ -689,8 +703,9 @@ async function scanLocalVersionsUI() {
 async function autoDetectAllPaths() {
   if (!window.electronAPI) return;
 
-  const itemsToProcess = catalog.filter((i) => !i.installPaths || i.installPaths.length === 0);
-  if (itemsToProcess.length === 0) return alert('Alle Programme haben bereits einen Installationspfad!');
+  // Sucht jetzt spezifisch nach Programmen, denen der Auto-Pfad fehlt
+  const itemsToProcess = catalog.filter((i) => !i.autoPaths || i.autoPaths.length === 0);
+  if (itemsToProcess.length === 0) return alert('Alle Programme im Katalog wurden bereits automatisch gesucht!');
 
   if (
     !confirm(
@@ -731,7 +746,8 @@ async function autoDetectAllPaths() {
         formats: item.formats || [],
         os: item.os || [],
         description: item.description || '',
-        installPaths: [res.path],
+        installPaths: item.installPaths || [], // Manuelle Pfade bleiben unangetastet!
+        autoPaths: [res.path], // Hier landet der neu gefundene Pfad
         links: item.links ? Object.fromEntries(item.links.map((l) => [l.label, l.url])) : {},
       };
 
@@ -906,10 +922,23 @@ function renderGrid() {
           badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
         }
 
-        // NEU: Warnung, wenn gar kein Pfad konfiguriert wurde
-        if (!item.installPaths || item.installPaths.length === 0) {
+        // Pfad-Herkunft Auswertung und Warnung
+        const hasManual = item.installPaths && item.installPaths.length > 0;
+        const hasAuto = item.autoPaths && item.autoPaths.length > 0;
+
+        if (!hasManual && !hasAuto) {
           badgesHtml +=
             '<div class="badge badge-nopath" title="Installationspfad fehlt. Klicke auf Bearbeiten, um ihn automatisch zu suchen.">Pfad fehlt ⚠️</div>';
+        } else if (appSettings.showPathOriginBadges) {
+          if (hasManual && hasAuto) {
+            badgesHtml +=
+              '<div class="badge badge-multi" title="Pfade wurden sowohl manuell als auch automatisch hinterlegt">Pfad: Mix</div>';
+          } else if (hasManual) {
+            badgesHtml +=
+              '<div class="badge badge-manual" title="Pfad wurde nur manuell eingetragen">Pfad: Manuell</div>';
+          } else if (hasAuto) {
+            badgesHtml += '<div class="badge badge-auto" title="Pfad wurde automatisch erkannt">Pfad: Auto</div>';
+          }
         }
 
         const versionTags = [];
@@ -1204,6 +1233,10 @@ async function openSettings() {
         <label style="width: 250px;">Versionsvergleich (Stellen):</label>
         <input type="number" id="cfgVersionCompareDepth" value="${s.versionCompareDepth !== undefined ? s.versionCompareDepth : 3}" min="1" max="10" style="width: 80px; flex: none;" title="Wie viele Stellen sollen verglichen werden? (z.B. 3 für X.X.X)">
       </div>
+      <label class="checkbox-lbl" style="margin-top: 15px;">
+        <input type="checkbox" id="cfgShowPathOriginBadges" ${s.showPathOriginBadges ? 'checked' : ''}>
+        Pfad-Herkunft als Badge anzeigen (Manuell / Auto / Mix)
+      </label>
     </div>
 
     <div class="settings-group">
@@ -1217,7 +1250,6 @@ async function openSettings() {
         <input type="number" id="cfgNestedDepth" value="${s.nestedDepth || 1}" min="1" max="5" style="width: 80px; flex: none;">
       </div>
     </div>
-
     <div class="settings-group">
       <h3>Auto-Download & Installation</h3>
       <p style="font-size: 0.9em; margin-top: 0;">Wenn kein <code>_last</code>-Ordner existiert, sucht der Scanner im Hauptordner des Programms nach diesen Dateitypen.</p>
@@ -1243,7 +1275,6 @@ async function openSettings() {
         </select>
       </div>
     </div>
-
     <div class="settings-group">
       <h3>Über & Daten</h3>
       <p style="margin-top: 5px; margin-bottom: 15px;">
@@ -1259,7 +1290,6 @@ async function openSettings() {
         <span id="updateContainer" style="margin-left: 10px;"></span>
       </div>
     </div>
-
     <div style="margin-top: 30px; text-align: right;">
       <button type="button" class="action-btn" data-action="save-settings">Speichern & Anwenden</button>
     </div>
@@ -1390,6 +1420,7 @@ async function saveSettings() {
       .map((s) => (s.startsWith('.') ? s : `.${s}`)), // Garantiert, dass jede Eingabe z.B. '.exe' statt 'exe' ist
     newBadgeDays: parseInt(document.getElementById('cfgNewBadgeDays').value, 10) || 0,
     versionCompareDepth: parseInt(document.getElementById('cfgVersionCompareDepth').value, 10) || 3,
+    showPathOriginBadges: document.getElementById('cfgShowPathOriginBadges').checked, // NEU
   };
 
   // Überprüfen, ob sich Pfade oder Ext-Listen im Vergleich zum alten State geändert haben
@@ -1406,7 +1437,7 @@ async function saveSettings() {
     if (needsRescan) {
       await startScan('quick'); // Führt den Scan und den Reload nahtlos aus!
     } else {
-      await init(); // Nur UI aktualisieren (z.B. versteckte Kategorien)
+      renderGrid(); // Nur das Grid aktualisieren reicht für die neuen Badges
     }
   } else {
     alert(`Fehler beim Speichern:\n${res.error}`);
@@ -1464,7 +1495,6 @@ function editSoftware(id) {
           <button type="button" data-cmd="createLink" title="Link einfügen">🔗 Link</button>
         </div>
         <div id="editDesc" class="rich-editor" contenteditable="true">${desc}</div>
-
       </div>
 
       <div style="margin-top: 15px;">
@@ -1472,22 +1502,28 @@ function editSoftware(id) {
         <textarea id="editLinks" style="width:100%; height:80px;">${escapeHTML(linksStr)}</textarea>
       </div>
 
-      <!-- Lokale Installationspfade -->
-      <div style="margin-top: 15px;">
-        <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
-          <span>Lokale Installationspfade (Einer pro Zeile):</span>
-          <div style="display: flex; gap: 10px;">
-            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-id="${item.id}" data-target="editInstallPaths">✨ Auto-Detect</button>
-            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
-          </div>
-        </label>
-        <textarea id="editInstallPaths" style="width:100%; height:60px;" placeholder="z.B. C:\\Program Files\\VLC\\vlc.exe">${escapeHTML(installPathsStr)}</textarea>
+      <!-- Gesplittete Pfad-Eingabe (Manuell vs. Auto) -->
+      <div style="margin-top: 15px; display: flex; gap: 15px;">
+        <div style="flex: 1;">
+          <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
+            <span>Auto-Pfade:</span>
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-id="${item.id}" data-target="editAutoPaths">✨ Suchen</button>
+          </label>
+          <textarea id="editAutoPaths" style="width:100%; height:60px;" placeholder="Wird automatisch gefüllt...">${escapeHTML((item.autoPaths || []).join('\n'))}</textarea>
+        </div>
+        <div style="flex: 1;">
+          <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
+            <span>Manuelle Pfade:</span>
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Wählen...</button>
+          </label>
+          <textarea id="editInstallPaths" style="width:100%; height:60px;" placeholder="z.B. C:\\Program Files\\...">${escapeHTML(installPathsStr)}</textarea>
+        </div>
       </div>
 
       <div style="display: flex; gap: 15px; margin-top: 15px;">
         <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="icon" style="flex: 1; margin-top: 0; padding: 15px; border-color: var(--accent);">
           🖼️ <strong>Icon</strong> hier ablegen<br><small style="opacity: 0.7;">(Wird zu icon.* umbenannt)</small><br>
-          <button type="button" class="action-btn" style="margin-top:15px; padding:6px 12px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="extract-icon" data-id="${item.id}" data-target="editInstallPaths">🪄 Aus .exe extrahieren</button>
+          <button type="button" class="action-btn" style="margin-top:15px; padding:6px 12px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="extract-icon" data-id="${item.id}" title="Liest das Icon der .exe Datei aus, die bei Pfade eingetragen ist">🪄 Aus .exe extrahieren</button>
         </div>
         <div class="media-dropzone" data-path="${escapeHTML(item.path)}" data-id="${item.id}" data-type="media" style="flex: 2; margin-top: 0; padding: 15px;">
           📷 <strong>Bilder oder Videos</strong> hier ablegen...
@@ -1539,11 +1575,18 @@ async function saveSoftware(id) {
       .value.split('\n')
       .map((s) => s.trim())
       .filter(Boolean),
-    links: {},
+    // Auto-Pfade getrennt speichern
+    autoPaths: document
+      .getElementById('editAutoPaths')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    links: item.links ? Object.fromEntries(item.links.map((l) => [l.label, l.url])) : {},
   };
 
   // Links parsen
   const linksRaw = document.getElementById('editLinks').value.split('\n');
+  data.links = {};
   for (const l of linksRaw) {
     const parts = l.split('|');
     if (parts.length >= 2) {

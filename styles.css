@@ -372,6 +372,18 @@ select {
   background: #f38ba8;
   color: #1e1e2e;
 }
+.badge-manual {
+  background: #bac2de; /* Dezentes Grau/Blau */
+  color: #1e1e2e;
+}
+.badge-auto {
+  background: #74c7ec; /* Hellblau */
+  color: #1e1e2e;
+}
+.badge-multi {
+  background: #cba6f7; /* Lila/Mauve */
+  color: #1e1e2e;
+}
 
 .fav-btn {
   position: absolute;
