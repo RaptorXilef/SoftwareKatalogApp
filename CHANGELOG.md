@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.15.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.14.0...v1.15.0) (2026-11-17)
+
+### 🚀 Features
+
+* **launcher:** Add alternative search names for registry auto-detection ([1ff89c2](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/1ff89c24b665756de6b7d47515ea0236ea4c8d52))
+* **launcher:** Add Auto-Detect for local installation paths via Registry parsing ([faf216c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/faf216c20a146f5ca211220f4e66fe9f947617c8))
+
+### 🐛 Bug Fixes
+
+* **launcher:** Bulletproof Auto-Detect utilizing two-way regex matching, uninstaller fallback, and EncodedCommand ([893e9ee](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/893e9eee86842e1b81ca8f18b4b203a9fa3ab081))
+* **ui:** Restore missing Auto-Detect button in the edit modal ([2621ca7](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2621ca721f8d8cf92da4d1edfe1ee08a02496f30))
+
 ## [1.14.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.13.3...v1.14.0) (2026-11-16)
 
 ### 🚀 Features
