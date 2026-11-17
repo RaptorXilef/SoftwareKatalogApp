@@ -282,7 +282,7 @@ el.clearSearchBtn.addEventListener('click', () => {
 el.sortSelect.addEventListener('change', renderGrid); // Auf Sortieränderung reagieren
 
 // ==========================================
-// EVENT DELEGATION (Robuster Selector .closest)
+// EVENT DELEGATION
 // ==========================================
 document.body.addEventListener('click', async (e) => {
   // Nativer Rich Text Editor Toolbar Handling
@@ -966,8 +966,9 @@ function openItemModal(id) {
                 <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
               </div>
             </div>`;
+          } else {
+            return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
           }
-          return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
         })
         .join('') +
       '</div>';
@@ -1366,7 +1367,7 @@ function editSoftware(id) {
         <label style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
           <span>Lokale Installationspfade (Einer pro Zeile):</span>
           <div style="display: flex; gap: 10px;">
-            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-name="${escapeHTML(item.name)}" data-target="editInstallPaths">✨ Auto-Detect</button>
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--accent); color:var(--bg);" data-action="auto-detect-path" data-target="editInstallPaths">✨ Auto-Detect</button>
             <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px;" data-action="browse-install-path" data-target="editInstallPaths">Suchen...</button>
           </div>
         </label>
