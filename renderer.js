@@ -347,6 +347,80 @@ document.body.addEventListener('click', async (e) => {
     openExternalUrl(actionEl.dataset.url);
   }
   if (action === 'save-settings') saveSettings();
+
+  // Debug & Backup Event Listener
+  if (action === 'reset-paths') {
+    const type = actionEl.dataset.type;
+    const typeName = type === 'auto' ? 'automatisch gefundenen' : 'manuell eingetragenen';
+    if (
+      !confirm(
+        `Willst du wirklich ALLE ${typeName} Pfade aus dem gesamten Katalog löschen?\n\nDas kann nicht rückgängig gemacht werden!`
+      )
+    )
+      return;
+
+    actionEl.disabled = true;
+    const origText = actionEl.textContent;
+    actionEl.textContent = '⏳ Lösche...';
+    try {
+      const res = await window.electronAPI.resetPaths(type);
+      if (res.success) {
+        await startScan('update'); // Lädt den Katalog neu, um Änderungen sofort zu zeigen
+        alert(`Erfolgreich gelöscht: ${res.count} Programme wurden aktualisiert.`);
+      }
+    } catch (err) {
+      alert(err);
+    }
+    actionEl.textContent = origText;
+    actionEl.disabled = false;
+  }
+
+  if (action === 'reset-versions') {
+    const type = actionEl.dataset.type;
+    if (type === 'nas') {
+      alert(
+        '💡 Info zu NAS-Versionen:\n\nDie NAS-Versionen werden nirgendwo in einer Datenbank gespeichert. Die App liest sie in Echtzeit aus den Dateinamen deiner Setup-Dateien (z.B. im "_last" Ordner) aus.\n\nUm diese Versionen zu löschen oder zu ändern, musst du die entsprechenden Dateien auf dem NAS-Laufwerk löschen oder umbenennen!'
+      );
+      return;
+    }
+
+    if (
+      !confirm(
+        'Willst du die gemerkten Versionen aller lokal installierten Programme auf diesem PC löschen?\n\nDie App wird sie beim nächsten Suchlauf neu einlesen.'
+      )
+    )
+      return;
+    const res = await window.electronAPI.resetVersions(type);
+    if (res.success) {
+      await init();
+      alert('Lokale PC-Versionen wurden erfolgreich zurückgesetzt!');
+    }
+  }
+
+  if (action === 'create-backup') {
+    const res = await window.electronAPI.createBackup();
+    if (res.success) alert('Backup erfolgreich als JSON-Datei gespeichert!');
+    else if (res.error) alert('Fehler beim Speichern:\n' + res.error);
+  }
+
+  if (action === 'restore-backup') {
+    if (
+      !confirm(
+        '⚠️ ACHTUNG ⚠️\n\nDein aktueller Zustand (Alle Einstellungen & Favoriten) wird komplett mit den Daten aus dem Backup überschrieben!\n\nWillst du wirklich fortfahren?'
+      )
+    )
+      return;
+    const res = await window.electronAPI.restoreBackup();
+    if (res.success) {
+      alert('Backup erfolgreich geladen!\nDie App-Ansicht wird nun aktualisiert.');
+      el.modalOverlay.style.display = 'none';
+      await init();
+    } else if (res.error) {
+      alert('Fehler beim Laden des Backups:\n' + res.error);
+    }
+  }
+  // ENDE: Debug & Backup Event Listener
+
   if (action === 'browse-file') {
     const isDir = actionEl.dataset.type === 'dir';
     const filterExt = actionEl.dataset.ext;
@@ -1275,6 +1349,24 @@ async function openSettings() {
         </select>
       </div>
     </div>
+
+    <!-- NEU: Debug & Backup -->
+    <div class="settings-group">
+      <h3 style="color: #f38ba8;">🛠️ Debug & Backup</h3>
+
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+         <button type="button" class="action-btn" style="margin-top:0; background:var(--surface); border:1px solid #f38ba8; color:#f38ba8;" data-action="reset-paths" data-type="auto">Auto-Pfade löschen</button>
+         <button type="button" class="action-btn" style="margin-top:0; background:var(--surface); border:1px solid #f38ba8; color:#f38ba8;" data-action="reset-paths" data-type="manual">Manuelle Pfade löschen</button>
+         <button type="button" class="action-btn" style="margin-top:0; background:var(--surface); border:1px solid #f38ba8; color:#f38ba8;" data-action="reset-versions" data-type="local">PC-Versionen löschen</button>
+         <button type="button" class="action-btn" style="margin-top:0; background:var(--surface); border:1px solid #f38ba8; color:#f38ba8;" data-action="reset-versions" data-type="nas">NAS-Versionen löschen</button>
+      </div>
+
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+         <button type="button" class="action-btn" style="margin-top:0; background: #89b4fa; color: var(--bg);" data-action="create-backup">💾 Backup erstellen</button>
+         <button type="button" class="action-btn" style="margin-top:0; background: #f9e2af; color: #1e1e2e;" data-action="restore-backup">📂 Backup laden</button>
+      </div>
+    </div>
+
     <div class="settings-group">
       <h3>Über & Daten</h3>
       <p style="margin-top: 5px; margin-bottom: 15px;">

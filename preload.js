@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Launcher & Software Features
   markAsInstalled: (id, version) => ipcRenderer.invoke('mark-as-installed', id, version),
   scanLocalVersions: () => ipcRenderer.invoke('scan-local-versions'),
+
+  // Debug & Backup Funktionen
+  resetPaths: (type) => ipcRenderer.invoke('reset-paths', type),
+  resetVersions: (type) => ipcRenderer.invoke('reset-versions', type),
+  createBackup: () => ipcRenderer.invoke('create-backup'),
+  restoreBackup: () => ipcRenderer.invoke('restore-backup'),
+
   autoDetectPath: (namesArray) => ipcRenderer.invoke('auto-detect-path', namesArray),
   extractExeIcon: (exePath, targetPath) => ipcRenderer.invoke('extract-exe-icon', exePath, targetPath),
   addSoftware: () => ipcRenderer.invoke('add-software'),

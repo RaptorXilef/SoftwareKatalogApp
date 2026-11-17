@@ -835,6 +835,87 @@ del "%~f0"
       });
     });
 
+    // ==========================================
+    // DEBUG & BACKUP HANDLER
+    // ==========================================
+
+    // Löscht global alle automatischen oder manuellen Pfade aus ALLEN meta.json Dateien
+    ipcMain.handle('reset-paths', async (_event, type) => {
+      try {
+        const config = getConfig();
+        if (!fs.existsSync(config.absJsonPath)) return { success: false, error: 'Katalog nicht gefunden' };
+
+        const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
+        let modified = 0;
+
+        for (const item of catData) {
+          const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+          if (fs.existsSync(metaPath)) {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+            if (type === 'auto') meta.autoPaths = [];
+            if (type === 'manual') meta.installPaths = [];
+            fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+            modified++;
+          }
+        }
+        return { success: true, count: modified };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    // Löscht die lokal zwischengespeicherten Versionsnummern der PC-Programme
+    ipcMain.handle('reset-versions', async (_event, type) => {
+      if (type === 'local') {
+        saveConfig({ installedVersions: {} });
+        return { success: true };
+      }
+      return { success: false };
+    });
+
+    // Exportiert config.json und state.json als gebündelte Backup-Datei
+    ipcMain.handle('create-backup', async () => {
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: 'Backup speichern',
+        defaultPath: 'SoftwareKatalog_Backup.json',
+        filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+      });
+
+      if (canceled || !filePath) return { success: false };
+
+      try {
+        const config = getConfig();
+        // Bereinige interne/temporäre Pfade, bevor wir sie sichern
+        delete config.appFolder;
+        delete config.statePath;
+        delete config.absJsonPath;
+        delete config.absScriptPath;
+
+        fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8');
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    // Importiert eine gebündelte Backup-Datei und überschreibt config/state
+    ipcMain.handle('restore-backup', async () => {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Backup wiederherstellen',
+        filters: [{ name: 'JSON Backup', extensions: ['json'] }],
+      });
+
+      if (canceled || filePaths.length === 0) return { success: false };
+
+      try {
+        const backupData = JSON.parse(fs.readFileSync(filePaths[0], 'utf-8'));
+        saveConfig(backupData);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
     ipcMain.handle('get-settings', () => getConfig());
     ipcMain.handle('save-settings', (_event, settings) => {
       try {
