@@ -403,13 +403,18 @@ if (!gotTheLock) {
           child.on('exit', () => {
             try {
               fs.unlinkSync(psScriptPath);
-            } catch (e) {}
+            } catch (error) {
+              console.warn(`Temporäre Skript-Datei konnte nicht gelöscht werden: ${error.message}`);
+            }
             resolve(out);
           });
-          child.on('error', () => {
+          child.on('error', (processError) => {
             try {
               fs.unlinkSync(psScriptPath);
-            } catch (e) {}
+            } catch (error) {
+              console.warn(`Temporäre Skript-Datei konnte nicht gelöscht werden: ${error.message}`);
+            }
+            console.error(`PowerShell Scanner Prozess-Fehler: ${processError.message}`);
             resolve('');
           });
         });
@@ -593,19 +598,12 @@ if (!gotTheLock) {
           const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript]);
           let out = '';
           // WICHTIG: Node liest die Ausgabe jetzt explizit als UTF-8!
-          child.stdout.on('data', (d) => { out += d.toString('utf8'); });
+          child.stdout.on('data', (d) => {
+            out += d.toString('utf8');
+          });
           child.on('exit', () => resolve(out.trim()));
           child.on('error', () => resolve(''));
         });
-
-        if (output && output.length > 3) {
-          return { success: true, path: output };
-        }
-        return { success: false, error: 'Kein Eintrag gefunden' };
-      } catch (e) {
-        return { success: false, error: e.message };
-      }
-    });
 
         if (output && output.length > 3) {
           return { success: true, path: output };

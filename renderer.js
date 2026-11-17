@@ -407,7 +407,7 @@ document.body.addEventListener('click', async (e) => {
   if (action === 'create-backup') {
     const res = await window.electronAPI.createBackup();
     if (res.success) alert('Backup erfolgreich als JSON-Datei gespeichert!');
-    else if (res.error) alert('Fehler beim Speichern:\n' + res.error);
+    else if (res.error) alert(`Fehler beim Speichern:\n${res.error}`);
   }
 
   if (action === 'restore-backup') {
@@ -423,7 +423,7 @@ document.body.addEventListener('click', async (e) => {
       el.modalOverlay.style.display = 'none';
       await init();
     } else if (res.error) {
-      alert('Fehler beim Laden des Backups:\n' + res.error);
+      alert(`Fehler beim Laden des Backups:\n${res.error}`);
     }
   }
   // ENDE: Debug & Backup Event Listener
