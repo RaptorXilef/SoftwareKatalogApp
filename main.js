@@ -308,7 +308,7 @@ if (!gotTheLock) {
       }
     });
 
-    // Liest die Windows-Dateiversionen aller lokal gefundenen Programme via PowerShell aus
+    // Liest die Windows-Dateiversionen aller lokal gefundenen Programme aus (mit Registry-Priorität)
     ipcMain.handle('scan-local-versions', async () => {
       try {
         const { absJsonPath, installedVersions } = getConfig();
@@ -318,13 +318,18 @@ if (!gotTheLock) {
         const updatedVersions = { ...(installedVersions || {}) };
         const targets = [];
 
+        // 1. Sammle alle zu prüfenden Programme (nimmt auch die Such-Namen mit auf)
         for (const item of data) {
           const itemId = item.id || Buffer.from(item.path).toString('base64url');
           // Beide Arrays durchsuchen
           const allPaths = [...(item.autoPaths || []), ...(item.installPaths || [])];
           for (const p of allPaths) {
             if (fs.existsSync(p) && p.toLowerCase().endsWith('.exe')) {
-              targets.push({ id: itemId, path: p });
+              targets.push({
+                id: itemId,
+                path: p,
+                names: [item.name, ...(item.searchNames || [])].filter(Boolean),
+              });
               break;
             }
           }
@@ -332,27 +337,82 @@ if (!gotTheLock) {
 
         if (targets.length === 0) return { success: true, count: 0 };
 
-        // Baut ein kompaktes PowerShell-Skript für alle lokalen EXEs in einem Rutsch (sehr schnell)
-        const psLines = targets.map((t) => {
+        // 2. Wir bauen ein extrem performantes PowerShell-Skript:
+        // Lädt alle Registry-Einträge mit "DisplayVersion" einmalig in den RAM (massiver Speed-Boost!)
+        let psScript = `
+          $ErrorActionPreference = 'SilentlyContinue'
+          $regPaths = @(
+            'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+            'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+            'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+            'HKCU:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+          )
+          $allReg = Get-ItemProperty -Path $regPaths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.DisplayVersion }
+        `;
+
+        // 3. Füge für jedes Programm eine Prüf-Logik hinzu
+        for (const t of targets) {
+          const psNames = t.names.map((n) => `"${n.replace(/"/g, '""')}"`).join(',');
           const safePath = t.path.replace(/'/g, "''");
-          return `$v = (Get-Item -LiteralPath '${safePath}' -ErrorAction SilentlyContinue).VersionInfo; if ($v) { $ver = if ($v.FileVersion) { $v.FileVersion } else { $v.ProductVersion }; Write-Output "${t.id}|$ver" }`;
-        });
+
+          psScript += `
+            $ver = $null
+            $names = @(${psNames})
+            # Priorität 1: Registry-Check ("Apps & Features")
+            foreach ($name in $names) {
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
+                $escName = [regex]::Escape($name.Trim())
+                $match = $allReg | Where-Object { ([string]$_.DisplayName -match $escName) -or ($name -match [regex]::Escape([string]$_.DisplayName)) } | Select-Object -First 1
+                if ($match) { $ver = $match.DisplayVersion; break }
+            }
+            # Priorität 2: EXE Metadaten Fallback (für Portable Apps oder wenn Registry fehlschlägt)
+            if (-not $ver) {
+                $v = (Get-Item -LiteralPath '${safePath}' -ErrorAction SilentlyContinue).VersionInfo
+                if ($v) { $ver = if ($v.FileVersion) { $v.FileVersion } else { $v.ProductVersion } }
+            }
+            if ($ver) { Write-Output "${t.id}|$ver" }
+          `;
+        }
+
+        // Bei hunderten Programmen wird das Skript zu groß für die versteckte Kommandozeile,
+        // daher speichern wir es zur Ausführung kurz als temporäre .ps1 Datei ab!
+        const tempDir = app.getPath('temp');
+        const psScriptPath = path.join(tempDir, `sk_ver_scan_${Date.now()}.ps1`);
+        fs.writeFileSync(psScriptPath, psScript, 'utf-8');
 
         const output = await new Promise((resolve) => {
-          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psLines.join('; ')]);
+          const child = spawn('powershell.exe', [
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            psScriptPath,
+          ]);
           let out = '';
           child.stdout.on('data', (d) => {
             out += d.toString();
           });
-          child.on('exit', () => resolve(out));
-          child.on('error', () => resolve(''));
+          child.on('exit', () => {
+            try {
+              fs.unlinkSync(psScriptPath);
+            } catch (e) {}
+            resolve(out);
+          });
+          child.on('error', () => {
+            try {
+              fs.unlinkSync(psScriptPath);
+            } catch (e) {}
+            resolve('');
+          });
         });
 
+        // 4. Ergebnisse bereinigen und sichern
         let updatedCount = 0;
         for (const line of output.split(/\r?\n/)) {
           const [id, rawVer] = line.split('|');
           if (id && rawVer) {
-            // Bereinigt Strings wie "3.0.24.0 (64-bit)" oder Kommas "3, 0, 24, 0" zu "3.0.24.0"
+            // Bereinigt Strings wie "3.0.24.0 (64-bit)" zu "3.0.24.0"
             const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
             if (cleaned) {
               updatedVersions[id.trim()] = cleaned[1];
