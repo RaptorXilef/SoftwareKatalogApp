@@ -888,6 +888,108 @@ del "%~f0"
     });
 
     // ==========================================
+    // WEB-VERSIONEN & NATIVE NAS-DOWNLOADS
+    // ==========================================
+    ipcMain.handle('check-web-versions', async () => {
+      try {
+        const config = getConfig();
+        if (!fs.existsSync(config.absJsonPath)) return { success: false, error: 'Katalog nicht gefunden' };
+
+        const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
+        let updatedCount = 0;
+
+        for (const item of catData) {
+          if (item.webVersionUrl && item.webVersionUrl.toLowerCase().includes('github.com')) {
+            // Schneidet Repository sicher aus (ignoriert .git am Ende)
+            const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+            if (repoMatch) {
+              const repo = repoMatch[1].replace(/\.git$/i, '');
+
+              try {
+                // Holt das letzte Release extrem ressourcenschonend (ca. 1-2 KB JSON)
+                const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+                  headers: { 'User-Agent': 'SoftwareKatalogApp' },
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  let latestVer = data.tag_name || '';
+
+                  // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
+                  const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                  if (cleaned) {
+                    latestVer = cleaned[1];
+                    // Hat sich die Version geändert?
+                    if (item.webVersion !== latestVer) {
+                      item.webVersion = latestVer;
+
+                      // Schreibe physisch in die meta.json des Programms
+                      const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+                      if (fs.existsSync(metaPath)) {
+                        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                        meta.webVersion = latestVer;
+                        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+                      }
+                      updatedCount++;
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn(`Fehler bei GitHub Abfrage für ${item.name}: ${err.message}`);
+              }
+            }
+          }
+        }
+
+        // Aktualisiert die globale JSON-Datei für das UI
+        if (updatedCount > 0) {
+          fs.writeFileSync(config.absJsonPath, JSON.stringify(catData, null, 2), 'utf-8');
+        }
+        return { success: true, count: updatedCount };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    ipcMain.handle('download-web-url', async (event, url, targetFolder, defaultName, itemId) => {
+      const config = getConfig();
+      // Ermittelt den absoluten Zielordner auf dem NAS
+      const targetAbs = path.resolve(config.appFolder, targetFolder);
+      const defaultPath = path.join(targetAbs, defaultName || 'setup.exe');
+
+      // Native Windows "Speichern unter"-Dialogbox öffnet sich DIREKT im NAS-Ordner!
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: 'Web-Download im NAS speichern',
+        defaultPath: defaultPath,
+      });
+
+      if (canceled || !filePath) return { success: false, canceled: true };
+
+      try {
+        const res = await fetch(url, { redirect: 'follow' });
+        if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+        const fileStream = fs.createWriteStream(filePath);
+        const total = parseInt(res.headers.get('content-length') || '0', 10);
+        let downloaded = 0;
+
+        // Streamt den Download direkt auf die Festplatte (ohne den RAM vollzumüllen)
+        for await (const chunk of res.body) {
+          fileStream.write(chunk);
+          downloaded += chunk.length;
+          if (total > 0) {
+            const percent = Math.round((downloaded / total) * 100);
+            // Sendet Live-Prozente an den richtigen Button im UI!
+            event.sender.send('web-download-progress', { id: itemId, pct: percent });
+          }
+        }
+        await new Promise((r) => fileStream.end(r));
+        return { success: true, filePath };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    // ==========================================
     // DEBUG & BACKUP HANDLER
     // ==========================================
 
@@ -1205,6 +1307,9 @@ del "%~f0"
             catData[catIdx].os = data.os || [];
             catData[catIdx].mainCategory = data.category || '';
             catData[catIdx].softwareType = data.softwareType || 'default';
+            catData[catIdx].webVersionUrl = data.webVersionUrl || '';
+            catData[catIdx].downloadUrl = data.downloadUrl || '';
+            catData[catIdx].webVersion = data.webVersion || '';
             catData[catIdx].subCategories = data.tags || [];
             catData[catIdx].formats = data.formats || [];
             catData[catIdx].searchNames = data.searchNames || [];

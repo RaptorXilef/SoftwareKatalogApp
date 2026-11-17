@@ -72,14 +72,22 @@ function getItemStatus(item) {
     item.lastFiles && item.lastFiles.length > 0 ? extractVersion(getBaseName(item.lastFiles[0])) : null;
   const localVersion = item.installedVersion || null;
 
-  let status = 'none'; // 'none' | 'installed' | 'update' | 'newer'
-  if (item.isInstalled) {
+  let status = 'none'; // 'none' | 'installed' | 'update' | 'newer' | 'webupdate'
+  // Konfigurierte Vergleichstiefe auslesen
+  const depth = appSettings.versionCompareDepth !== undefined ? appSettings.versionCompareDepth : 3;
+
+  // Höchste Priorität: Ist die aus dem Web gezogene Version neuer als die auf dem NAS?
+  if (item.webVersion) {
+    if (!nasVersion || compareVersions(item.webVersion, nasVersion, depth) > 0) {
+      status = 'webupdate';
+    }
+  }
+
+  // Danach greift die bisherige PC-vs-NAS Auswertung
+  if (status !== 'webupdate' && item.isInstalled) {
     status = 'installed';
     if (nasVersion && localVersion) {
-      // Konfigurierte Vergleichstiefe auslesen
-      const depth = appSettings.versionCompareDepth !== undefined ? appSettings.versionCompareDepth : 3;
       const cmp = compareVersions(nasVersion, localVersion, depth);
-
       if (cmp > 0) status = 'update';
       else if (cmp < 0) status = 'newer';
     }
@@ -264,6 +272,7 @@ document.body.addEventListener('click', (e) => {
   if (e.target.id === 'btnScan') startScan('quick');
   if (e.target.id === 'btnUpdate') startScan('update');
   if (e.target.id === 'btnLocalVersions') scanLocalVersionsUI();
+  if (e.target.id === 'btnWebVersions') checkWebVersionsUI();
   if (e.target.id === 'btnAutoDetectAll') autoDetectAllPaths();
   if (e.target.id === 'btnFullScan') startScan('full');
 
@@ -613,6 +622,41 @@ document.body.addEventListener('click', async (e) => {
       actionEl.disabled = false;
     }
   }
+
+  // Check Web Versions
+  if (action === 'check-web-versions') {
+    checkWebVersionsUI();
+  }
+
+  // Download Web Version
+  if (action === 'download-web') {
+    const url = actionEl.dataset.url;
+    const folder = actionEl.dataset.path;
+    const itemId = actionEl.dataset.id;
+
+    // Generiert einen vernünftigen Standardnamen aus der URL
+    let defaultName = url.split('/').pop().split('?')[0] || 'setup.exe';
+    if (!defaultName.includes('.')) defaultName += '.exe';
+
+    actionEl.disabled = true;
+    const origText = actionEl.textContent;
+    actionEl.textContent = '⏳ Wähle Ziel...';
+
+    try {
+      const res = await window.electronAPI.downloadWebUrl(url, folder, defaultName, itemId);
+      if (res.success) {
+        alert(`Download abgeschlossen!\n\nDatei: ${res.filePath}`);
+        startScan('update'); // Flottes NAS-Update, um die neue Setup-Datei sofort im Katalog zu sehen!
+      } else if (!res.canceled) {
+        alert(`Fehler beim Download:\n${res.error}`);
+      }
+    } catch (e) {
+      alert(`Fehler:\n${e.message}`);
+    } finally {
+      actionEl.textContent = origText;
+      actionEl.disabled = false;
+    }
+  }
 });
 
 // Reagiert auf die VersionSelector-Änderung (um die Buttons im Modal dynamisch anzupassen)
@@ -702,6 +746,14 @@ function updateProgressUI() {
   const displayPct = Math.floor(currentPct);
   el.scanProgressBar.style.width = `${displayPct}%`;
   el.scanPercentText.textContent = `${displayPct}%`;
+}
+
+// Hört auf den Live-Fortschritt des Web-Downloads aus der main.js
+if (window.electronAPI) {
+  window.electronAPI.onWebDownloadProgress((data) => {
+    const btn = document.getElementById(`btnWebDl_${data.id}`);
+    if (btn) btn.textContent = `⏳ ${data.pct}%`;
+  });
 }
 
 // ==========================================
@@ -902,6 +954,31 @@ async function autoDetectAllPaths() {
   alert(`Auto-Detect abgeschlossen! Pfade gefunden: ${foundCount} von ${itemsToProcess.length}`);
 }
 
+async function checkWebVersionsUI() {
+  if (!window.electronAPI) return;
+  const btn = document.getElementById('btnWebVersions');
+  const origText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Prüfe Web...';
+  }
+
+  try {
+    const res = await window.electronAPI.checkWebVersions();
+    if (res.success) {
+      await init(); // Lädt das Grid neu und malt die aktualisierten lila Karten!
+      if (res.count > 0) alert(`Web-Prüfung abgeschlossen!\nEs wurden ${res.count} neue Updates im Netz gefunden.`);
+    } else if (res.error) {
+      alert(`Fehler beim Abrufen der Web-Versionen:\n${res.error}`);
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
+}
+
 function renderTags() {
   const allTags = new Set();
   // forEach ohne automatischen Return via geschweifte Klammern
@@ -1040,7 +1117,10 @@ function renderGrid() {
         let cardStatusClass = '';
 
         // Status Rendering
-        if (status === 'update') {
+        if (status === 'webupdate') {
+          cardStatusClass = 'status-webupdate';
+          badgesHtml += '<div class="badge badge-webupdate" title="Neue Version im Web verfügbar">Web-Update 🌐</div>';
+        } else if (status === 'update') {
           cardStatusClass = 'status-update';
           badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
         } else if (status === 'newer') {
@@ -1084,6 +1164,11 @@ function renderGrid() {
         const versionTags = [];
         if (localVersion) versionTags.push(`<span>PC: v${escapeHTML(localVersion)}</span>`);
         if (nasVersion) versionTags.push(`<span>NAS: v${escapeHTML(nasVersion)}</span>`);
+        // Web-Version unten am Rand der Karte anzeigen
+        if (item.webVersion)
+          versionTags.push(
+            `<span style="background: rgba(203,166,247,0.25); color: #cba6f7;">Web: v${escapeHTML(item.webVersion)}</span>`
+          );
         const versionsHtml = versionTags.length > 0 ? `<div class="card-versions">${versionTags.join('')}</div>` : '';
 
         return `
@@ -1174,6 +1259,13 @@ function openItemModal(id) {
     : '';
 
   let downloadHtml = '';
+
+  // Web-Download Button, falls URL2 konfiguriert ist
+  let webDownloadHtml = '';
+  if (item.downloadUrl) {
+    webDownloadHtml = `<button type="button" id="btnWebDl_${item.id}" class="action-btn" style="background: #cba6f7; color: var(--bg); margin-left: 10px;" data-action="download-web" data-id="${item.id}" data-url="${escapeHTML(item.downloadUrl)}" data-path="${escapeHTML(item.path)}">🚀 Web-Download</button>`;
+  }
+
   let installHtml = '';
   let versionSelectHtml = '';
 
@@ -1282,6 +1374,7 @@ function openItemModal(id) {
         ${versionSelectHtml}
         ${installHtml}
         ${downloadHtml}
+        ${webDownloadHtml}
       </div>
     </div>
   `;
@@ -1669,6 +1762,13 @@ function editSoftware(id) {
         <div id="editDesc" class="rich-editor" contenteditable="true">${desc}</div>
       </div>
 
+      <div class="settings-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border);">
+        <h3 style="margin-bottom: 10px; margin-top: 0; font-size: 14px; color: #cba6f7;">🌐 Web-Erkennung & Download</h3>
+        <div class="settings-row"><label style="width:150px;">Prüf-URL (URL1):</label><input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt."></div>
+        <div class="settings-row"><label style="width:150px;">Download (URL2):</label><input type="text" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Direkter Link zur aktuellsten .exe / .zip"></div>
+        <div class="settings-row"><label style="width:150px;">Zuletzt erkannt:</label><input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Wird beim Klick auf 'Web-Versionen prüfen' automatisch gefüllt" readonly style="opacity:0.7;"></div>
+      </div>
+
       <div style="margin-top: 15px;">
         <label style="display:block; margin-bottom:5px;">Links (Format: Name | https://...):</label>
         <textarea id="editLinks" style="width:100%; height:80px;">${escapeHTML(linksStr)}</textarea>
@@ -1719,6 +1819,9 @@ async function saveSoftware(id) {
   const data = {
     name: document.getElementById('editName').value.trim(),
     softwareType: document.getElementById('editSoftwareType').value,
+    webVersionUrl: document.getElementById('editWebVersionUrl').value.trim(),
+    downloadUrl: document.getElementById('editDownloadUrl').value.trim(),
+    webVersion: document.getElementById('editWebVersion').value.trim(),
     searchNames: document
       .getElementById('editSearchNames')
       .value.split(',')

@@ -315,6 +315,15 @@ select {
   border-color: #89b4fa;
 }
 
+/* Web-Update Status (Lila) */
+.card.status-webupdate {
+  background-color: rgba(203, 166, 247, 0.08);
+  border-color: rgba(203, 166, 247, 0.45);
+}
+.card.status-webupdate:hover {
+  border-color: #cba6f7;
+}
+
 /* Versionsanzeige auf der Karte */
 .card-versions {
   margin-top: auto;
@@ -366,6 +375,10 @@ select {
 }
 .badge-newer {
   background: #89b4fa;
+  color: #1e1e2e;
+}
+.badge-webupdate {
+  background: #cba6f7;
   color: #1e1e2e;
 }
 .badge-nopath {

@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   markAsInstalled: (id, version) => ipcRenderer.invoke('mark-as-installed', id, version),
   scanLocalVersions: () => ipcRenderer.invoke('scan-local-versions'),
 
+  // Web-Versionen & Web-Downloads
+  checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
+  downloadWebUrl: (url, targetFolder, defaultName, itemId) =>
+    ipcRenderer.invoke('download-web-url', url, targetFolder, defaultName, itemId),
+  onWebDownloadProgress: (callback) => ipcRenderer.on('web-download-progress', (_event, data) => callback(data)),
+
   // Installierte Programme auflisten
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
 

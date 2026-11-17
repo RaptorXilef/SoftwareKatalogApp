@@ -66,6 +66,9 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     installPaths = [],
     autoPaths = [],
     softwareType = 'default',
+    webVersionUrl = '',
+    downloadUrl = '',
+    webVersion = '',
     hiddenCategory = '';
 
   let addedAt = 0,
@@ -161,6 +164,11 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
           autoPaths = Array.isArray(data.autoPaths) ? data.autoPaths.filter(Boolean) : [data.autoPaths].filter(Boolean);
         }
 
+        // Web-Variablen auslesen
+        if (data.webVersionUrl) webVersionUrl = data.webVersionUrl.trim();
+        if (data.downloadUrl) downloadUrl = data.downloadUrl.trim();
+        if (data.webVersion) webVersion = data.webVersion.trim();
+
         if (data.links && typeof data.links === 'object') {
           links = Array.isArray(data.links)
             ? data.links
@@ -240,6 +248,9 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     installPaths,
     autoPaths,
     softwareType,
+    webVersionUrl,
+    downloadUrl,
+    webVersion,
     links,
     formats,
     hiddenCategory,
