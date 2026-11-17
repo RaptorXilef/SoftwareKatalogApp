@@ -899,7 +899,7 @@ del "%~f0"
         let updatedCount = 0;
 
         for (const item of catData) {
-          if (item.webVersionUrl && item.webVersionUrl.toLowerCase().includes('github.com')) {
+          if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
             // Schneidet Repository sicher aus (ignoriert .git am Ende)
             const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
             if (repoMatch) {
