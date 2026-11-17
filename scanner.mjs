@@ -65,6 +65,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     searchNames = [],
     installPaths = [],
     autoPaths = [],
+    softwareType = 'default',
     hiddenCategory = '';
 
   let addedAt = 0,
@@ -123,6 +124,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
                 .split(',')
                 .map((s) => s.trim());
         if (data.category) mainCategory = data.category;
+        if (data.softwareType) softwareType = data.softwareType;
         if (data.tags)
           subCategories = Array.isArray(data.tags)
             ? data.tags
@@ -237,6 +239,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     searchNames,
     installPaths,
     autoPaths,
+    softwareType,
     links,
     formats,
     hiddenCategory,

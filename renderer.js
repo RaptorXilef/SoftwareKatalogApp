@@ -833,7 +833,12 @@ async function autoDetectAllPaths() {
   if (!window.electronAPI) return;
 
   // Sucht jetzt spezifisch nach Programmen, denen der Auto-Pfad fehlt
-  const itemsToProcess = catalog.filter((i) => !i.autoPaths || i.autoPaths.length === 0);
+  // Sucht spezifisch nach Programmen, denen der Auto-Pfad fehlt UND die normale Programme sind
+  const itemsToProcess = catalog.filter((i) => {
+    const isStandard = !i.softwareType || i.softwareType === 'default';
+    const noAutoPath = !i.autoPaths || i.autoPaths.length === 0;
+    return isStandard && noAutoPath;
+  });
   if (itemsToProcess.length === 0) return alert('Alle Programme im Katalog wurden bereits automatisch gesucht!');
 
   if (
@@ -1054,8 +1059,14 @@ function renderGrid() {
         // Pfad-Herkunft Auswertung und Warnung
         const hasManual = item.installPaths && item.installPaths.length > 0;
         const hasAuto = item.autoPaths && item.autoPaths.length > 0;
+        const sType = item.softwareType || 'default';
 
-        if (!hasManual && !hasAuto) {
+        if (sType === 'portable') {
+          badgesHtml +=
+            '<div class="badge badge-portable" title="Portables Programm (benötigt keinen Installationspfad)">Portabel 🧳</div>';
+        } else if (sType === 'driver') {
+          badgesHtml += '<div class="badge badge-driver" title="Treiber oder Systemkomponente">Treiber ⚙️</div>';
+        } else if (!hasManual && !hasAuto) {
           badgesHtml +=
             '<div class="badge badge-nopath" title="Installationspfad fehlt. Klicke auf Bearbeiten, um ihn automatisch zu suchen.">Pfad fehlt ⚠️</div>';
         } else if (appSettings.showPathOriginBadges) {
@@ -1630,6 +1641,14 @@ function editSoftware(id) {
           <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="fetch-installed-apps">📋 Liste laden</button>
         </div>
       </div>
+      <div class="settings-row">
+        <label style="width:150px;">Typ:</label>
+        <select id="editSoftwareType" style="flex:1; padding:10px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px;">
+          <option value="default" ${!item.softwareType || item.softwareType === 'default' ? 'selected' : ''}>Standard (Benötigt Pfad)</option>
+          <option value="portable" ${item.softwareType === 'portable' ? 'selected' : ''}>Portabel 🧳</option>
+          <option value="driver" ${item.softwareType === 'driver' ? 'selected' : ''}>Treiber / Addon ⚙️</option>
+        </select>
+      </div>
       <div class="settings-row"><label style="width:150px;">Hauptkategorie:</label><input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}"></div>
       <div class="settings-row"><label style="width:150px;">Tags (Komma):</label><input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}"></div>
       <div class="settings-row"><label style="width:150px;">Formate (Komma):</label><input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}"></div>
@@ -1699,6 +1718,7 @@ async function saveSoftware(id) {
 
   const data = {
     name: document.getElementById('editName').value.trim(),
+    softwareType: document.getElementById('editSoftwareType').value,
     searchNames: document
       .getElementById('editSearchNames')
       .value.split(',')

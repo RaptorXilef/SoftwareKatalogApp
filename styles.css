@@ -372,6 +372,14 @@ select {
   background: #f38ba8;
   color: #1e1e2e;
 }
+.badge-portable {
+  background: #cdd6f4; /* Weiß/Hellgrau */
+  color: #1e1e2e;
+}
+.badge-driver {
+  background: #f9e2af; /* Gelb */
+  color: #1e1e2e;
+}
 .badge-manual {
   background: #bac2de; /* Dezentes Grau/Blau */
   color: #1e1e2e;

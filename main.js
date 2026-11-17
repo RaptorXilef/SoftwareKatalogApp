@@ -1032,6 +1032,7 @@ del "%~f0"
         if (!fs.existsSync(metaFile)) {
           const template = {
             name: path.basename(targetDir),
+            softwareType: 'default',
             category: '',
             hiddenCategory: '',
             tags: [],
@@ -1075,6 +1076,7 @@ del "%~f0"
         if (!fs.existsSync(metaFile)) {
           const template = {
             name: path.basename(targetDir),
+            softwareType: 'default',
             category: '',
             hiddenCategory: '',
             tags: [],
@@ -1202,6 +1204,7 @@ del "%~f0"
             catData[catIdx].hiddenCategory = data.hiddenCategory ? data.hiddenCategory.trim() : '';
             catData[catIdx].os = data.os || [];
             catData[catIdx].mainCategory = data.category || '';
+            catData[catIdx].softwareType = data.softwareType || 'default';
             catData[catIdx].subCategories = data.tags || [];
             catData[catIdx].formats = data.formats || [];
             catData[catIdx].searchNames = data.searchNames || [];
