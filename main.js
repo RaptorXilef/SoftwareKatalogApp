@@ -976,6 +976,67 @@ del "%~f0"
     });
 
     // ==========================================
+    // VISUELLER LINK-PICKER (Für Download-Buttons)
+    // ==========================================
+    ipcMain.handle('open-visual-link-picker', async (_event, url) => {
+      return new Promise((resolve) => {
+        const scraperWin = new BrowserWindow({
+          width: 1200,
+          height: 800,
+          title: 'Visueller Link-Picker (Download-Button anklicken)',
+          autoHideMenuBar: true,
+          webPreferences: { nodeIntegration: false, contextIsolation: true },
+        });
+
+        let isResolved = false;
+        scraperWin.loadURL(url);
+
+        scraperWin.webContents.on('dom-ready', async () => {
+          if (isResolved) return;
+          try {
+            const code = `
+              if (!document.getElementById('sk-link-overlay-box')) {
+                new Promise((resolveJS) => {
+                  const div = document.createElement('div');
+                  div.id = 'sk-link-overlay-box';
+                  div.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#1e1e2e; color:#cdd6f4; padding:15px; border:2px solid #89b4fa; border-radius:8px; z-index:2147483647; font-family:sans-serif; box-shadow:0 10px 30px rgba(0,0,0,0.8); pointer-events:none;';
+                  div.innerHTML = '<span style="font-size:14px; font-weight:bold;">Bitte klicke auf der Webseite auf den Download-Button / Link!</span>';
+                  document.body.appendChild(div);
+
+                  // Fängt den allerersten Klick auf einen Link ab
+                  document.addEventListener('click', (e) => {
+                    const link = e.target.closest('a');
+                    if (link && link.href) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      div.remove();
+                      resolveJS({ success: true, url: link.href });
+                    }
+                  }, { capture: true });
+                });
+              }
+            `;
+            const result = await scraperWin.webContents.executeJavaScript(code);
+            if (result && result.success && !isResolved) {
+              isResolved = true;
+              scraperWin.close();
+              resolve(result);
+            }
+          } catch (e) {
+            // Ignorieren beim Neuladen
+          }
+        });
+
+        scraperWin.on('closed', () => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve({ success: false, canceled: true });
+          }
+        });
+      });
+    });
+
+    // ==========================================
     // WEB-VERSIONEN & NATIVE NAS-DOWNLOADS
     // ==========================================
     ipcMain.handle('check-web-versions', async () => {

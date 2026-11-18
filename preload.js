@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('download-web-url', url, targetFolder, defaultName, itemId),
   onWebDownloadProgress: (callback) => ipcRenderer.on('web-download-progress', (_event, data) => callback(data)),
   openVisualScraper: (url) => ipcRenderer.invoke('open-visual-scraper', url),
+  openVisualLinkPicker: (url) => ipcRenderer.invoke('open-visual-link-picker', url),
 
   // Installierte Programme auflisten
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),

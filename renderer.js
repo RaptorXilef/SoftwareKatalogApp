@@ -96,6 +96,25 @@ function getItemStatus(item) {
   return { status, nasVersion, localVersion };
 }
 
+// Globale Helper-Funktion für das Edit-Modal
+window.handleWebUrlChange = (input) => {
+  const val = input.value.trim();
+  const isGithub = val.toLowerCase().includes('github.com');
+  const scrapeOpts = document.getElementById('webScrapeOpts');
+  if (scrapeOpts) scrapeOpts.style.display = isGithub ? 'none' : 'block';
+
+  // Auto-Fill für GitHub Releases
+  if (isGithub) {
+    const dlInput = document.getElementById('editDownloadUrl');
+    const repoMatch = val.match(/github\.com\/([^/]+\/[^/?#]+)/);
+    if (dlInput && !dlInput.value.trim() && repoMatch) {
+      // Entfernt trailing Slashes und .git am Ende
+      const cleanUrl = val.replace(/\.git$/i, '').replace(/\/$/, '');
+      dlInput.value = `${cleanUrl}/releases/latest`;
+    }
+  }
+};
+
 // Globaler Error-Listener zum Ausblenden fehlender Bilder
 document.addEventListener(
   'error',
@@ -623,7 +642,35 @@ document.body.addEventListener('click', async (e) => {
     }
   }
 
-  // Visual Scrape Button (Endgegner Feature)
+  // Visual Link Picker
+  if (action === 'visual-link-pick') {
+    let startUrl = document.getElementById('editWebVersionUrl').value.trim();
+    if (!startUrl || startUrl.toLowerCase().includes('github.com')) {
+      startUrl = prompt('Bitte gib die Webseite ein, auf der der Download-Button zu finden ist:', 'https://');
+      if (!startUrl) return;
+    }
+
+    actionEl.disabled = true;
+    const origText = actionEl.textContent;
+    actionEl.textContent = '⏳ Öffne Browser...';
+
+    try {
+      const res = await window.electronAPI.openVisualLinkPicker(startUrl);
+      if (res.success) {
+        document.getElementById('editDownloadUrl').value = res.url;
+        alert(`Erfolgreich erkannt!\n\nDownload-Link: ${res.url}`);
+      } else if (!res.canceled) {
+        alert(`Fehler:\n${res.error}`);
+      }
+    } catch (e) {
+      alert(`Fehler:\n${e.message}`);
+    } finally {
+      actionEl.textContent = origText;
+      actionEl.disabled = false;
+    }
+  }
+
+  // Visual Scrape Button
   if (action === 'visual-scrape') {
     const url = document.getElementById('editWebVersionUrl').value.trim();
     if (!url || url.toLowerCase().includes('github.com')) {
@@ -1798,7 +1845,7 @@ function editSoftware(id) {
         <div class="settings-row">
           <label style="width:150px;">Prüf-URL (URL1):</label>
           <div style="display:flex; flex:1; gap:10px;">
-            <input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt." oninput="document.getElementById('webScrapeOpts').style.display = this.value.toLowerCase().includes('github.com') ? 'none' : 'block'" style="flex:1;">
+            <input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt." style="flex:1;" oninput="window.handleWebUrlChange(this)">
             <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="visual-scrape">🪄 Visuell markieren</button>
           </div>
         </div>
@@ -1810,7 +1857,13 @@ function editSoftware(id) {
           <div class="settings-row"><label style="width:130px; font-size:13px;">Danach (Suffix):</label><input type="text" id="editWebSuffix" value="${escapeHTML(item.webVersionSuffix || '')}" placeholder="z.B. </span>"></div>
         </div>
 
-        <div class="settings-row"><label style="width:150px;">Download (URL2):</label><input type="text" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Direkter Link oder Download-Seite"></div>
+        <div class="settings-row">
+          <label style="width:150px;">Download (URL2):</label>
+          <div style="display:flex; flex:1; gap:10px;">
+            <input type="text" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Direkter Link oder Download-Seite" style="flex:1;">
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="visual-link-pick">🪄 URL suchen</button>
+          </div>
+        </div>
         <div class="settings-row"><label style="width:150px;">Zuletzt erkannt:</label><input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Wird beim Klick auf 'Web-Versionen prüfen' automatisch gefüllt" readonly style="opacity:0.7;"></div>
       </div>
 
