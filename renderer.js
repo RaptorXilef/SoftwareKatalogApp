@@ -623,6 +623,36 @@ document.body.addEventListener('click', async (e) => {
     }
   }
 
+  // Visual Scrape Button (Endgegner Feature)
+  if (action === 'visual-scrape') {
+    const url = document.getElementById('editWebVersionUrl').value.trim();
+    if (!url || url.toLowerCase().includes('github.com')) {
+      return alert('Bitte trage zuerst eine gültige Webseite (Kein GitHub!) in das URL1 Feld ein!');
+    }
+
+    actionEl.disabled = true;
+    const origText = actionEl.textContent;
+    actionEl.textContent = '⏳ Öffne Browser...';
+
+    try {
+      const res = await window.electronAPI.openVisualScraper(url);
+      if (res.success) {
+        document.getElementById('editWebPrefix').value = res.prefix;
+        document.getElementById('editWebSuffix').value = res.suffix;
+        document.getElementById('editWebVersion').value = res.version;
+        document.getElementById('webScrapeOpts').style.display = 'block'; // Box zur Sicherheit aufklappen
+        alert(`Erfolgreich markiert!\n\nPräfix und Suffix wurden automatisch generiert.\nVersion: ${res.version}`);
+      } else if (!res.canceled) {
+        alert(`Fehler:\n${res.error}`);
+      }
+    } catch (e) {
+      alert(`Fehler:\n${e.message}`);
+    } finally {
+      actionEl.textContent = origText;
+      actionEl.disabled = false;
+    }
+  }
+
   // Check Web Versions
   if (action === 'check-web-versions') {
     checkWebVersionsUI();
@@ -1767,7 +1797,10 @@ function editSoftware(id) {
 
         <div class="settings-row">
           <label style="width:150px;">Prüf-URL (URL1):</label>
-          <input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt." oninput="document.getElementById('webScrapeOpts').style.display = this.value.toLowerCase().includes('github.com') ? 'none' : 'block'">
+          <div style="display:flex; flex:1; gap:10px;">
+            <input type="text" id="editWebVersionUrl" value="${escapeHTML(item.webVersionUrl || '')}" placeholder="z.B. https://github.com/nutzer/repo" title="GitHub-Links werden vollautomatisch ohne Programmierung getrackt." oninput="document.getElementById('webScrapeOpts').style.display = this.value.toLowerCase().includes('github.com') ? 'none' : 'block'" style="flex:1;">
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="visual-scrape">🪄 Visuell markieren</button>
+          </div>
         </div>
 
         <!-- Klappt sich dynamisch auf, wenn es KEIN GitHub Link ist -->

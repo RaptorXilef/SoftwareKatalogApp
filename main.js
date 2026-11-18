@@ -888,6 +888,94 @@ del "%~f0"
     });
 
     // ==========================================
+    // VISUELLER TEXT-HIGHLIGHTER
+    // ==========================================
+    ipcMain.handle('open-visual-scraper', async (_event, url) => {
+      return new Promise((resolve) => {
+        const scraperWin = new BrowserWindow({
+          width: 1200,
+          height: 800,
+          title: 'Visueller Text-Highlighter (Version markieren)',
+          autoHideMenuBar: true,
+          webPreferences: { nodeIntegration: false, contextIsolation: true },
+        });
+
+        let isResolved = false;
+        scraperWin.loadURL(url);
+
+        // dom-ready feuert auch, wenn der Nutzer auf der Seite herumklickt und navigiert!
+        scraperWin.webContents.on('dom-ready', async () => {
+          if (isResolved) return;
+          try {
+            const code = `
+              // Verhindert, dass die Box doppelt auf der Seite landet
+              if (!document.getElementById('sk-overlay-box')) {
+                new Promise((resolveJS) => {
+                  const div = document.createElement('div');
+                  div.id = 'sk-overlay-box';
+                  div.style.cssText = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#1e1e2e; color:#cdd6f4; padding:15px; border:2px solid #cba6f7; border-radius:8px; z-index:2147483647; font-family:sans-serif; box-shadow:0 10px 30px rgba(0,0,0,0.8); display:flex; align-items:center; gap:15px;';
+                  div.innerHTML = '<span style="font-size:14px; line-height:1.4;">1. <b>Versionsnummer</b> auf der Webseite markieren<br>2. Auf Übernehmen klicken</span><button id="sk-save-btn" style="background:#a6e3a1; color:#1e1e2e; border:none; padding:8px 15px; border-radius:4px; font-weight:bold; cursor:pointer;">Übernehmen</button>';
+                  document.body.appendChild(div);
+
+                  document.getElementById('sk-save-btn').onclick = () => {
+                     const sel = window.getSelection();
+                     const text = sel.toString().trim();
+                     if (!text) return alert('Bitte markiere zuerst eine Versionsnummer (z.B. 4.5.1) mit der Maus!');
+
+                     let parentHtml = '';
+                     // 3 = TextNode (Der rohe Text, wir brauchen aber das HTML-Element drum herum!)
+                     if (sel.anchorNode && sel.anchorNode.nodeType === 3) {
+                        parentHtml = sel.anchorNode.parentNode.innerHTML;
+                     } else if (sel.anchorNode) {
+                        parentHtml = sel.anchorNode.innerHTML;
+                     }
+
+                     let prefix = '';
+                     let suffix = '';
+                     const idx = parentHtml.indexOf(text);
+
+                     if (idx !== -1) {
+                        // Schneidet exakt 30 Zeichen vor und nach der Markierung aus dem rohen HTML aus
+                        prefix = parentHtml.substring(Math.max(0, idx - 30), idx);
+                        suffix = parentHtml.substring(idx + text.length, Math.min(parentHtml.length, idx + text.length + 30));
+                     } else {
+                        // Fallback, falls das HTML verschachtelt ist -> Nutzt den reinen Text-Kontext
+                        const textCtx = sel.anchorNode.parentNode.textContent;
+                        const tIdx = textCtx.indexOf(text);
+                        if (tIdx !== -1) {
+                           prefix = textCtx.substring(Math.max(0, tIdx - 30), tIdx);
+                           suffix = textCtx.substring(tIdx + text.length, Math.min(textCtx.length, tIdx + text.length + 30));
+                        }
+                     }
+
+                     div.remove();
+                     resolveJS({ success: true, prefix, suffix, version: text });
+                  };
+                });
+              }
+            `;
+            // Führt den Code nativ im fremden Browser aus und wartet, bis der Nutzer klickt!
+            const result = await scraperWin.webContents.executeJavaScript(code);
+            if (result && result.success && !isResolved) {
+              isResolved = true;
+              scraperWin.close();
+              resolve(result);
+            }
+          } catch (e) {
+            // Ignoriere Fehler, falls die Seite beim Navigieren neu lädt
+          }
+        });
+
+        scraperWin.on('closed', () => {
+          if (!isResolved) {
+            isResolved = true;
+            resolve({ success: false, canceled: true });
+          }
+        });
+      });
+    });
+
+    // ==========================================
     // WEB-VERSIONEN & NATIVE NAS-DOWNLOADS
     // ==========================================
     ipcMain.handle('check-web-versions', async () => {
