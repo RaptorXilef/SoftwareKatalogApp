@@ -803,12 +803,16 @@ document.body.addEventListener('click', async (e) => {
     }
   }
 
-  // Visual Link Picker
+  // Visual Link Picker (nutzt ausschließlich URL2, unabhängig von URL1)
   if (action === 'visual-link-pick') {
-    let startUrl = document.getElementById('editWebVersionUrl').value.trim();
-    if (!startUrl || startUrl.toLowerCase().includes('github.com')) {
-      startUrl = prompt('Bitte gib die Webseite ein, auf der der Download-Button zu finden ist:', 'https://');
-      if (!startUrl) return;
+    let startUrl = document.getElementById('editDownloadUrl').value.trim();
+    if (!startUrl) {
+      startUrl = prompt(
+        'Bitte gib die Download-Webseite (URL2) ein, auf der der Download-Button zu finden ist:',
+        'https://'
+      );
+      if (!startUrl || startUrl.trim() === 'https://') return;
+      startUrl = startUrl.trim();
     }
 
     actionEl.disabled = true;
@@ -823,7 +827,7 @@ document.body.addEventListener('click', async (e) => {
         document.getElementById('editDlSuffix').value = res.suffix;
         document.getElementById('dlScrapeOpts').style.display = 'block';
         alert(
-          `Erfolgreich erkannt!\n\nDieser Download-Link wird ab sofort bei jedem Klick vollautomatisch aus der Quell-Webseite ausgelesen!`
+          'Erfolgreich erkannt!\n\nDieser Download-Link wird ab sofort bei jedem Klick vollautomatisch aus der Quell-Webseite ausgelesen!'
         );
       } else if (!res.canceled) {
         alert(`Fehler:\n${res.error}`);
