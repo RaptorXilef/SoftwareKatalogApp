@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.21.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.20.1...v1.21.0) (2026-11-18)
+
+### 🚀 Features
+
+* **ui:** Add sticky badge legend, compact card icons, edit-modal backdrop lock, and enriched detail view ([0be9dee](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0be9deeab4ac218be41647afd67e7b6362f92a95))
+
+### 🐛 Bug Fixes
+
+* **catalog/web:** Decouple visual link picker (URL2) from version URL (URL1) ([10e0a7b](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/10e0a7be244125d6694ee7aff32768fdb928716e))
+
 ## [1.20.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.20.0...v1.20.1) (2026-11-18)
 
 ### 🐛 Bug Fixes
