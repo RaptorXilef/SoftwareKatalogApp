@@ -658,7 +658,12 @@ document.body.addEventListener('click', async (e) => {
       const res = await window.electronAPI.openVisualLinkPicker(startUrl);
       if (res.success) {
         document.getElementById('editDownloadUrl').value = res.url;
-        alert(`Erfolgreich erkannt!\n\nDownload-Link: ${res.url}`);
+        document.getElementById('editDlPrefix').value = res.prefix;
+        document.getElementById('editDlSuffix').value = res.suffix;
+        document.getElementById('dlScrapeOpts').style.display = 'block';
+        alert(
+          `Erfolgreich erkannt!\n\nDieser Download-Link wird ab sofort bei jedem Klick vollautomatisch aus der Quell-Webseite ausgelesen!`
+        );
       } else if (!res.canceled) {
         alert(`Fehler:\n${res.error}`);
       }
@@ -703,17 +708,22 @@ document.body.addEventListener('click', async (e) => {
   // Einzelnes Programm prüfen (Direkt aus dem Edit Modal)
   if (action === 'check-single-web') {
     const itemId = actionEl.dataset.id;
-    // Wir speichern vorher einmal durch, falls die URL gerade erst abgetippt wurde
-    await saveSoftware(itemId);
+    const url = document.getElementById('editWebVersionUrl').value.trim();
+    const prefix = document.getElementById('editWebPrefix').value;
+    const suffix = document.getElementById('editWebSuffix').value;
+
+    if (!url) return alert('Bitte zuerst eine URL1 eintragen!');
 
     actionEl.disabled = true;
     const origText = actionEl.textContent;
     actionEl.textContent = '⏳ Prüfe...';
     try {
-      const res = await window.electronAPI.checkSingleWebVersion(itemId);
+      const res = await window.electronAPI.checkSingleWebVersion(itemId, url, prefix, suffix);
       if (res.success) {
         document.getElementById('editWebVersion').value = res.version;
-        alert(`Erfolgreich geprüft!\n\nAktuellste Version im Web ist: ${res.version}`);
+        alert(
+          `Erfolgreich geprüft!\n\nAktuellste Version im Web ist: ${res.version}\n\n(Bitte vergiss nicht, unten auf "Speichern" zu klicken)`
+        );
       } else {
         alert(`Fehler:\n${res.error}`);
       }
@@ -733,6 +743,8 @@ document.body.addEventListener('click', async (e) => {
   // Download Web Version
   if (action === 'download-web') {
     const url = actionEl.dataset.url;
+    const dlPrefix = actionEl.dataset.pre || '';
+    const dlSuffix = actionEl.dataset.suf || '';
     const folder = actionEl.dataset.path;
     const itemId = actionEl.dataset.id;
 
@@ -745,7 +757,7 @@ document.body.addEventListener('click', async (e) => {
     actionEl.textContent = '⏳ Wähle Ziel...';
 
     try {
-      const res = await window.electronAPI.downloadWebUrl(url, folder, defaultName, itemId);
+      const res = await window.electronAPI.downloadWebUrl(url, dlPrefix, dlSuffix, folder, defaultName, itemId);
       if (res.success) {
         const doUpdate = confirm(
           `Download abgeschlossen!\n\nDie Setup-Datei liegt nun in deinem NAS-Ordner.\nDatei: ${res.filePath}\n\nMöchtest du das Programm (Metadaten/Ordner) jetzt kurz scannen, damit die neue Datei sofort sichtbar ist?`
@@ -1392,7 +1404,7 @@ function openItemModal(id) {
   // Web-Download Button, falls URL2 konfiguriert ist
   let webDownloadHtml = '';
   if (item.downloadUrl) {
-    webDownloadHtml = `<button type="button" id="btnWebDl_${item.id}" class="action-btn" style="background: #cba6f7; color: var(--bg); margin-left: 10px;" data-action="download-web" data-id="${item.id}" data-url="${escapeHTML(item.downloadUrl)}" data-path="${escapeHTML(item.path)}">🚀 Web-Download</button>`;
+    webDownloadHtml = `<button type="button" id="btnWebDl_${item.id}" class="action-btn" style="background: #cba6f7; color: var(--bg); margin-left: 10px;" data-action="download-web" data-id="${item.id}" data-url="${escapeHTML(item.downloadUrl)}" data-pre="${escapeHTML(item.dlPrefix || '')}" data-suf="${escapeHTML(item.dlSuffix || '')}" data-path="${escapeHTML(item.path)}">🚀 Web-Download</button>`;
   }
 
   let installHtml = '';
@@ -1916,6 +1928,14 @@ function editSoftware(id) {
             <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="visual-link-pick">🪄 URL suchen</button>
           </div>
         </div>
+
+        <!-- Die dynamischen Felder für den Link-Picker! -->
+        <div id="dlScrapeOpts" style="display: ${item.dlPrefix || item.dlSuffix ? 'block' : 'none'}; margin-left: 20px; padding-left: 15px; border-left: 2px solid #94e2d5; margin-top: 10px; margin-bottom: 15px; background: rgba(0,0,0,0.1); border-radius: 0 8px 8px 0; padding-top: 10px; padding-bottom: 10px;">
+          <p style="margin-top:0; font-size:12px; color:var(--text); opacity:0.8; margin-bottom:10px;">💡 Die App nutzt dieses HTML-Muster, um den Downloadlink in der Webseite vollautomatisch zu finden:</p>
+          <div class="settings-row" style="margin-top:0;"><label style="width:130px; font-size:13px;">Davor (Präfix):</label><input type="text" id="editDlPrefix" value="${escapeHTML(item.dlPrefix || '')}"></div>
+          <div class="settings-row"><label style="width:130px; font-size:13px;">Danach (Suffix):</label><input type="text" id="editDlSuffix" value="${escapeHTML(item.dlSuffix || '')}"></div>
+        </div>
+
         <div class="settings-row">
           <label style="width:150px;">Zuletzt erkannt:</label>
           <div style="display:flex; flex:1; gap:10px;">
@@ -1979,6 +1999,8 @@ async function saveSoftware(id) {
     webVersionPrefix: document.getElementById('editWebPrefix').value, // (trim entfernt, da Leerzeichen bei Prefix wichtig sein könnten!)
     webVersionSuffix: document.getElementById('editWebSuffix').value,
     downloadUrl: document.getElementById('editDownloadUrl').value.trim(),
+    dlPrefix: document.getElementById('editDlPrefix').value,
+    dlSuffix: document.getElementById('editDlSuffix').value,
     webVersion: document.getElementById('editWebVersion').value.trim(),
     searchNames: document
       .getElementById('editSearchNames')

@@ -922,32 +922,26 @@ del "%~f0"
                      const text = sel.toString().trim();
                      if (!text) return alert('Bitte markiere zuerst eine Versionsnummer (z.B. 4.5.1) mit der Maus!');
 
-                     let parentHtml = '';
-                     // 3 = TextNode (Der rohe Text, wir brauchen aber das HTML-Element drum herum!)
-                     if (sel.anchorNode && sel.anchorNode.nodeType === 3) {
-                        parentHtml = sel.anchorNode.parentNode.innerHTML;
-                     } else if (sel.anchorNode) {
-                        parentHtml = sel.anchorNode.innerHTML;
-                     }
+                     // Der kugelsichere Marker-Trick für fehlerfreies HTML-Parsing
+                     const range = sel.getRangeAt(0);
+                     const marker = document.createElement('span');
+                     marker.id = 'sk-temp-marker-42';
+                     marker.textContent = text;
+                     range.deleteContents();
+                     range.insertNode(marker);
 
+                     const parentHtml = marker.parentNode.innerHTML;
+                     const parts = parentHtml.split('<span id="sk-temp-marker-42">' + text + '</span>');
+
+                     // 30 Zeichen exakt um das Element herum ausschneiden
                      let prefix = '';
                      let suffix = '';
-                     const idx = parentHtml.indexOf(text);
-
-                     if (idx !== -1) {
-                        // Schneidet exakt 30 Zeichen vor und nach der Markierung aus dem rohen HTML aus
-                        prefix = parentHtml.substring(Math.max(0, idx - 30), idx);
-                        suffix = parentHtml.substring(idx + text.length, Math.min(parentHtml.length, idx + text.length + 30));
-                     } else {
-                        // Fallback, falls das HTML verschachtelt ist -> Nutzt den reinen Text-Kontext
-                        const textCtx = sel.anchorNode.parentNode.textContent;
-                        const tIdx = textCtx.indexOf(text);
-                        if (tIdx !== -1) {
-                           prefix = textCtx.substring(Math.max(0, tIdx - 30), tIdx);
-                           suffix = textCtx.substring(tIdx + text.length, Math.min(textCtx.length, tIdx + text.length + 30));
-                        }
+                     if (parts.length === 2) {
+                        prefix = parts[0].substring(Math.max(0, parts[0].length - 40));
+                        suffix = parts[1].substring(0, 40);
                      }
 
+                     marker.replaceWith(text); // Spuren verwischen
                      div.remove();
                      resolveJS({ success: true, prefix, suffix, version: text });
                   };
@@ -1003,14 +997,25 @@ del "%~f0"
                   div.innerHTML = '<span style="font-size:14px; font-weight:bold;">Bitte klicke auf der Webseite auf den Download-Button / Link!</span>';
                   document.body.appendChild(div);
 
-                  // Fängt den allerersten Klick auf einen Link ab
                   document.addEventListener('click', (e) => {
                     const link = e.target.closest('a');
-                    if (link && link.href) {
+                    const href = link ? link.getAttribute('href') : null;
+                    if (link && href) {
                       e.preventDefault();
                       e.stopPropagation();
+
+                      // Marker Trick für die href-URL
+                      link.setAttribute('href', 'SK_TEMP_HREF_MARKER');
+                      const parentHtml = link.parentNode.innerHTML;
+                      const parts = parentHtml.split('SK_TEMP_HREF_MARKER');
+
+                      let prefix = parts[0].substring(Math.max(0, parts[0].length - 40));
+                      let suffix = parts[1].substring(0, 15); // Endet meistens direkt beim schließenden Quote >
+
+                      link.setAttribute('href', href); // Wiederherstellen
                       div.remove();
-                      resolveJS({ success: true, url: link.href });
+
+                      resolveJS({ success: true, url: window.location.href, prefix, suffix });
                     }
                   }, { capture: true });
                 });
@@ -1140,10 +1145,7 @@ del "%~f0"
             });
           executing.add(p);
           p.then(() => executing.delete(p));
-
-          if (executing.size >= limit) {
-            await Promise.race(executing);
-          }
+          if (executing.size >= limit) await Promise.race(executing);
         }
         // Warten, bis die allerletzten Requests fertig sind
         await Promise.all(executing);
@@ -1158,23 +1160,18 @@ del "%~f0"
       }
     });
 
-    ipcMain.handle('check-single-web-version', async (_event, itemId) => {
+    // NEU: Einzelprüfung (Nimmt exakt die Daten, die aktuell im Frontend getippt wurden)
+    ipcMain.handle('check-single-web-version', async (_event, _itemId, url, prefix, suffix) => {
       try {
         const config = getConfig();
         if (!fs.existsSync(config.absJsonPath)) return { success: false, error: 'Katalog nicht gefunden' };
-
-        const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
-        const itemIdx = catData.findIndex((i) => i.id === itemId);
-        if (itemIdx === -1) return { success: false, error: 'Programm nicht gefunden' };
-
-        const item = catData[itemIdx];
-        if (!item.webVersionUrl) return { success: false, error: 'Keine Prüf-URL (URL1) hinterlegt!' };
+        if (!url) return { success: false, error: 'Keine Prüf-URL hinterlegt!' };
 
         let latestVer = '';
 
         // Github API Abfrage
-        if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
-          const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+        if (url.toLowerCase().includes('github.com')) {
+          const repoMatch = url.match(/github\.com\/([^/]+\/[^/?#]+)/);
           if (repoMatch) {
             const repo = repoMatch[1].replace(/\.git$/i, '');
             const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
@@ -1185,18 +1182,16 @@ del "%~f0"
               latestVer = data.tag_name || '';
             }
           }
-        }
-        // HTML Scraper
-        else if (item.webVersionPrefix && item.webVersionSuffix) {
-          const res = await fetch(item.webVersionUrl, {
+        } else if (prefix && suffix) {
+          const res = await fetch(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
           });
           if (res.ok) {
             const html = await res.text();
-            const preIdx = html.indexOf(item.webVersionPrefix);
+            const preIdx = html.indexOf(prefix);
             if (preIdx !== -1) {
-              const startIdx = preIdx + item.webVersionPrefix.length;
-              const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
+              const startIdx = preIdx + prefix.length;
+              const sufIdx = html.indexOf(suffix, startIdx);
               if (sufIdx !== -1) {
                 latestVer = html.substring(startIdx, sufIdx).trim();
               }
@@ -1207,42 +1202,50 @@ del "%~f0"
         // Putzen
         const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
         if (cleaned) {
-          latestVer = cleaned[1];
-          if (item.webVersion !== latestVer) {
-            item.webVersion = latestVer;
-            catData[itemIdx] = item;
-
-            const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
-            if (fs.existsSync(metaPath)) {
-              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-              meta.webVersion = latestVer;
-              fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-            }
-            fs.writeFileSync(config.absJsonPath, JSON.stringify(catData, null, 2), 'utf-8');
-          }
-          return { success: true, version: latestVer };
+          return { success: true, version: cleaned[1] };
         }
-
         return {
           success: false,
-          error: 'Keine Versionsnummer in der URL gefunden (evtl. Regex-Fehler oder Seite hat sich geändert)',
+          error: 'Keine Versionsnummer in der URL gefunden (Regex-Fehler, leeres Suffix oder Seite geändert)',
         };
       } catch (e) {
         return { success: false, error: e.message };
       }
     });
 
-    ipcMain.handle('download-web-url', async (event, url, targetFolder, defaultName, itemId) => {
+    ipcMain.handle('download-web-url', async (event, url, dlPrefix, dlSuffix, targetFolder, defaultName, itemId) => {
       const config = getConfig();
       // Ermittelt den absoluten Zielordner auf dem NAS
       const targetAbs = path.resolve(config.appFolder, targetFolder);
 
-      const ext = url.split('?')[0].toLowerCase().split('.').pop();
+      // Dynamische Link-Extraktion, falls Prefix/Suffix vom Visual-Picker hinterlegt wurden
+      let finalUrl = url;
+      if (dlPrefix && dlSuffix) {
+        try {
+          const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const html = await res.text();
+          const pIdx = html.indexOf(dlPrefix);
+          if (pIdx !== -1) {
+            const start = pIdx + dlPrefix.length;
+            const sIdx = html.indexOf(dlSuffix, start);
+            if (sIdx !== -1) {
+              const extractedHref = html.substring(start, sIdx);
+              // Wandelt relative URLs (/download.exe) automatisch in absolute um
+              finalUrl = new URL(extractedHref, url).href;
+            } else throw new Error('Download-Suffix nicht auf der Webseite gefunden.');
+          } else throw new Error('Download-Präfix nicht auf der Webseite gefunden.');
+        } catch (err) {
+          return { success: false, error: `Dynamische Link-Suche fehlgeschlagen: ${err.message}` };
+        }
+      }
+
+      const ext = finalUrl.split('?')[0].toLowerCase().split('.').pop();
       const directExts = ['exe', 'msi', 'zip', '7z', 'rar', 'tar', 'gz'];
 
-      // Fall 1: Direkte Datei - Streamen ohne Browser
       if (directExts.includes(ext)) {
-        const defaultPath = path.join(targetAbs, defaultName || 'setup.exe');
+        // Fall 1: Direkter Download (Kein Browser nötig)
+        const suggestedName = finalUrl.split('/').pop().split('?')[0];
+        const defaultPath = path.join(targetAbs, suggestedName || defaultName || 'setup.exe');
 
         // Native Windows "Speichern unter"-Dialogbox öffnet sich DIREKT im NAS-Ordner!
         const { canceled, filePath } = await dialog.showSaveDialog({
@@ -1253,7 +1256,7 @@ del "%~f0"
         if (canceled || !filePath) return { success: false, canceled: true };
 
         try {
-          const res = await fetch(url, { redirect: 'follow' });
+          const res = await fetch(finalUrl, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } });
           if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
           const fileStream = fs.createWriteStream(filePath);
@@ -1275,9 +1278,8 @@ del "%~f0"
         } catch (e) {
           return { success: false, error: e.message };
         }
-      }
-      // Fall 2: In-App Browser Interceptor für Klick-Webseiten (Wie UniGetUI / GitHub Releases)
-      else {
+      } else {
+        // Fall 2: In-App Browser (Webseite erzwingt Klick)
         return new Promise((resolve) => {
           const dlWin = new BrowserWindow({
             width: 1000,
@@ -1287,7 +1289,7 @@ del "%~f0"
             webPreferences: { nodeIntegration: false, contextIsolation: true },
           });
 
-          dlWin.loadURL(url);
+          dlWin.loadURL(finalUrl);
 
           // Fängt den Download rigoros ab, sobald du auf der Webseite klickst!
           // LINTER FIX: Ungenutzte Parameter mit "_" präfixt
@@ -1319,9 +1321,7 @@ del "%~f0"
             });
           });
 
-          dlWin.on('closed', () => {
-            resolve({ success: false, canceled: true });
-          });
+          dlWin.on('closed', () => resolve({ success: false, canceled: true }));
         });
       }
     });
@@ -1648,6 +1648,8 @@ del "%~f0"
             catData[catIdx].webVersionPrefix = data.webVersionPrefix || '';
             catData[catIdx].webVersionSuffix = data.webVersionSuffix || '';
             catData[catIdx].downloadUrl = data.downloadUrl || '';
+            catData[catIdx].dlPrefix = data.dlPrefix || '';
+            catData[catIdx].dlSuffix = data.dlSuffix || '';
             catData[catIdx].webVersion = data.webVersion || '';
             catData[catIdx].subCategories = data.tags || [];
             catData[catIdx].formats = data.formats || [];

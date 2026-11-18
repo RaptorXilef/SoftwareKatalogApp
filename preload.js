@@ -30,9 +30,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Web-Versionen & Web-Downloads
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
-  checkSingleWebVersion: (itemId) => ipcRenderer.invoke('check-single-web-version', itemId),
-  downloadWebUrl: (url, targetFolder, defaultName, itemId) =>
-    ipcRenderer.invoke('download-web-url', url, targetFolder, defaultName, itemId),
+  checkSingleWebVersion: (itemId, url, prefix, suffix) =>
+    ipcRenderer.invoke('check-single-web-version', itemId, url, prefix, suffix),
+  downloadWebUrl: (url, dlPrefix, dlSuffix, targetFolder, defaultName, itemId) =>
+    ipcRenderer.invoke('download-web-url', url, dlPrefix, dlSuffix, targetFolder, defaultName, itemId),
   onWebDownloadProgress: (callback) => ipcRenderer.on('web-download-progress', (_event, data) => callback(data)),
   openVisualScraper: (url) => ipcRenderer.invoke('open-visual-scraper', url),
   openVisualLinkPicker: (url) => ipcRenderer.invoke('open-visual-link-picker', url),

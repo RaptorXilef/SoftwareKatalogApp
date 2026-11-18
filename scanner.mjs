@@ -70,6 +70,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     webVersionPrefix = '',
     webVersionSuffix = '',
     downloadUrl = '',
+    dlPrefix = '',
+    dlSuffix = '',
     webVersion = '',
     hiddenCategory = '';
 
@@ -171,6 +173,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
         if (data.webVersionPrefix) webVersionPrefix = data.webVersionPrefix;
         if (data.webVersionSuffix) webVersionSuffix = data.webVersionSuffix;
         if (data.downloadUrl) downloadUrl = data.downloadUrl.trim();
+        if (data.dlPrefix) dlPrefix = data.dlPrefix;
+        if (data.dlSuffix) dlSuffix = data.dlSuffix;
         if (data.webVersion) webVersion = data.webVersion.trim();
 
         if (data.links && typeof data.links === 'object') {
@@ -256,6 +260,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     webVersionPrefix,
     webVersionSuffix,
     downloadUrl,
+    dlPrefix,
+    dlSuffix,
     webVersion,
     links,
     formats,
