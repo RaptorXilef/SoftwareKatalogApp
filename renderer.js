@@ -925,6 +925,7 @@ async function startScan(mode) {
     document.getElementById('btnFullScan'),
     document.getElementById('btnAutoDetectAll'),
     document.getElementById('btnLocalVersions'),
+    document.getElementById('btnWebVersions'),
   ];
   btns.forEach((b) => {
     if (b) b.disabled = true;
@@ -1041,6 +1042,14 @@ async function autoDetectAllPaths() {
 
       const data = {
         name: item.name,
+        softwareType: item.softwareType || 'default',
+        webVersionUrl: item.webVersionUrl || '',
+        webVersionPrefix: item.webVersionPrefix || '',
+        webVersionSuffix: item.webVersionSuffix || '',
+        downloadUrl: item.downloadUrl || '',
+        dlPrefix: item.dlPrefix || '',
+        dlSuffix: item.dlSuffix || '',
+        webVersion: item.webVersion || '',
         searchNames: item.searchNames || [],
         category: item.mainCategory || '',
         hiddenCategory: item.hiddenCategory || '',

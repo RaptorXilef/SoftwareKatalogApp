@@ -920,30 +920,37 @@ del "%~f0"
                   document.getElementById('sk-save-btn').onclick = () => {
                      const sel = window.getSelection();
                      const text = sel.toString().trim();
-                     if (!text) return alert('Bitte markiere zuerst eine Versionsnummer (z.B. 4.5.1) mit der Maus!');
+                     if (!text) return alert('Bitte markiere zuerst eine Versionsnummer (z.B. 43.0) mit der Maus!');
 
-                     // Der kugelsichere Marker-Trick für fehlerfreies HTML-Parsing
                      const range = sel.getRangeAt(0);
                      const marker = document.createElement('span');
                      marker.id = 'sk-temp-marker-42';
-                     marker.textContent = text;
-                     range.deleteContents();
+                     marker.appendChild(range.extractContents());
                      range.insertNode(marker);
 
-                     const parentHtml = marker.parentNode.innerHTML;
-                     const parts = parentHtml.split('<span id="sk-temp-marker-42">' + text + '</span>');
+                     // Liest aus dem gesamten Body, damit auch schließende Tags (wie </a></h2>) im Suffix landen!
+                     const markerOuter = marker.outerHTML;
+                     const fullHtml = document.body.innerHTML;
+                     const mIdx = fullHtml.indexOf(markerOuter);
 
-                     // 30 Zeichen exakt um das Element herum ausschneiden
                      let prefix = '';
                      let suffix = '';
-                     if (parts.length === 2) {
-                        prefix = parts[0].substring(Math.max(0, parts[0].length - 40));
-                        suffix = parts[1].substring(0, 40);
+                     if (mIdx !== -1) {
+                        prefix = fullHtml.substring(Math.max(0, mIdx - 35), mIdx);
+                        suffix = fullHtml.substring(mIdx + markerOuter.length, mIdx + markerOuter.length + 25);
                      }
 
-                     marker.replaceWith(text); // Spuren verwischen
+                     // Spuren im DOM sauber zurückbauen
+                     marker.replaceWith(...marker.childNodes);
                      div.remove();
-                     resolveJS({ success: true, prefix, suffix, version: text });
+
+                     const cleanedVer = text.replace(/,\\s*/g, '.').match(/(\\d+(?:\\.\\d+)+)/);
+                     resolveJS({
+                       success: true,
+                       prefix,
+                       suffix,
+                       version: cleanedVer ? cleanedVer[1] : text,
+                     });
                   };
                 });
               }
@@ -955,8 +962,8 @@ del "%~f0"
               scraperWin.close();
               resolve(result);
             }
-          } catch (_e) {
-            // Ignoriere Fehler, falls die Seite beim Navigieren neu lädt
+          } catch (navError) {
+            console.info(`Scraper-Fenster navigiert oder wurde geschlossen: ${navError.message}`);
           }
         });
 
@@ -1004,13 +1011,18 @@ del "%~f0"
                       e.preventDefault();
                       e.stopPropagation();
 
-                      // Marker Trick für die href-URL
-                      link.setAttribute('href', 'SK_TEMP_HREF_MARKER');
-                      const parentHtml = link.parentNode.innerHTML;
-                      const parts = parentHtml.split('SK_TEMP_HREF_MARKER');
+                      // Marker Trick auf dem gesamten Body für eindeutige Präfixe/Suffixe
+                      const markerStr = 'SK_TEMP_HREF_MARKER';
+                      link.setAttribute('href', markerStr);
+                      const fullHtml = document.body.innerHTML;
+                      const mIdx = fullHtml.indexOf(markerStr);
 
-                      let prefix = parts[0].substring(Math.max(0, parts[0].length - 40));
-                      let suffix = parts[1].substring(0, 15); // Endet meistens direkt beim schließenden Quote >
+                      let prefix = '';
+                      let suffix = '';
+                      if (mIdx !== -1) {
+                        prefix = fullHtml.substring(Math.max(0, mIdx - 40), mIdx);
+                        suffix = fullHtml.substring(mIdx + markerStr.length, mIdx + markerStr.length + 20);
+                      }
 
                       link.setAttribute('href', href); // Wiederherstellen
                       div.remove();
@@ -1027,8 +1039,8 @@ del "%~f0"
               scraperWin.close();
               resolve(result);
             }
-          } catch (_e) {
-            // Ignorieren beim Neuladen
+          } catch (navError) {
+            console.info(`Link-Picker navigiert oder wurde geschlossen: ${navError.message}`);
           }
         });
 
@@ -1044,6 +1056,69 @@ del "%~f0"
     // ==========================================
     // WEB-VERSIONEN & NATIVE NAS-DOWNLOADS
     // ==========================================
+
+    // Robuste Such-Engine für HTML-Präfix/Suffix (gleicht DOM-Unterschiede und dynamische Zahlen aus)
+    function extractBetween(html, prefix, suffix) {
+      if (!html || !prefix) return null;
+
+      const buildFlexRegex = (str, wildcardNumbers = false) => {
+        let escaped = str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (wildcardNumbers) {
+          // Macht rotierende Zahlen im Umfeld (wie dl_430 oder Datumsangaben) flexibel, schont aber HTML-Tags wie h2
+          escaped = escaped.replace(/\d+(?:\\.\d+)+|\b\d+\b|(?<=_|-|\/)\d+/g, '\\d+(?:\\.\\d+)*');
+        }
+        return escaped
+          .replace(/["']/g, '["\']')
+          .replace(/<br\s*\\?\/?>/gi, '<br\\s*\\/?>')
+          .replace(/\s+/g, '\\s+');
+      };
+
+      // 1. Versuch: Schnelle exakte Suche (mit lastIndexOf-Schutz gegen zu weites Aufspannen)
+      if (suffix) {
+        let searchFrom = 0;
+        while (searchFrom < html.length) {
+          const preIdx = html.indexOf(prefix, searchFrom);
+          if (preIdx === -1) break;
+          const startIdx = preIdx + prefix.length;
+          const sufIdx = html.indexOf(suffix, startIdx);
+          if (sufIdx === -1) break;
+
+          const closerPreIdx = html.lastIndexOf(prefix, sufIdx);
+          const actualStart = closerPreIdx !== -1 && closerPreIdx >= preIdx ? closerPreIdx + prefix.length : startIdx;
+
+          if (sufIdx - actualStart <= 500) {
+            return html.substring(actualStart, sufIdx).trim();
+          }
+          searchFrom = actualStart;
+        }
+      } else {
+        // Funktioniert auch, wenn das Suffix leer gelassen wurde!
+        const preIdx = html.indexOf(prefix);
+        if (preIdx !== -1) {
+          return html.substring(preIdx + prefix.length, preIdx + prefix.length + 30).trim();
+        }
+      }
+
+      // 2. Versuch: Fehlertolerantes Regex (Stufe 1: Formatierung, Stufe 2: Dynamische Zahlen-Wildcards)
+      for (const useWildcard of [false, true]) {
+        try {
+          const prePat = buildFlexRegex(prefix, useWildcard);
+          const sufPat = suffix ? buildFlexRegex(suffix, useWildcard) : '';
+          const fullRegex = suffix
+            ? new RegExp(`${prePat}([\\s\\S]{1,500}?)${sufPat}`, 'i')
+            : new RegExp(`${prePat}([\\s\\S]{1,30})`, 'i');
+          const match = html.match(fullRegex);
+          if (match?.[1]) {
+            return match[1].trim();
+          }
+        } catch (regexErr) {
+          console.warn(`Regex-Fallback Warnung: ${regexErr.message}`);
+        }
+      }
+
+      return null;
+    }
+
     ipcMain.handle('check-web-versions', async () => {
       try {
         const config = getConfig();
@@ -1070,17 +1145,14 @@ del "%~f0"
                 });
                 if (res.ok) {
                   const data = await res.json();
-                  let latestVer = data.tag_name || '';
+                  const latestVer = data.tag_name || '';
 
                   // Regex-Putzdienst: "Release 4.5.1" -> "4.5.1"
                   const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
-                  if (cleaned) {
-                    latestVer = cleaned[1];
+                  if (cleaned && item.webVersion !== cleaned[1]) {
                     // Hat sich die Version geändert?
-                    if (item.webVersion !== latestVer) {
-                      item.webVersion = latestVer;
-                      updated = true;
-                    }
+                    item.webVersion = cleaned[1];
+                    updated = true;
                   }
                 }
               } catch (err) {
@@ -1088,8 +1160,8 @@ del "%~f0"
               }
             }
           }
-          // Szenario B: Davor/Danach (Prefix/Suffix) HTML-Scraper
-          else if (item.webVersionPrefix && item.webVersionSuffix) {
+          // Szenario B: Davor/Danach (Prefix/Suffix) HTML-Scraper (Suffix ist jetzt optional!)
+          else if (item.webVersionPrefix) {
             try {
               // Lädt nur reinen Quelltext (Keine Bilder/CSS = kaum Datenvolumen)
               const res = await fetch(item.webVersionUrl, {
@@ -1097,20 +1169,12 @@ del "%~f0"
               });
               if (res.ok) {
                 const html = await res.text();
-                const preIdx = html.indexOf(item.webVersionPrefix);
-                if (preIdx !== -1) {
-                  const startIdx = preIdx + item.webVersionPrefix.length;
-                  const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
-                  if (sufIdx !== -1) {
-                    const rawVer = html.substring(startIdx, sufIdx).trim();
-                    const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
-                    if (cleaned) {
-                      const latestVer = cleaned[1];
-                      if (item.webVersion !== latestVer) {
-                        item.webVersion = latestVer;
-                        updated = true;
-                      }
-                    }
+                const rawVer = extractBetween(html, item.webVersionPrefix, item.webVersionSuffix);
+                if (rawVer) {
+                  const cleaned = rawVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+                  if (cleaned && item.webVersion !== cleaned[1]) {
+                    item.webVersion = cleaned[1];
+                    updated = true;
                   }
                 }
               }
@@ -1150,9 +1214,11 @@ del "%~f0"
         // Warten, bis die allerletzten Requests fertig sind
         await Promise.all(executing);
 
-        // Aktualisiert die globale JSON-Datei für das UI
+        // Aktualisiert die globale JSON-Datei atomar für das UI
         if (updatedCount > 0) {
-          fs.writeFileSync(config.absJsonPath, JSON.stringify(catData, null, 2), 'utf-8');
+          const tmpFile = `${config.absJsonPath}.tmp`;
+          fs.writeFileSync(tmpFile, JSON.stringify(catData, null, 2), 'utf-8');
+          fs.renameSync(tmpFile, config.absJsonPath);
         }
         return { success: true, count: updatedCount };
       } catch (e) {
@@ -1160,8 +1226,8 @@ del "%~f0"
       }
     });
 
-    // NEU: Einzelprüfung (Nimmt exakt die Daten, die aktuell im Frontend getippt wurden)
-    ipcMain.handle('check-single-web-version', async (_event, _itemId, url, prefix, suffix) => {
+    // Einzelprüfung (Prüft live die aktuellen Eingaben und merkt sich die gefundene Version direkt beim Programm)
+    ipcMain.handle('check-single-web-version', async (_event, itemId, url, prefix, suffix) => {
       try {
         const config = getConfig();
         if (!fs.existsSync(config.absJsonPath)) return { success: false, error: 'Katalog nicht gefunden' };
@@ -1182,31 +1248,43 @@ del "%~f0"
               latestVer = data.tag_name || '';
             }
           }
-        } else if (prefix && suffix) {
+        } else if (prefix) {
           const res = await fetch(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
           });
           if (res.ok) {
             const html = await res.text();
-            const preIdx = html.indexOf(prefix);
-            if (preIdx !== -1) {
-              const startIdx = preIdx + prefix.length;
-              const sufIdx = html.indexOf(suffix, startIdx);
-              if (sufIdx !== -1) {
-                latestVer = html.substring(startIdx, sufIdx).trim();
-              }
-            }
+            latestVer = extractBetween(html, prefix, suffix) || '';
           }
+        } else {
+          return {
+            success: false,
+            error: 'Bitte gib mindestens ein Präfix (Davor) an oder nutze "🪄 Visuell markieren"!',
+          };
         }
 
         // Putzen
         const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
         if (cleaned) {
-          return { success: true, version: cleaned[1] };
+          const foundVersion = cleaned[1];
+
+          // Speichere die erkannte Version direkt beim Eintrag mit der übergebenen itemId
+          if (itemId) {
+            const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
+            const itemIdx = catData.findIndex((i) => i.id === itemId);
+            if (itemIdx !== -1) {
+              catData[itemIdx].webVersion = foundVersion;
+              const tmpFile = `${config.absJsonPath}.tmp`;
+              fs.writeFileSync(tmpFile, JSON.stringify(catData, null, 2), 'utf-8');
+              fs.renameSync(tmpFile, config.absJsonPath);
+            }
+          }
+
+          return { success: true, version: foundVersion };
         }
         return {
           success: false,
-          error: 'Keine Versionsnummer in der URL gefunden (Regex-Fehler, leeres Suffix oder Seite geändert)',
+          error: 'Keine Versionsnummer an dieser Stelle gefunden. Bitte markiere die Version noch einmal neu!',
         };
       } catch (e) {
         return { success: false, error: e.message };
@@ -1220,20 +1298,20 @@ del "%~f0"
 
       // Dynamische Link-Extraktion, falls Prefix/Suffix vom Visual-Picker hinterlegt wurden
       let finalUrl = url;
-      if (dlPrefix && dlSuffix) {
+      if (dlPrefix) {
         try {
-          const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const res = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          });
           const html = await res.text();
-          const pIdx = html.indexOf(dlPrefix);
-          if (pIdx !== -1) {
-            const start = pIdx + dlPrefix.length;
-            const sIdx = html.indexOf(dlSuffix, start);
-            if (sIdx !== -1) {
-              const extractedHref = html.substring(start, sIdx);
-              // Wandelt relative URLs (/download.exe) automatisch in absolute um
-              finalUrl = new URL(extractedHref, url).href;
-            } else throw new Error('Download-Suffix nicht auf der Webseite gefunden.');
-          } else throw new Error('Download-Präfix nicht auf der Webseite gefunden.');
+          const extractedHref = extractBetween(html, dlPrefix, dlSuffix);
+          if (extractedHref) {
+            const cleanHref = extractedHref.split(/["'\s>]/)[0];
+            // Wandelt relative URLs (/download.exe) automatisch in absolute um
+            finalUrl = new URL(cleanHref, url).href;
+          } else {
+            throw new Error('Download-Link konnte anhand von Präfix/Suffix nicht auf der Webseite gefunden werden.');
+          }
         } catch (err) {
           return { success: false, error: `Dynamische Link-Suche fehlgeschlagen: ${err.message}` };
         }
@@ -1256,7 +1334,10 @@ del "%~f0"
         if (canceled || !filePath) return { success: false, canceled: true };
 
         try {
-          const res = await fetch(finalUrl, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0' } });
+          const res = await fetch(finalUrl, {
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          });
           if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
           const fileStream = fs.createWriteStream(filePath);
