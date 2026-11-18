@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.20.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.20.0...v1.20.1) (2026-11-18)
+
+### 🐛 Bug Fixes
+
+* **catalog/web:** Fix empty suffix extraction on nested tags and add resilient HTML matching ([07f6195](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/07f6195ca0c9568df60ffed469adb948da842621))
+
 ## [1.20.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.19.0...v1.20.0) (2026-11-18)
 
 ### 🚀 Features
