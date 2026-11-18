@@ -263,7 +263,7 @@ select {
 .card {
   position: relative;
   background: var(--surface);
-  padding: 20px;
+  padding: 16px 38px 16px 10px;
   border-radius: 12px;
   cursor: pointer;
   text-align: center;
@@ -273,21 +273,35 @@ select {
     background-color 0.2s,
     border-color 0.2s;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
 }
 .card:hover {
   transform: translateY(-5px);
   border-color: var(--accent);
 }
+.card-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 .card img {
   width: 64px;
   height: 64px;
   object-fit: contain;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
 }
 .card h3 {
   margin: 0 0 8px 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.card small {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Status-Farben für die Karten */
@@ -332,7 +346,7 @@ select {
   color: var(--text);
   opacity: 0.75;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
   flex-wrap: wrap;
 }
@@ -343,67 +357,168 @@ select {
   font-family: monospace;
 }
 
-/* Flexibles Badges System */
+/* Kompakte Badge-Spalte links in der Karte (überlappt keinen Text) */
 .badges-container {
-  position: absolute;
-  top: 10px;
-  left: 10px;
   display: flex;
   flex-direction: column;
   gap: 5px;
-  align-items: flex-start;
+  align-items: center;
+  width: 22px;
+  flex-shrink: 0;
 }
-.badge {
-  font-size: 11px;
+
+/* Runder Symbol-Badge (Karten & Legende) */
+.badge-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1e1e2e;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+.badge-dot svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Vollständiger Pill-Badge (Detailansicht oben) */
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   font-weight: bold;
-  padding: 3px 8px;
-  border-radius: 12px;
-  text-shadow: none;
+  padding: 4px 10px;
+  border-radius: 14px;
+  color: #1e1e2e;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
-.badge-new {
-  background: var(--accent);
-  color: var(--bg);
+.badge-pill svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.badge-installed {
-  background: #a6e3a1;
-  color: #1e1e2e;
+
+/* Dauerhafte Badge-Legende in der Sticky Toolbar */
+.badge-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid rgba(69, 71, 90, 0.5);
+  font-size: 12px;
+  color: var(--text);
 }
-.badge-update {
-  background: #fab387;
-  color: #1e1e2e;
+.toolbar.shrink .badge-legend {
+  padding-top: 6px;
+  gap: 6px 10px;
+  font-size: 11px;
 }
-.badge-newer {
-  background: #89b4fa;
-  color: #1e1e2e;
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.9;
+  white-space: nowrap;
 }
-.badge-webupdate {
-  background: #cba6f7;
-  color: #1e1e2e;
+.legend-item .badge-dot {
+  width: 18px;
+  height: 18px;
 }
-.badge-nopath {
-  background: #f38ba8;
-  color: #1e1e2e;
+.legend-item .badge-dot svg {
+  width: 11px;
+  height: 11px;
 }
-.badge-portable {
-  background: #cdd6f4; /* Weiß/Hellgrau */
-  color: #1e1e2e;
+
+/* Detail-Ansicht Erweiterungen */
+.modal-badges-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-right: 36px;
 }
-.badge-driver {
-  background: #f9e2af; /* Gelb */
-  color: #1e1e2e;
+.detail-search-names {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--text);
+  opacity: 0.65;
+  margin-left: 8px;
 }
-.badge-manual {
-  background: #bac2de; /* Dezentes Grau/Blau */
-  color: #1e1e2e;
+.detail-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px 0;
 }
-.badge-auto {
-  background: #74c7ec; /* Hellblau */
-  color: #1e1e2e;
+.ver-pill {
+  font-family: monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
 }
-.badge-multi {
-  background: #cba6f7; /* Lila/Mauve */
-  color: #1e1e2e;
+.ver-pill.ver-pc {
+  color: #a6e3a1;
+  border-color: rgba(166, 227, 161, 0.4);
+}
+.ver-pill.ver-nas {
+  color: #89b4fa;
+  border-color: rgba(137, 180, 250, 0.4);
+}
+.ver-pill.ver-web {
+  color: #cba6f7;
+  border-color: rgba(203, 166, 247, 0.4);
+}
+.detail-tech-info {
+  margin-top: 18px;
+  padding: 12px 15px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.detail-tech-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.detail-tech-label {
+  min-width: 135px;
+  color: var(--text);
+  opacity: 0.65;
+  font-weight: bold;
+}
+.detail-tech-value {
+  flex: 1;
+  font-family: monospace;
+  word-break: break-all;
+  color: var(--text);
+}
+.detail-tech-value a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.detail-tech-value a:hover {
+  text-decoration: underline;
 }
 
 .fav-btn {
@@ -485,6 +600,46 @@ select {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Modal Action-Reihen (Linter Fix: Muss nach .action-btn stehen) */
+.modal-actions {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.modal-action-row .action-btn,
+.modal-action-row .version-selector {
+  margin: 0;
+}
+.version-filename {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-family: monospace;
+  font-size: 13px;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Lightbox mit interaktiven Pfeilen */
 
 /* Lightbox mit interaktiven Pfeilen */
 .img-zoomable {

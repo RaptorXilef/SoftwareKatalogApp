@@ -18,6 +18,167 @@ let currentLightboxIndex = 0;
 
 let currentOpenModalId = null; // Tracke das aktuell offene Modal für Dropdown Updates
 let isUpdating = false; // Merkt sich, ob gerade ein Update heruntergeladen wird
+let isEditModalOpen = false; // Blockiert Klicks außerhalb des Modals im Bearbeiten-Modus
+
+// Zentrale Badge-Definition (Einzigartige Farben + 100% Offline-SVGs)
+const BADGE_CONFIG = {
+  webupdate: {
+    label: 'Web-Update',
+    title: 'Neue Version im Web verfügbar',
+    color: '#cba6f7',
+    icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  },
+  update: {
+    label: 'NAS-Update',
+    title: 'Neue Version auf dem NAS verfügbar',
+    color: '#fab387',
+    icon: '<svg viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>',
+  },
+  installed: {
+    label: 'Installiert',
+    title: 'Programm ist auf diesem PC installiert',
+    color: '#a6e3a1',
+    icon: '<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+  },
+  newer: {
+    label: 'PC neuer als NAS',
+    title: 'Installierte Version ist neuer als auf dem NAS',
+    color: '#89dceb',
+    icon: '<svg viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg>',
+  },
+  new: {
+    label: 'NEU',
+    title: 'Kürzlich hinzugefügt oder bearbeitet',
+    color: '#89b4fa',
+    icon: '<svg viewBox="0 0 24 24"><path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.2L12 16.4l-6.3 4.4 2.3-7.2-6-4.4h7.6z"/></svg>',
+  },
+  nopath: {
+    label: 'Pfad fehlt',
+    title: 'Installationspfad fehlt. Klicke auf Bearbeiten, um ihn automatisch zu suchen.',
+    color: '#f38ba8',
+    icon: '<svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  },
+  portable: {
+    label: 'Portabel',
+    title: 'Portables Programm (benötigt keinen Installationspfad)',
+    color: '#cdd6f4',
+    icon: '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>',
+  },
+  driver: {
+    label: 'Treiber',
+    title: 'Treiber oder Systemkomponente',
+    color: '#f9e2af',
+    icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  },
+  webtracking: {
+    label: 'Web-Tracking',
+    title: 'Prüft automatisch nach neuen Versionen im Internet (URL1)',
+    color: '#b4befe',
+    icon: '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  },
+  webdownload: {
+    label: 'Web-Download',
+    title: 'Download-Link hinterlegt (URL2)',
+    color: '#94e2d5',
+    icon: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  },
+  manual: {
+    label: 'Pfad: Manuell',
+    title: 'Pfad wurde nur manuell eingetragen',
+    color: '#a6adc8',
+    icon: '<svg viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+  },
+  auto: {
+    label: 'Pfad: Auto',
+    title: 'Pfad wurde automatisch erkannt',
+    color: '#74c7ec',
+    icon: '<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  },
+  multi: {
+    label: 'Pfad: Mix',
+    title: 'Pfade wurden sowohl manuell als auch automatisch hinterlegt',
+    color: '#f5c2e7',
+    icon: '<svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  },
+};
+
+function getItemBadges(item) {
+  const { status } = getItemStatus(item);
+  const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
+  const TIME_WINDOW = badgeDays * 24 * 60 * 60 * 1000;
+  const itemTimestamp = item.updatedAt || item.addedAt || 0;
+  const keys = [];
+
+  if (status === 'webupdate') keys.push('webupdate');
+  else if (status === 'update') keys.push('update');
+  else if (status === 'newer') keys.push('newer');
+  else if (status === 'installed') keys.push('installed');
+
+  if (itemTimestamp > 0 && badgeDays > 0 && Date.now() - itemTimestamp < TIME_WINDOW) {
+    keys.push('new');
+  }
+
+  const hasManual = item.installPaths?.length > 0;
+  const hasAuto = item.autoPaths?.length > 0;
+  const sType = item.softwareType || 'default';
+
+  if (sType === 'portable') {
+    keys.push('portable');
+  } else if (sType === 'driver') {
+    keys.push('driver');
+  } else if (!hasManual && !hasAuto) {
+    keys.push('nopath');
+  } else if (appSettings.showPathOriginBadges) {
+    if (hasManual && hasAuto) keys.push('multi');
+    else if (hasManual) keys.push('manual');
+    else if (hasAuto) keys.push('auto');
+  }
+
+  if (item.webVersionUrl) keys.push('webtracking');
+  if (item.downloadUrl) keys.push('webdownload');
+
+  return keys;
+}
+
+function renderBadgeDot(key) {
+  const cfg = BADGE_CONFIG[key];
+  if (!cfg) return '';
+  return `<div class="badge-dot" style="background:${cfg.color};" title="${escapeHTML(cfg.label)} – ${escapeHTML(cfg.title)}">${cfg.icon}</div>`;
+}
+
+function renderBadgePill(key) {
+  const cfg = BADGE_CONFIG[key];
+  if (!cfg) return '';
+  return `<div class="badge-pill" style="background:${cfg.color};" title="${escapeHTML(cfg.title)}">${cfg.icon}<span>${escapeHTML(cfg.label)}</span></div>`;
+}
+
+function renderBadgeLegend() {
+  const legendEl = document.getElementById('badgeLegend');
+  if (!legendEl) return;
+
+  const keys = [
+    'webupdate',
+    'update',
+    'installed',
+    'newer',
+    'new',
+    'nopath',
+    'portable',
+    'driver',
+    'webtracking',
+    'webdownload',
+  ];
+  if (appSettings.showPathOriginBadges) {
+    keys.push('manual', 'auto', 'multi');
+  }
+
+  legendEl.innerHTML = keys
+    .map((key) => {
+      const cfg = BADGE_CONFIG[key];
+      return `<div class="legend-item" title="${escapeHTML(cfg.title)}"><span class="badge-dot" style="background:${cfg.color};">${cfg.icon}</span><span>${escapeHTML(cfg.label)}</span></div>`;
+    })
+    .join('');
+}
 
 // Security: XSS Helper
 function escapeHTML(str) {
@@ -266,7 +427,7 @@ window.addEventListener('scroll', () => {
 });
 
 el.modalOverlay.addEventListener('click', (e) => {
-  if (e.target === el.modalOverlay) closeModal();
+  if (e.target === el.modalOverlay && !isEditModalOpen) closeModal();
 });
 
 el.lightboxOverlay.addEventListener('click', (e) => {
@@ -905,6 +1066,7 @@ async function init() {
       el.catalogCount.textContent = '0';
     } else {
       el.catalogCount.textContent = catalog.length.toString();
+      renderBadgeLegend();
       renderTags();
       renderGrid();
       performAutoUpdateCheck(); // Führt Prüfung im Hintergrund aus, falls Intervall erreicht
@@ -1241,94 +1403,39 @@ function renderGrid() {
   if (filtered.length === 0) {
     el.grid.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text); opacity: 0.7;">Keine Einträge für diese Suche gefunden.</div>`;
   } else {
-    // Hole konfigurierte Anzahl an Tagen (Standard: 14)
-    const badgeDays = appSettings.newBadgeDays !== undefined ? appSettings.newBadgeDays : 14;
-    const TIME_WINDOW = badgeDays * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-
     el.grid.innerHTML = filtered
       .map((item) => {
         const isFav = localFavorites.includes(item.id);
-        const itemTimestamp = item.updatedAt || item.addedAt || 0;
-
         const { status, nasVersion, localVersion } = getItemStatus(item);
 
-        let badgesHtml = '';
         let cardStatusClass = '';
+        if (status === 'webupdate') cardStatusClass = 'status-webupdate';
+        else if (status === 'update') cardStatusClass = 'status-update';
+        else if (status === 'newer') cardStatusClass = 'status-newer';
+        else if (status === 'installed') cardStatusClass = 'status-installed';
 
-        // Status Rendering
-        if (status === 'webupdate') {
-          cardStatusClass = 'status-webupdate';
-          badgesHtml += '<div class="badge badge-webupdate" title="Neue Version im Web verfügbar">Web-Update 🌐</div>';
-        } else if (status === 'update') {
-          cardStatusClass = 'status-update';
-          badgesHtml += '<div class="badge badge-update" title="Neue Version auf dem NAS verfügbar">Update 🎁</div>';
-        } else if (status === 'newer') {
-          cardStatusClass = 'status-newer';
-          badgesHtml += '<div class="badge badge-newer" title="Installierte Version ist neuer als auf dem NAS">✓</div>';
-        } else if (status === 'installed') {
-          cardStatusClass = 'status-installed';
-          badgesHtml += '<div class="badge badge-installed" title="Programm ist auf diesem PC installiert">✓</div>';
-        }
-
-        // Dynamisches NEU Badge
-        if (itemTimestamp > 0 && badgeDays > 0 && now - itemTimestamp < TIME_WINDOW) {
-          badgesHtml += '<div class="badge badge-new" title="Kürzlich hinzugefügt/bearbeitet">NEU</div>';
-        }
-
-        // Pfad-Herkunft Auswertung und Warnung
-        const hasManual = item.installPaths && item.installPaths.length > 0;
-        const hasAuto = item.autoPaths && item.autoPaths.length > 0;
-        const sType = item.softwareType || 'default';
-
-        if (sType === 'portable') {
-          badgesHtml +=
-            '<div class="badge badge-portable" title="Portables Programm (benötigt keinen Installationspfad)">Portabel 🧳</div>';
-        } else if (sType === 'driver') {
-          badgesHtml += '<div class="badge badge-driver" title="Treiber oder Systemkomponente">Treiber ⚙️</div>';
-        } else if (!hasManual && !hasAuto) {
-          badgesHtml +=
-            '<div class="badge badge-nopath" title="Installationspfad fehlt. Klicke auf Bearbeiten, um ihn automatisch zu suchen.">Pfad fehlt ⚠️</div>';
-        } else if (appSettings.showPathOriginBadges) {
-          if (hasManual && hasAuto) {
-            badgesHtml +=
-              '<div class="badge badge-multi" title="Pfade wurden sowohl manuell als auch automatisch hinterlegt">Pfad: Mix</div>';
-          } else if (hasManual) {
-            badgesHtml +=
-              '<div class="badge badge-manual" title="Pfad wurde nur manuell eingetragen">Pfad: Manuell</div>';
-          } else if (hasAuto) {
-            badgesHtml += '<div class="badge badge-auto" title="Pfad wurde automatisch erkannt">Pfad: Auto</div>';
-          }
-        }
-
-        // Konfigurierte URLs anzeigen
-        if (item.webVersionUrl) {
-          badgesHtml +=
-            '<div class="badge badge-manual" style="background:#89b4fa;" title="Dieses Programm prüft automatisch nach neuen Versionen im Internet">🌐 Web-Tracking</div>';
-        }
-        if (item.downloadUrl) {
-          badgesHtml +=
-            '<div class="badge badge-manual" style="background:#94e2d5;" title="Für dieses Programm wurde ein direkter Download-Link hinterlegt">⬇️ Web-Download</div>';
-        }
+        const badgesHtml = getItemBadges(item).map(renderBadgeDot).join('');
 
         const versionTags = [];
         if (localVersion) versionTags.push(`<span>PC: v${escapeHTML(localVersion)}</span>`);
         if (nasVersion) versionTags.push(`<span>NAS: v${escapeHTML(nasVersion)}</span>`);
-        // Web-Version unten am Rand der Karte anzeigen
-        if (item.webVersion)
+        if (item.webVersion) {
           versionTags.push(
             `<span style="background: rgba(203,166,247,0.25); color: #cba6f7;">Web: v${escapeHTML(item.webVersion)}</span>`
           );
+        }
         const versionsHtml = versionTags.length > 0 ? `<div class="card-versions">${versionTags.join('')}</div>` : '';
 
         return `
       <div class="card ${cardStatusClass}" data-id="${item.id}">
         <div class="badges-container">${badgesHtml}</div>
+        <div class="card-content">
+          ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon">` : ''}
+          <h3>${escapeHTML(item.name)}</h3>
+          <small>${escapeHTML(item.tags.join(', '))}</small>
+          ${versionsHtml}
+        </div>
         <button class="fav-btn ${isFav ? 'active' : ''}" data-id="${item.id}" title="Favorit">★</button>
-        ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" loading="lazy" decoding="async" alt="Icon">` : ''}
-        <h3>${escapeHTML(item.name)}</h3>
-        <small>${escapeHTML(item.tags.join(', '))}</small>
-        ${versionsHtml}
       </div>
     `;
       })
@@ -1397,112 +1504,141 @@ function openItemModal(id) {
   const item = catalog.find((i) => i.id === id);
   if (!item) return;
 
+  isEditModalOpen = false;
   currentOpenModalId = id; // Tracken für Version-Select Update
 
-  const osBadges = item.os.length > 0 ? `<p><strong>OS:</strong> ${escapeHTML(item.os.join(', '))}</p>` : '';
+  const { nasVersion, localVersion } = getItemStatus(item);
+  const fullBadgesHtml = getItemBadges(item).map(renderBadgePill).join('');
+  const badgesBarHtml = fullBadgesHtml ? `<div class="modal-badges-bar">${fullBadgesHtml}</div>` : '';
+
+  const searchNamesHtml =
+    item.searchNames?.length > 0
+      ? `<span class="detail-search-names">(${escapeHTML(item.searchNames.join(', '))})</span>`
+      : '';
+
+  const detailVersionsHtml = `
+    <div class="detail-versions">
+      <span class="ver-pill ver-pc">PC: ${localVersion ? `v${escapeHTML(localVersion)}` : '–'}</span>
+      <span class="ver-pill ver-nas">NAS: ${nasVersion ? `v${escapeHTML(nasVersion)}` : '–'}</span>
+      <span class="ver-pill ver-web">Web: ${item.webVersion ? `v${escapeHTML(item.webVersion)}` : '–'}</span>
+    </div>
+  `;
+
+  const osBadges =
+    item.os?.length > 0 ? `<p style="margin:4px 0;"><strong>OS:</strong> ${escapeHTML(item.os.join(', '))}</p>` : '';
   const formatBadges =
-    item.formats && item.formats.length > 0
-      ? `<p><strong>Formate:</strong> ${escapeHTML(item.formats.join(', '))}</p>`
+    item.formats?.length > 0
+      ? `<p style="margin:4px 0;"><strong>Formate:</strong> ${escapeHTML(item.formats.join(', '))}</p>`
       : '';
   const catText = item.mainCategory
-    ? `<p><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)} ${item.subCategories.length > 0 ? `(${escapeHTML(item.subCategories.join(', '))})` : ''}</p>`
+    ? `<p style="margin:4px 0;"><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)} ${item.subCategories?.length > 0 ? `(${escapeHTML(item.subCategories.join(', '))})` : ''}</p>`
     : '';
 
-  let downloadHtml = '';
-
-  // Web-Download Button, falls URL2 konfiguriert ist
-  let webDownloadHtml = '';
-  if (item.downloadUrl) {
-    webDownloadHtml = `<button type="button" id="btnWebDl_${item.id}" class="action-btn" style="background: #cba6f7; color: var(--bg); margin-left: 10px;" data-action="download-web" data-id="${item.id}" data-url="${escapeHTML(item.downloadUrl)}" data-pre="${escapeHTML(item.dlPrefix || '')}" data-suf="${escapeHTML(item.dlSuffix || '')}" data-path="${escapeHTML(item.path)}">🚀 Web-Download</button>`;
-  }
-
-  let installHtml = '';
-  let versionSelectHtml = '';
-
-  // Wenn es einen verifizierten lokalen Installationspfad gibt -> extra Start Button!
+  // Reihe 1: Explorer, Bearbeiten, Programm starten
   let runLocalHtml = '';
   if (item.isInstalled && item.validInstallPath) {
-    runLocalHtml = `<button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e; margin-right: 10px;" data-action="open-explorer" data-path="${escapeHTML(item.validInstallPath)}" title="Startet die installierte Software auf diesem PC">🚀 Programm starten</button>`;
+    runLocalHtml = `<button type="button" class="action-btn" style="background: #a6e3a1; color: #1e1e2e;" data-action="open-explorer" data-path="${escapeHTML(item.validInstallPath)}" title="Startet die installierte Software auf diesem PC">🚀 Programm starten</button>`;
   }
 
-  if (item.lastFiles && item.lastFiles.length > 0) {
-    // Wenn es genau EINE Datei zum Herunterladen/Ausführen gibt, zeige den Installations-Button
+  // Reihe 2: Setup-Datei/Dropdown, Setup, Download, Web-Download
+  let fileInfoOrSelectHtml = '';
+  let installHtml = '';
+  let downloadHtml = '';
+
+  if (item.lastFiles?.length > 0) {
     if (item.lastFiles.length === 1) {
       const fileName = getBaseName(item.lastFiles[0]);
-      installHtml = `
-        <button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;"
-                data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">
-          ▶️ Setup / Installieren (${escapeHTML(fileName)})
-        </button>`;
-      downloadHtml = `
-        <button type="button" class="action-btn" style="background: var(--accent); color: var(--bg); margin-left: 10px;"
-                data-action="start-download" data-files='${escapeHTML(JSON.stringify(item.lastFiles))}'>
-          ⬇️ Download</button>`;
+      fileInfoOrSelectHtml = `<span class="version-filename" title="${escapeHTML(fileName)}">${escapeHTML(fileName)}</span>`;
+      installHtml = `<button type="button" class="action-btn" style="background: #fab387; color: #1e1e2e;" data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
+      downloadHtml = `<button type="button" class="action-btn" style="background: var(--accent); color: var(--bg);" data-action="start-download" data-files='${escapeHTML(JSON.stringify(item.lastFiles))}'>⬇️ Download</button>`;
     } else {
-      // Versionsauswahl Dropdown, wenn es mehrere Installer/Dateien gibt!
       const optionsHtml = item.lastFiles
-        .map((f, i) => {
-          const name = getBaseName(f);
-          return `<option value="${i}">${escapeHTML(name)}</option>`;
-        })
+        .map((f, i) => `<option value="${i}">${escapeHTML(getBaseName(f))}</option>`)
         .join('');
-
-      versionSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
-
-      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e; margin-left: 10px;" data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
-      downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: var(--accent); color: var(--bg); margin-left: 10px;" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
+      fileInfoOrSelectHtml = `<select id="versionSelector" class="version-selector">${optionsHtml}</select>`;
+      installHtml = `<button type="button" id="dynamicInstallBtn" class="action-btn" style="background: #fab387; color: #1e1e2e;" data-action="execute-temp" data-id="${item.id}" data-path="${escapeHTML(item.lastFiles[0])}" title="Kopiert die Datei lokal und führt sie aus">▶️ Setup</button>`;
+      downloadHtml = `<button type="button" id="dynamicDownloadBtn" class="action-btn" style="background: var(--accent); color: var(--bg);" data-action="start-download" data-files='${escapeHTML(JSON.stringify([item.lastFiles[0]]))}'>⬇️ Download</button>`;
     }
   }
 
+  let webDownloadHtml = '';
+  if (item.downloadUrl) {
+    webDownloadHtml = `<button type="button" id="btnWebDl_${item.id}" class="action-btn" style="background: #cba6f7; color: var(--bg);" data-action="download-web" data-id="${item.id}" data-url="${escapeHTML(item.downloadUrl)}" data-pre="${escapeHTML(item.dlPrefix || '')}" data-suf="${escapeHTML(item.dlSuffix || '')}" data-path="${escapeHTML(item.path)}">🚀 Web-Download</button>`;
+  }
+
+  const row2Html =
+    fileInfoOrSelectHtml || webDownloadHtml
+      ? `<div class="modal-action-row">${fileInfoOrSelectHtml}${installHtml}${downloadHtml}${webDownloadHtml}</div>`
+      : '';
+
   // Links generieren
   let linksHtml = '';
-  if (item.links && item.links.length > 0) {
-    linksHtml =
-      '<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">' +
-      item.links
-        .map(
-          (l) =>
-            `<li><a href="#" style="color: var(--accent);" data-action="open-url" data-url="${escapeHTML(l.url)}">${escapeHTML(l.label)}</a></li>`
-        )
-        .join('') +
-      '</ul></div>';
+  if (item.links?.length > 0) {
+    linksHtml = `<div style="margin-top: 15px;"><strong>Links:</strong><ul style="margin-top: 5px;">${item.links
+      .map(
+        (l) =>
+          `<li><a href="#" style="color: var(--accent);" data-action="open-url" data-url="${escapeHTML(l.url)}">${escapeHTML(l.label)}</a></li>`
+      )
+      .join('')}</ul></div>`;
   }
+
+  // Technische Details (NAS-Ordner, URL1, URL2, Auto- & Manuelle PC-Pfade)
+  const techRows = [];
+  techRows.push(
+    `<div class="detail-tech-row"><span class="detail-tech-label">NAS-Ordner:</span><span class="detail-tech-value">${escapeHTML(item.path)}</span></div>`
+  );
+  if (item.webVersionUrl) {
+    techRows.push(
+      `<div class="detail-tech-row"><span class="detail-tech-label">Prüf-URL (URL1):</span><span class="detail-tech-value"><a href="#" data-action="open-url" data-url="${escapeHTML(item.webVersionUrl)}">${escapeHTML(item.webVersionUrl)}</a></span></div>`
+    );
+  }
+  if (item.downloadUrl) {
+    techRows.push(
+      `<div class="detail-tech-row"><span class="detail-tech-label">Download-URL (URL2):</span><span class="detail-tech-value"><a href="#" data-action="open-url" data-url="${escapeHTML(item.downloadUrl)}">${escapeHTML(item.downloadUrl)}</a></span></div>`
+    );
+  }
+  if (item.autoPaths?.length > 0) {
+    techRows.push(
+      `<div class="detail-tech-row"><span class="detail-tech-label">Auto-Pfad (PC):</span><span class="detail-tech-value">${item.autoPaths.map((p) => escapeHTML(p)).join('<br>')}</span></div>`
+    );
+  }
+  if (item.installPaths?.length > 0) {
+    techRows.push(
+      `<div class="detail-tech-row"><span class="detail-tech-label">Manueller Pfad (PC):</span><span class="detail-tech-value">${item.installPaths.map((p) => escapeHTML(p)).join('<br>')}</span></div>`
+    );
+  }
+  const techInfoHtml = `<div class="detail-tech-info">${techRows.join('')}</div>`;
 
   // Generierung der Thumbnails (Bilder + Videos mit Play-Overlay)
   let mediaHtml = '';
-  if (item.screenshots && item.screenshots.length > 0) {
-    mediaHtml =
-      '<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">' +
-      item.screenshots
-        .map((s, idx) => {
-          const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
-          const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
+  if (item.screenshots?.length > 0) {
+    mediaHtml = `<div style="margin-top: 20px; display: flex; gap: 15px; overflow-x: auto; padding-bottom: 10px;">${item.screenshots
+      .map((s, idx) => {
+        const fileUrl = `file:///${s.replace(/\\/g, '/')}`;
+        const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
 
-          if (isVid) {
-            // #t=1 springt bei der Vorschau auf Sekunde 1 (überspringt schwarze Anfangsbilder)
-            return `
+        if (isVid) {
+          return `
             <div class="vid-container" style="position:relative; display:inline-block; cursor:pointer;" data-id="${item.id}" data-idx="${idx}" title="Video abspielen">
               <video src="${fileUrl}#t=1" class="img-zoomable" style="height: 120px; min-width: 150px; max-width: 250px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;" muted preload="metadata"></video>
               <div style="position:absolute; inset:0; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.3); border-radius:8px; pointer-events:none;">
                 <span style="font-size:32px; color:white; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">▶️</span>
               </div>
             </div>`;
-          } else {
-            return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
-          }
-        })
-        .join('') +
-      '</div>';
+        }
+        return `<img src="${fileUrl}" class="img-zoomable" data-id="${item.id}" data-idx="${idx}" style="height: 120px; min-width: 150px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover;">`;
+      })
+      .join('')}</div>`;
   }
 
-  // Wichtig für den Editor-Fallback (HTML darf nicht ent-escapt werden)
-  // Das Modal rendert item.description wie bisher 1:1, da wir es im Custom Editor als reines HTML speichern
   el.modalContent.innerHTML = `
     <button type="button" class="close-btn" data-action="close-modal" title="Schließen" aria-label="Schließen">&times;</button>
+    ${badgesBarHtml}
     <div style="display: flex; gap: 20px; align-items: flex-start;">
       ${item.icon ? `<img src="file:///${item.icon.replace(/\\/g, '/')}" style="width: 80px; height: 80px; object-fit: contain;">` : ''}
-      <div>
-        <h2>${escapeHTML(item.name)}</h2>
+      <div style="flex: 1; min-width: 0;">
+        <h2 style="margin-bottom: 4px;">${escapeHTML(item.name)}${searchNamesHtml}</h2>
+        ${detailVersionsHtml}
         ${osBadges}
         ${formatBadges}
         ${catText}
@@ -1512,20 +1648,15 @@ function openItemModal(id) {
       <div style="line-height: 1.5; opacity: 0.9;">${item.description ? item.description : 'Keine Beschreibung vorhanden.'}</div>
       ${linksHtml}
       ${mediaHtml}
-      <p><small style="color: gray;">Netzwerk-Pfad: ${escapeHTML(item.path)}</small></p>
+      ${techInfoHtml}
     </div>
-    <div style="margin-top: 20px; border-top: 1px solid var(--border); padding-top: 15px; display: flex; align-items: center; justify-content: space-between;">
-      <div>
-        <button type="button" class="action-btn" style="margin-top: 0;" data-action="open-explorer" data-path="${escapeHTML(item.path)}">Im Explorer öffnen</button>
-        <button type="button" class="action-btn" style="margin-top: 0; margin-left: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
-      </div>
-      <div style="display: flex; align-items: center;">
+    <div class="modal-actions">
+      <div class="modal-action-row">
+        <button type="button" class="action-btn" data-action="open-explorer" data-path="${escapeHTML(item.path)}">Im Explorer öffnen</button>
+        <button type="button" class="action-btn" style="background: var(--surface); border: 1px solid var(--border); color: var(--text);" data-action="edit-software" data-id="${item.id}">✏️ Bearbeiten</button>
         ${runLocalHtml}
-        ${versionSelectHtml}
-        ${installHtml}
-        ${downloadHtml}
-        ${webDownloadHtml}
       </div>
+      ${row2Html}
     </div>
   `;
   el.modalOverlay.style.display = 'flex';
@@ -1534,6 +1665,7 @@ function openItemModal(id) {
 function closeModal() {
   el.modalOverlay.style.display = 'none';
   currentOpenModalId = null;
+  isEditModalOpen = false;
 }
 
 function openExternalUrl(url) {
@@ -1571,6 +1703,7 @@ async function performAutoUpdateCheck() {
 
 async function openSettings() {
   if (!window.electronAPI) return alert('Einstellungen sind nur in der Desktop-App verfügbar.');
+  isEditModalOpen = false;
   const s = appSettings;
   const info = await window.electronAPI.getAppInfo();
 
@@ -1838,6 +1971,7 @@ async function saveSettings() {
     if (needsRescan) {
       await startScan('quick'); // Führt den Scan und den Reload nahtlos aus!
     } else {
+      renderBadgeLegend();
       renderGrid(); // Nur das Grid aktualisieren reicht für die neuen Badges
     }
   } else {
@@ -1861,6 +1995,8 @@ async function addSoftwareFolder() {
 function editSoftware(id) {
   const item = catalog.find((i) => i.id === id);
   if (!item) return;
+
+  isEditModalOpen = true;
 
   // Description is now pure HTML from the rich text editor
   const desc = item.description || '';
