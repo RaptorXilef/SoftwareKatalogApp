@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.20.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.19.0...v1.20.0) (2026-11-18)
+
+### 🚀 Features
+
+* **catalog/web:** Add GitHub URL auto-fill and visual link picker ([7b0cc01](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7b0cc01b44ec8b721416bc39ce070c09dd22d08b))
+* **catalog/web:** Add granular sorting, URL badges, and targeted single-item web checks ([b1c14bf](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/b1c14bf99da09308391d0a0bf770c51206c94557))
+* **catalog/web:** Implement Phase 1 of Web Versioning (GitHub API & Native NAS Downloads) ([186f013](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/186f01310745ecbe95784f5c629e4871e377b88f))
+* **catalog/web:** Implement Phase 2 Web Scraper and Download Interceptor ([51d2082](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/51d208295dd58a23cea4088617384f2b31e5f506))
+* **catalog/web:** Implement Visual Text Highlighter for effortless web scraping ([5accf44](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5accf44f722b785491a9fa0bab9eafd25925c75f))
+
+### 🐛 Bug Fixes
+
+* **catalog/web:** Enhance visual scrapers, fix single-check UI state, and add dynamic download extraction ([f1c059d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f1c059d2a24065e49b13b2f9d175f5816707d364))
+
+### ⚙️ Refactoring
+
+* **catalog/web:** Implement concurrent processing for web version checks ([20f45e8](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/20f45e8623d6fbddbb8a5010875c3b519cc8228c))
+* **launcher:** Fix Biome optional chain lint warning ([2df7a34](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2df7a34c0b9352e06778ab2ebe34b055b36d3e7b))
+* **launcher:** Fix unused function parameters in Web Download Interceptor ([13dc156](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/13dc15637a5ca52d60cd2f8fe23156b1b34ff88e))
+
 ## [1.19.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.18.0...v1.19.0) (2026-11-17)
 
 ### 🚀 Features
