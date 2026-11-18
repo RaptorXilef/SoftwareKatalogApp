@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Web-Versionen & Web-Downloads
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
+  checkSingleWebVersion: (itemId) => ipcRenderer.invoke('check-single-web-version', itemId),
   downloadWebUrl: (url, targetFolder, defaultName, itemId) =>
     ipcRenderer.invoke('download-web-url', url, targetFolder, defaultName, itemId),
   onWebDownloadProgress: (callback) => ipcRenderer.on('web-download-progress', (_event, data) => callback(data)),

@@ -956,12 +956,12 @@ del "%~f0"
             `;
             // Führt den Code nativ im fremden Browser aus und wartet, bis der Nutzer klickt!
             const result = await scraperWin.webContents.executeJavaScript(code);
-            if (result && result.success && !isResolved) {
+            if (result?.success && !isResolved) {
               isResolved = true;
               scraperWin.close();
               resolve(result);
             }
-          } catch (e) {
+          } catch (_e) {
             // Ignoriere Fehler, falls die Seite beim Navigieren neu lädt
           }
         });
@@ -1017,12 +1017,12 @@ del "%~f0"
               }
             `;
             const result = await scraperWin.webContents.executeJavaScript(code);
-            if (result && result.success && !isResolved) {
+            if (result?.success && !isResolved) {
               isResolved = true;
               scraperWin.close();
               resolve(result);
             }
-          } catch (e) {
+          } catch (_e) {
             // Ignorieren beim Neuladen
           }
         });
@@ -1153,6 +1153,80 @@ del "%~f0"
           fs.writeFileSync(config.absJsonPath, JSON.stringify(catData, null, 2), 'utf-8');
         }
         return { success: true, count: updatedCount };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    });
+
+    ipcMain.handle('check-single-web-version', async (_event, itemId) => {
+      try {
+        const config = getConfig();
+        if (!fs.existsSync(config.absJsonPath)) return { success: false, error: 'Katalog nicht gefunden' };
+
+        const catData = JSON.parse(fs.readFileSync(config.absJsonPath, 'utf-8'));
+        const itemIdx = catData.findIndex((i) => i.id === itemId);
+        if (itemIdx === -1) return { success: false, error: 'Programm nicht gefunden' };
+
+        const item = catData[itemIdx];
+        if (!item.webVersionUrl) return { success: false, error: 'Keine Prüf-URL (URL1) hinterlegt!' };
+
+        let latestVer = '';
+
+        // Github API Abfrage
+        if (item.webVersionUrl?.toLowerCase().includes('github.com')) {
+          const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/);
+          if (repoMatch) {
+            const repo = repoMatch[1].replace(/\.git$/i, '');
+            const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+              headers: { 'User-Agent': 'SoftwareKatalogApp' },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              latestVer = data.tag_name || '';
+            }
+          }
+        }
+        // HTML Scraper
+        else if (item.webVersionPrefix && item.webVersionSuffix) {
+          const res = await fetch(item.webVersionUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          });
+          if (res.ok) {
+            const html = await res.text();
+            const preIdx = html.indexOf(item.webVersionPrefix);
+            if (preIdx !== -1) {
+              const startIdx = preIdx + item.webVersionPrefix.length;
+              const sufIdx = html.indexOf(item.webVersionSuffix, startIdx);
+              if (sufIdx !== -1) {
+                latestVer = html.substring(startIdx, sufIdx).trim();
+              }
+            }
+          }
+        }
+
+        // Putzen
+        const cleaned = latestVer.replace(/,\s*/g, '.').match(/(\d+(?:\.\d+)+)/);
+        if (cleaned) {
+          latestVer = cleaned[1];
+          if (item.webVersion !== latestVer) {
+            item.webVersion = latestVer;
+            catData[itemIdx] = item;
+
+            const metaPath = path.join(config.appFolder, item.path, '_metadata', 'meta.json');
+            if (fs.existsSync(metaPath)) {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              meta.webVersion = latestVer;
+              fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+            }
+            fs.writeFileSync(config.absJsonPath, JSON.stringify(catData, null, 2), 'utf-8');
+          }
+          return { success: true, version: latestVer };
+        }
+
+        return {
+          success: false,
+          error: 'Keine Versionsnummer in der URL gefunden (evtl. Regex-Fehler oder Seite hat sich geändert)',
+        };
       } catch (e) {
         return { success: false, error: e.message };
       }

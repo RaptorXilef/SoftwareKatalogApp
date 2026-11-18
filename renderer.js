@@ -700,6 +700,31 @@ document.body.addEventListener('click', async (e) => {
     }
   }
 
+  // Einzelnes Programm prüfen (Direkt aus dem Edit Modal)
+  if (action === 'check-single-web') {
+    const itemId = actionEl.dataset.id;
+    // Wir speichern vorher einmal durch, falls die URL gerade erst abgetippt wurde
+    await saveSoftware(itemId);
+
+    actionEl.disabled = true;
+    const origText = actionEl.textContent;
+    actionEl.textContent = '⏳ Prüfe...';
+    try {
+      const res = await window.electronAPI.checkSingleWebVersion(itemId);
+      if (res.success) {
+        document.getElementById('editWebVersion').value = res.version;
+        alert(`Erfolgreich geprüft!\n\nAktuellste Version im Web ist: ${res.version}`);
+      } else {
+        alert(`Fehler:\n${res.error}`);
+      }
+    } catch (e) {
+      alert(`Fehler:\n${e.message}`);
+    } finally {
+      actionEl.textContent = origText;
+      actionEl.disabled = false;
+    }
+  }
+
   // Check Web Versions
   if (action === 'check-web-versions') {
     checkWebVersionsUI();
@@ -722,8 +747,10 @@ document.body.addEventListener('click', async (e) => {
     try {
       const res = await window.electronAPI.downloadWebUrl(url, folder, defaultName, itemId);
       if (res.success) {
-        alert(`Download abgeschlossen!\n\nDatei: ${res.filePath}`);
-        startScan('update'); // Flottes NAS-Update, um die neue Setup-Datei sofort im Katalog zu sehen!
+        const doUpdate = confirm(
+          `Download abgeschlossen!\n\nDie Setup-Datei liegt nun in deinem NAS-Ordner.\nDatei: ${res.filePath}\n\nMöchtest du das Programm (Metadaten/Ordner) jetzt kurz scannen, damit die neue Datei sofort sichtbar ist?`
+        );
+        if (doUpdate) startScan('update'); // Flottes NAS-Update, um die neue Setup-Datei sofort im Katalog zu sehen!
       } else if (!res.canceled) {
         alert(`Fehler beim Download:\n${res.error}`);
       }
@@ -1158,11 +1185,26 @@ function renderGrid() {
     if (aFav && !bFav) return -1;
     if (!aFav && bFav) return 1;
 
-    if (sortMode === 'update') {
-      const aHasUpdate = getItemStatus(a).status === 'update';
-      const bHasUpdate = getItemStatus(b).status === 'update';
-      if (aHasUpdate && !bHasUpdate) return -1;
-      if (!aHasUpdate && bHasUpdate) return 1;
+    const depth = appSettings.versionCompareDepth !== undefined ? appSettings.versionCompareDepth : 3;
+    const statA = getItemStatus(a);
+    const statB = getItemStatus(b);
+
+    if (sortMode === 'webnas') {
+      const aIsNewer = statA.nasVersion && a.webVersion && compareVersions(a.webVersion, statA.nasVersion, depth) > 0;
+      const bIsNewer = statB.nasVersion && b.webVersion && compareVersions(b.webVersion, statB.nasVersion, depth) > 0;
+      if (aIsNewer && !bIsNewer) return -1;
+      if (!aIsNewer && bIsNewer) return 1;
+    } else if (sortMode === 'webpc') {
+      // Wenn die Webversion neuer ist, als die auf dem PC (oder PC ist nicht installiert = Web ist implizit neuer)
+      const aIsNewer =
+        a.webVersion && (!statA.localVersion || compareVersions(a.webVersion, statA.localVersion, depth) > 0);
+      const bIsNewer =
+        b.webVersion && (!statB.localVersion || compareVersions(b.webVersion, statB.localVersion, depth) > 0);
+      if (aIsNewer && !bIsNewer) return -1;
+      if (!aIsNewer && bIsNewer) return 1;
+    } else if (sortMode === 'update') {
+      if (statA.status === 'update' && statB.status !== 'update') return -1;
+      if (statA.status !== 'update' && statB.status === 'update') return 1;
     } else if (sortMode === 'installed') {
       if (a.isInstalled && !b.isInstalled) return -1;
       if (!a.isInstalled && b.isInstalled) return 1;
@@ -1236,6 +1278,16 @@ function renderGrid() {
           } else if (hasAuto) {
             badgesHtml += '<div class="badge badge-auto" title="Pfad wurde automatisch erkannt">Pfad: Auto</div>';
           }
+        }
+
+        // Konfigurierte URLs anzeigen
+        if (item.webVersionUrl) {
+          badgesHtml +=
+            '<div class="badge badge-manual" style="background:#89b4fa;" title="Dieses Programm prüft automatisch nach neuen Versionen im Internet">🌐 Web-Tracking</div>';
+        }
+        if (item.downloadUrl) {
+          badgesHtml +=
+            '<div class="badge badge-manual" style="background:#94e2d5;" title="Für dieses Programm wurde ein direkter Download-Link hinterlegt">⬇️ Web-Download</div>';
         }
 
         const versionTags = [];
@@ -1864,7 +1916,13 @@ function editSoftware(id) {
             <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border); color:var(--text);" data-action="visual-link-pick">🪄 URL suchen</button>
           </div>
         </div>
-        <div class="settings-row"><label style="width:150px;">Zuletzt erkannt:</label><input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Wird beim Klick auf 'Web-Versionen prüfen' automatisch gefüllt" readonly style="opacity:0.7;"></div>
+        <div class="settings-row">
+          <label style="width:150px;">Zuletzt erkannt:</label>
+          <div style="display:flex; flex:1; gap:10px;">
+            <input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Wird beim Klick auf 'Web-Versionen prüfen' automatisch gefüllt" readonly style="opacity:0.7; flex:1;">
+            <button type="button" class="action-btn" style="margin:0; padding:4px 8px; font-size:12px; background:var(--surface); border:1px solid var(--accent); color:var(--accent);" data-action="check-single-web" data-id="${item.id}">🔄 Einzel-Prüfung</button>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top: 15px;">
