@@ -2,9 +2,11 @@
 node_modules/
 
 # Build Output
+out/
 dist/
 build/*.jfif
 data/
+scan.lock
 
 *.url
 
@@ -15,6 +17,10 @@ catalog.json
 .DS_Store
 Thumbs.db
 
+
+
+
+# Notizen & Private Backups
 notes.txt
 notes_index.txt
 *.7z

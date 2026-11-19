@@ -35,7 +35,7 @@ jobs:
             ${{ runner.os }}-electron-builder-
 
       - name: 📦 Abhängigkeiten installieren
-        run: npm install
+        run: npm ci
 
       - name: 🏗️ App-Build (Portable & ZIP)
         run: npm run build:dist
@@ -47,4 +47,3 @@ jobs:
           files: |
             dist/SoftwareKatalog-Portable.exe
             dist/*.zip
-            scanner.mjs
