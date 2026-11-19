@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.22.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.21.0...v1.22.0) (2026-11-19)
+
+### 🚀 Features
+
+* **main:** Implement modular backend, smart archive scanner, winget support, and job cancellation ([eaf373c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/eaf373cbf82f24d30618c432bffb68ba640debd7))
+* **modals:** Implement redesigned detail modal, 4-tab editor with Winget wizard, and settings modal ([6ba1182](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/6ba11822e3009a335967ece533576f61a3c33c9f))
+* **ui:** Build redesigned main catalog UI, parallel job bars, toast system, and modular CSS ([6e7b03e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/6e7b03e084fec84ce24c218985ed8a9175b35e11))
+
+### 🐛 Bug Fixes
+
+* **build:** Resolve Electron binary install error and CSS Biome lint warnings ([31e1170](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/31e117049ecd26deebb89f73c7efe163b604fc83))
+
+### ⚙️ Refactoring
+
+* **core:** Migrate to electron-vite architecture and separate runtime data from project root ([f91d3b3](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f91d3b38c36942e505bc77a47dc19b808f460a8a))
+* **core:** Migrate to electron-vite architecture and separate runtime data from project root ([5f1be40](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5f1be40e59d9e7aeb80ddaa8fd2c782c237880b2))
+
+### 🧪 Tests
+
+* **shared:** Add unit tests for version helpers and fix CSS specificity in modals.css ([f09b5bf](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f09b5bf7c27c2570a86256607fc17c39698f8bb5))
+
 ## [1.21.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.20.1...v1.21.0) (2026-11-18)
 
 ### 🚀 Features
