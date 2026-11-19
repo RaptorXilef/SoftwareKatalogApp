@@ -13,6 +13,8 @@
       "!!public/assets",
       "!!vendor",
       "!!node_modules",
+      "!!out",
+      "!!dist",
       "!!**/*.min.js",
       "!!**/*.min.css",
       "!!.cache",
@@ -54,6 +56,16 @@
       "bracketSpacing": true
     },
     "globals": ["window", "document", "navigator", "process", "module"]
+  },
+  "css": {
+    "formatter": {
+      "enabled": true,
+      "indentStyle": "space",
+      "indentWidth": 2
+    },
+    "linter": {
+      "enabled": true
+    }
   },
   "overrides": [
     {
