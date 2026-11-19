@@ -251,6 +251,18 @@
   gap: 10px;
 }
 
+.ver-box-lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.ver-box-val {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 15px;
+}
+
 .detail-ver-box {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -289,18 +301,6 @@
       color: var(--color-web);
     }
   }
-}
-
-.ver-box-lbl {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.ver-box-val {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 15px;
 }
 
 .detail-inline-banner {
