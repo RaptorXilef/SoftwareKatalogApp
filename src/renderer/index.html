@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Software Katalog</title>
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' catalog-media: data:; media-src 'self' catalog-media:; connect-src 'self' ws:;"
+  >
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+  <div id="dropOverlay" class="drop-overlay" hidden>
+    <div class="drop-overlay-box">
+      <h2>Ordner hier ablegen zum Hinzufügen</h2>
+      <p>Legt automatisch einen neuen Katalog-Eintrag im Software-Verzeichnis an</p>
+    </div>
+  </div>
+
+  <header class="app-header">
+    <div class="header-title">
+      <h1>Software Katalog</h1>
+      <span class="header-meta">by © Felix Maywald <span id="appVersion"></span></span>
+      <span id="headerUpdateNotice" class="header-update-notice"></span>
+    </div>
+    <div class="header-actions">
+      <button type="button" class="icon-btn" id="btnLegendToggle" title="Farben & Symbole erklären" aria-label="Legende">ⓘ</button>
+      <button type="button" class="icon-btn" id="btnSettingsToggle" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
+    </div>
+  </header>
+
+  <!-- Kompaktes Popover statt riesiger Dauer-Legende -->
+  <div id="legendPopover" class="popover legend-popover" hidden>
+    <h4>Farben & Status (Priorität von oben nach unten)</h4>
+    <div class="legend-list">
+      <div class="legend-row"><span class="status-swatch is-webupdate"></span><div><strong>Web-Update</strong> – Neuere Version online verfügbar (höchste Priorität)</div></div>
+      <div class="legend-row"><span class="status-swatch is-update"></span><div><strong>Archiv-Update</strong> – Neuere Version auf dem NAS als auf diesem PC</div></div>
+      <div class="legend-row"><span class="status-swatch is-installed"></span><div><strong>Aktuell / Installiert</strong> – Auf diesem PC installiert</div></div>
+      <div class="legend-row"><span class="status-swatch is-newer"></span><div><strong>PC neuer</strong> – Lokale Version ist neuer als im Archiv</div></div>
+    </div>
+  </div>
+
+  <section class="toolbar" id="mainToolbar">
+    <div class="toolbar-primary">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Software suchen (Strg+F)..." autocomplete="off">
+        <button type="button" id="clearSearchBtn" class="clear-btn" title="Suche leeren" hidden>✕</button>
+      </div>
+
+      <select id="sortSelect" class="toolbar-select" title="Sortierung">
+        <option value="az">Sortieren: A – Z</option>
+        <option value="updates">Sortieren: Updates zuerst</option>
+        <option value="webnas">Sortieren: Web neuer als NAS</option>
+        <option value="update">Sortieren: NAS neuer als PC</option>
+        <option value="installed">Sortieren: Auf PC installiert</option>
+        <option value="newest">Sortieren: Zuletzt hinzugefügt</option>
+        <option value="updated">Sortieren: Zuletzt aktualisiert</option>
+      </select>
+
+      <select id="filterSelect" class="toolbar-select" title="Status & Wartungsfilter">
+        <option value="all">Filter: Alle Programme</option>
+        <option value="any-update">Nur mit Updates (Online & Archiv)</option>
+        <option value="webupdate">Nur Online-Updates</option>
+        <option value="nasupdate">Nur Archiv-Updates</option>
+        <option value="installed">Nur installierte Programme</option>
+        <optgroup label="Wartung & Einrichtung">
+          <option value="missing-path">Ohne PC-Pfad</option>
+          <option value="missing-web">Ohne Online-Prüfung</option>
+        </optgroup>
+      </select>
+
+      <!-- Die 3 klaren Hauptaktionen (können parallel laufen!) -->
+      <div class="toolbar-checks">
+        <button type="button" id="btnCheckArchive" class="btn btn-archive" title="Prüft das NAS/Archiv auf neue Ordner und geänderte Setup-Dateien">
+          🔄 Archiv prüfen
+        </button>
+        <button type="button" id="btnCheckOnline" class="btn btn-online" title="Prüft im Internet (GitHub, Winget, Web) nach neueren Versionen">
+          🌐 Online-Updates
+        </button>
+        <button type="button" id="btnCheckLocal" class="btn btn-local" title="Liest die aktuell installierten Versionen auf diesem PC aus">
+          💻 Installierte prüfen
+        </button>
+
+        <!-- Kompaktes Admin-Menü für seltene Aktionen -->
+        <div class="menu-anchor">
+          <button type="button" id="btnMoreActions" class="btn btn-ghost btn-icon-only" title="Weitere Aktionen" aria-label="Weitere Aktionen">⋯</button>
+          <div id="moreActionsMenu" class="popover menu-popover" hidden>
+            <button type="button" class="menu-item" data-toolbar-action="add-software">➕ Software-Ordner hinzufügen</button>
+            <button type="button" class="menu-item" data-toolbar-action="auto-detect-all">🔎 Fehlende PC-Pfade suchen</button>
+            <hr class="menu-divider">
+            <button type="button" class="menu-item" data-toolbar-action="scan-update">📋 Alle Metadaten neu einlesen</button>
+            <button type="button" class="menu-item" data-toolbar-action="scan-full">♻️ Vollständiger Archiv-Rescan</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="catalog-counter">
+        <strong id="catalogCountDisplay">0</strong>
+        <span id="catalogCountSub">Programme</span>
+      </div>
+    </div>
+
+    <!-- Parallele Fortschrittsbalken (erscheinen untereinander, sobald 1+ Jobs laufen) -->
+    <div id="jobsContainer" class="jobs-container" hidden></div>
+
+    <!-- Einklappbare Kategorien -->
+    <details id="tagsDetails" class="tags-drawer">
+      <summary>Kategorien & Tags</summary>
+      <div class="tags-list" id="tagContainer"></div>
+    </details>
+  </section>
+
+  <main class="catalog-grid" id="grid"></main>
+
+  <!-- Modal Container -->
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" hidden>
+    <div class="modal" id="modalContent"></div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" hidden>
+    <button type="button" class="lightbox-close" id="lightboxBtnClose" aria-label="Schließen">✕</button>
+    <button type="button" class="lightbox-arrow left" id="lightboxBtnLeft" aria-label="Zurück">&#10094;</button>
+    <img id="lightboxImg" src="" alt="Vollbildansicht" hidden>
+    <video id="lightboxVid" src="" controls hidden>
+      <track kind="captions" src="" label="Keine Untertitel" default>
+    </video>
+    <button type="button" class="lightbox-arrow right" id="lightboxBtnRight" aria-label="Vor">&#10095;</button>
+  </div>
+
+  <!-- Nicht-blockierende Toast-Benachrichtigungen -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

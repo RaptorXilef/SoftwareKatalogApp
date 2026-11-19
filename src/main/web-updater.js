@@ -139,7 +139,7 @@ export async function searchWinget(query) {
     const cols = line.split(/\s{2,}/);
     if (cols.length >= 2) {
       const id = cols[1]?.trim();
-      if (id && id.includes('.')) {
+      if (id?.includes('.')) {
         results.push({
           name: cols[0].trim(),
           id,

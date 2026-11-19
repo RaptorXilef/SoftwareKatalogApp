@@ -87,7 +87,7 @@ export function createJob({ type, title, dedupeKey = null, cancelable = true, on
 
 export async function cancelJob(id) {
   const job = activeJobs.get(id);
-  if (!job || job.status !== 'running' || !job.cancelable) return false;
+  if (job?.status !== 'running' || !job.cancelable) return false;
 
   job.status = 'canceled';
   job.detail = 'Wird abgebrochen...';
