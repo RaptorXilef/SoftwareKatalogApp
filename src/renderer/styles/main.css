@@ -5,3 +5,8 @@
 @import "./jobs.css" layer(components);
 @import "./cards.css" layer(components);
 @import "./modals.css" layer(modals);
+
+/* Ungelayert: überschreibt alle Layer-Regeln (z. B. display: flex) ohne !important */
+[hidden] {
+  display: none;
+}

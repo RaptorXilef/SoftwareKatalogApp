@@ -87,6 +87,6 @@
     }
   },
   "allowScripts": {
-    "electron@33.4.11": true
+    "electron@45.2.3": true
   }
 }
