@@ -17,8 +17,8 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build:vite": "electron-vite build",
-    "scan": "node scanner.mjs",
-    "scan:full": "node scanner.mjs --full",
+    "scan": "node src/scanner/scanner.mjs",
+    "scan:full": "node src/scanner/scanner.mjs --full",
     "build:dir": "electron-vite build && electron-builder --dir",
     "build:dist": "electron-vite build && electron-builder",
     "build:portable": "electron-vite build && electron-builder --win portable",
@@ -60,8 +60,11 @@
       "out/**/*",
       "package.json"
     ],
-    "extraFiles": [
-      "scanner.mjs"
+    "extraResources": [
+      {
+        "from": "src/scanner/scanner.mjs",
+        "to": "scanner.mjs"
+      }
     ],
     "win": {
       "target": [

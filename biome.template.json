@@ -9,20 +9,21 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
+      "!!_Notizen",
+      "!!.build",
+      "!!.cache",
+      "!!.debug",
       "!!*.md",
-      "!!public/assets",
-      "!!vendor",
+      "!!**/*.min.css",
+      "!!**/*.min.js",
+      "!!composer.lock",
+      "!!data",
+      "!!dist",
       "!!node_modules",
       "!!out",
-      "!!dist",
-      "!!**/*.min.js",
-      "!!**/*.min.css",
-      "!!.cache",
-      "!!.build",
-      "!!.debug",
       "!!package-lock.json",
-      "!!composer.lock",
-      "!!_Notizen"
+      "!!public/assets",
+      "!!vendor"
     ]
   },
   "formatter": {
