@@ -3,7 +3,7 @@ import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
 import { initToolbar, renderTagChips } from './components/toolbar.js';
-import { closeModal, openDetailModal, openSettingsModal } from './modals/index.js';
+import { closeModal, initModals, openDetailModal, openSettingsModal } from './modals/index.js';
 import { refreshCatalogData, state, toggleFavorite } from './state.js';
 import { escapeHTML } from './utils/sanitize.js';
 
@@ -152,6 +152,7 @@ document.addEventListener(
 
 async function bootstrap() {
   initLightbox();
+  initModals({ onReload: reloadUI });
   setupGridEvents();
   setupGlobalDragAndDrop();
   setupKeyboardShortcuts();
