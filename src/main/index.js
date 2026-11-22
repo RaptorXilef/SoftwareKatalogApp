@@ -21,6 +21,8 @@ import {
   checkAllWebVersions,
   checkSingleWebSource,
   downloadWebUpdate,
+  fetchChangelog,
+  fetchSoftwareMetadata,
   openVisualLinkPicker,
   openVisualScraper,
   searchWinget,
