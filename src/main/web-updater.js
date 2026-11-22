@@ -152,31 +152,148 @@ export async function searchWinget(query) {
   return { success: true, results };
 }
 
-export async function fetchWingetInfo(wingetId, signal = null) {
-  const { code, stdout } = await runWinget(
-    ['show', '--id', wingetId.trim(), '--exact', '--source', 'winget', '--accept-source-agreements'],
-    signal
-  );
+// ==========================================
+// WINGET SHOW PARSER (DE + EN, MEHRZEILIG)
+// ==========================================
+function parseWingetShowOutput(stdout) {
+  const lines = stdout.split(/\r?\n/);
+  const result = {
+    name: '',
+    publisher: '',
+    version: '',
+    description: '',
+    homepage: '',
+    licenseUrl: '',
+    releaseNotes: '',
+    releaseNotesUrl: '',
+    downloadUrl: '',
+    sha256: '',
+    tags: [],
+  };
 
-  if (code !== 0 || !stdout) {
+  // Erste Zeile enthält oft: "Gefunden VLC media player [VideoLAN.VLC]" oder "Found ..."
+  const headerLine = lines.find((l) => /\[[^\]]+\]\s*$/.test(l.trim()));
+  if (headerLine) {
+    const nameMatch = headerLine.trim().match(/^(?:Gefunden|Found)\s+(.+?)\s+\[[^\]]+\]$/i);
+    if (nameMatch?.[1]) result.name = nameMatch[1].trim();
+  }
+
+  const keyMap = new Map([
+    ['version', 'version'],
+    ['herausgeber', 'publisher'],
+    ['publisher', 'publisher'],
+    ['beschreibung', 'description'],
+    ['description', 'description'],
+    ['homepage', 'homepage'],
+    ['lizenz-url', 'licenseUrl'],
+    ['license url', 'licenseUrl'],
+    ['versionshinweise', 'releaseNotes'],
+    ['release notes', 'releaseNotes'],
+    ['versionshinweis-url', 'releaseNotesUrl'],
+    ['release notes url', 'releaseNotesUrl'],
+    ['installer-url', 'downloadUrl'],
+    ['installer url', 'downloadUrl'],
+    ['download-url', 'downloadUrl'],
+    ['download url', 'downloadUrl'],
+    ['installer-sha256', 'sha256'],
+    ['installer sha256', 'sha256'],
+    ['sha256', 'sha256'],
+    ['tags', 'tags'],
+  ]);
+
+  let activeField = null;
+  const multiLines = { description: [], releaseNotes: [], tags: [] };
+
+  for (const rawLine of lines) {
+    const isIndented = /^\s{2,}\S/.test(rawLine);
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      if (activeField === 'releaseNotes' && multiLines.releaseNotes.length > 0) {
+        multiLines.releaseNotes.push('');
+      }
+      continue;
+    }
+
+    const kvMatch = !isIndented ? trimmed.match(/^([^:]+):(.*)$/) : null;
+    if (kvMatch) {
+      const normalizedKey = kvMatch[1].trim().toLowerCase();
+      const val = kvMatch[2].trim();
+      const mapped = keyMap.get(normalizedKey) || null;
+      activeField = mapped;
+
+      if (!mapped) continue;
+
+      if (mapped === 'tags') {
+        if (val)
+          multiLines.tags.push(
+            ...val
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean)
+          );
+      } else if (mapped === 'description' || mapped === 'releaseNotes') {
+        if (val) multiLines[mapped].push(val);
+      } else if (val) {
+        result[mapped] = val;
+      }
+      continue;
+    }
+
+    if (activeField && isIndented) {
+      if (activeField === 'tags') {
+        multiLines.tags.push(trimmed);
+      } else if (activeField === 'description' || activeField === 'releaseNotes') {
+        multiLines[activeField].push(trimmed);
+      }
+    }
+  }
+
+  result.description = multiLines.description.join(' ').replace(/\s+/g, ' ').trim();
+  result.releaseNotes = multiLines.releaseNotes.join('\n').trim();
+  result.tags = [...new Set(multiLines.tags.filter(Boolean))];
+  if (result.version) {
+    result.version = extractVersion(result.version) || result.version.trim();
+  }
+  if (result.sha256) {
+    result.sha256 = result.sha256.trim().toLowerCase();
+  }
+
+  return result;
+}
+
+async function runWingetShow(wingetId, { preferGerman = true, signal = null } = {}) {
+  const baseArgs = ['show', '--id', wingetId.trim(), '--exact', '--source', 'winget', '--accept-source-agreements'];
+
+  if (preferGerman) {
+    const deRes = await runWinget([...baseArgs, '--locale', 'de-DE'], signal);
+    if (deRes.code === 0 && deRes.stdout) {
+      const parsed = parseWingetShowOutput(deRes.stdout);
+      if (parsed.version) return { success: true, parsed, locale: 'de-DE' };
+    }
+  }
+
+  // Automatischer Fallback auf Standard-/Englisch-Manifest
+  const fallbackRes = await runWinget(baseArgs, signal);
+  if (fallbackRes.code !== 0 || !fallbackRes.stdout) {
     return { success: false, error: `Winget-Paket "${wingetId}" nicht gefunden.` };
   }
 
-  // Funktioniert sprachunabhängig für deutsche & englische Windows-Installationen
-  const verMatch = stdout.match(/^\s*Version:\s*(.+)$/im);
-  const urlMatch = stdout.match(/^\s*(?:Installer-URL|Installer Url|Download-URL|Download Url):\s*(https?:\/\/\S+)/im);
-  const shaMatch = stdout.match(/^\s*(?:Installer-SHA256|Installer SHA256|SHA256):\s*([a-f0-9]{64})/im);
-
-  const version = verMatch ? extractVersion(verMatch[1]) || verMatch[1].trim() : null;
-  if (!version) {
+  const parsed = parseWingetShowOutput(fallbackRes.stdout);
+  if (!parsed.version) {
     return { success: false, error: 'Keine Versionsnummer in Winget-Ausgabe gefunden.' };
   }
+  return { success: true, parsed, locale: 'default' };
+}
 
+export async function fetchWingetInfo(wingetId, signal = null) {
+  const res = await runWingetShow(wingetId, { preferGerman: true, signal });
+  if (!res.success) return res;
   return {
     success: true,
-    version,
-    downloadUrl: urlMatch ? urlMatch[1].trim() : '',
-    sha256: shaMatch ? shaMatch[1].trim().toLowerCase() : '',
+    version: res.parsed.version,
+    downloadUrl: res.parsed.downloadUrl,
+    sha256: res.parsed.sha256,
   };
 }
 
@@ -871,6 +988,179 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
       return { success: false, canceled: true };
     }
     job.finish('error', e.message, { autoRemoveMs: 6000 });
+    return { success: false, error: e.message };
+  }
+}
+
+// ==========================================
+// AUTO-FILL SOFTWARE-DETAILS (WINGET / GITHUB / WEB)
+// ==========================================
+export async function fetchSoftwareMetadata({ sourceType = '', wingetId = '', url = '' }) {
+  try {
+    const effective =
+      sourceType || (wingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
+
+    if (effective === 'winget') {
+      if (!wingetId) return { success: false, error: 'Bitte zuerst eine Winget-ID auswählen.' };
+      const res = await runWingetShow(wingetId, { preferGerman: true });
+      if (!res.success) return res;
+
+      const p = res.parsed;
+      const links = {};
+      if (p.homepage) links.Homepage = p.homepage;
+      if (p.releaseNotesUrl) links.Changelog = p.releaseNotesUrl;
+
+      return {
+        success: true,
+        sourceLabel: res.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget (Standard/EN)',
+        metadata: {
+          name: p.name,
+          description: p.description,
+          tags: p.tags.slice(0, 10),
+          links,
+          version: p.version,
+        },
+      };
+    }
+
+    if (effective === 'github') {
+      const repoMatch = url?.match(/github\.com\/([^/]+\/[^/?#]+)/i);
+      if (!repoMatch) return { success: false, error: 'Bitte eine gültige GitHub-Repository-URL angeben.' };
+      const repo = repoMatch[1].replace(/\.git$/i, '');
+
+      const res = await fetch(`https://api.github.com/repos/${repo}`, {
+        headers: { 'User-Agent': 'SoftwareKatalogApp' },
+      });
+      if (!res.ok) return { success: false, error: `GitHub API Fehler (${res.status})` };
+
+      const data = await res.json();
+      const links = { GitHub: data.html_url };
+      if (data.homepage) links.Homepage = data.homepage;
+
+      return {
+        success: true,
+        sourceLabel: 'GitHub Repository',
+        metadata: {
+          name: data.name || '',
+          description: data.description || '',
+          tags: Array.isArray(data.topics) ? data.topics.slice(0, 10) : [],
+          links,
+          version: '',
+        },
+      };
+    }
+
+    if (effective === 'web' && url) {
+      const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+      if (!res.ok) return { success: false, error: `Webseite nicht erreichbar (HTTP ${res.status})` };
+      const html = await res.text();
+
+      const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1];
+      const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1];
+      const desc = (ogDesc || metaDesc || '').trim();
+
+      return {
+        success: true,
+        sourceLabel: 'Webseite (Meta-Tags)',
+        metadata: {
+          name: '',
+          description: desc,
+          tags: [],
+          links: { Webseite: new URL(url).origin },
+          version: '',
+        },
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Bitte zuerst im Tab "Online-Updates" eine Quelle (Winget, GitHub oder Webseite) wählen.',
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ==========================================
+// CHANGELOGS ("WAS IST NEU?") MIT RAM-CACHE
+// ==========================================
+const changelogCache = new Map();
+const CHANGELOG_TTL_MS = 30 * 60 * 1000;
+
+export async function fetchChangelog(item) {
+  const sourceType =
+    item.webSourceType ||
+    (item.wingetId ? 'winget' : item.webVersionUrl?.toLowerCase().includes('github.com') ? 'github' : 'none');
+
+  const cacheKey = `${item.id}:${sourceType}:${item.wingetId || item.webVersionUrl || ''}`;
+  const cached = changelogCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CHANGELOG_TTL_MS) {
+    return cached.data;
+  }
+
+  try {
+    let payload = { success: false, error: 'Für diese Quelle sind keine Changelogs verfügbar.' };
+
+    if (sourceType === 'github' && item.webVersionUrl) {
+      const repoMatch = item.webVersionUrl.match(/github\.com\/([^/]+\/[^/?#]+)/i);
+      if (repoMatch) {
+        const repo = repoMatch[1].replace(/\.git$/i, '');
+        const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=8`, {
+          headers: { 'User-Agent': 'SoftwareKatalogApp' },
+        });
+        if (!res.ok) return { success: false, error: `GitHub API Fehler (${res.status})` };
+
+        const releases = await res.json();
+        const entries = (Array.isArray(releases) ? releases : [])
+          .filter((r) => !r.draft)
+          .map((r) => ({
+            version: extractVersion(r.tag_name || r.name || '') || r.tag_name || '',
+            title: r.name || r.tag_name || 'Release',
+            date: r.published_at ? r.published_at.slice(0, 10) : '',
+            body: (r.body || '').trim(),
+            url: r.html_url || '',
+            prerelease: Boolean(r.prerelease),
+          }));
+
+        payload = {
+          success: true,
+          source: 'GitHub Releases',
+          entries,
+          externalUrl: `https://github.com/${repo}/releases`,
+        };
+      }
+    } else if (sourceType === 'winget' && item.wingetId) {
+      const res = await runWingetShow(item.wingetId, { preferGerman: true });
+      if (!res.success) return res;
+
+      const p = res.parsed;
+      const entries =
+        p.releaseNotes || p.releaseNotesUrl
+          ? [
+              {
+                version: p.version,
+                title: `Version ${p.version}`,
+                date: '',
+                body: p.releaseNotes || 'Kein direkter Text hinterlegt - nutze den externen Changelog-Link.',
+                url: p.releaseNotesUrl || '',
+                prerelease: false,
+              },
+            ]
+          : [];
+
+      payload = {
+        success: true,
+        source: res.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget',
+        entries,
+        externalUrl: p.releaseNotesUrl || p.homepage || '',
+      };
+    }
+
+    if (payload.success) {
+      changelogCache.set(cacheKey, { ts: Date.now(), data: payload });
+    }
+    return payload;
+  } catch (e) {
     return { success: false, error: e.message };
   }
 }

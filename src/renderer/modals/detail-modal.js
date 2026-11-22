@@ -1,6 +1,8 @@
+import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
+import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { closeModal, openEditModal, triggerCatalogReload } from './index.js';
 
@@ -252,6 +254,24 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
     );
   }
 
+  const supportsChangelog =
+    (item.webSourceType === 'winget' && Boolean(item.wingetId)) ||
+    (item.webSourceType === 'github' && Boolean(item.webVersionUrl));
+
+  const changelogHtml = supportsChangelog
+    ? `
+    <details class="detail-changelog-drawer" id="detailChangelogDrawer">
+      <summary>
+        <span>📋 Was ist neu? (Changelog)</span>
+        ${st.hasWebUpdate ? `<span class="changelog-new-pill">Neu: v${escapeHTML(st.webVersion)}</span>` : ''}
+      </summary>
+      <div id="detailChangelogBody" class="changelog-body">
+        <span class="muted">Wird beim Öffnen geladen...</span>
+      </div>
+    </details>
+  `
+    : '';
+
   modal.innerHTML = `
     <div class="modal-header detail-header">
       <div class="detail-head-main">
@@ -306,6 +326,7 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       }
 
       ${archiveFilesHtml}
+      ${changelogHtml}
 
       <div class="detail-section">
         <h4>Beschreibung</h4>
@@ -333,6 +354,63 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
   `;
 
   overlay.hidden = false;
+
+  const changelogDrawer = modal.querySelector('#detailChangelogDrawer');
+  let changelogLoaded = false;
+
+  changelogDrawer?.addEventListener('toggle', async () => {
+    if (!changelogDrawer.open || changelogLoaded) return;
+    changelogLoaded = true;
+
+    const bodyEl = modal.querySelector('#detailChangelogBody');
+    if (!bodyEl) return;
+    bodyEl.innerHTML = '<span class="muted">⏳ Lade Versionshinweise...</span>';
+
+    const res = await window.electronAPI.fetchChangelog(item);
+    if (!res.success) {
+      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res.error || 'Kein Changelog verfügbar.')}</span>`;
+      return;
+    }
+
+    if (!res.entries?.length) {
+      bodyEl.innerHTML = `
+      <div class="changelog-empty">
+        <span class="muted">Keine direkten Versionshinweise hinterlegt.</span>
+        ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Im Browser öffnen ↗</button>` : ''}
+      </div>
+    `;
+      return;
+    }
+
+    const depth = state.settings.versionCompareDepth ?? 3;
+    const entriesHtml = res.entries
+      .map((entry) => {
+        const isNewerThanPc =
+          st.localVersion && entry.version && compareVersions(entry.version, st.localVersion, depth) > 0;
+        return `
+        <article class="changelog-entry ${isNewerThanPc ? 'is-unread' : ''}">
+          <div class="changelog-entry-head">
+            <strong>${escapeHTML(entry.title)}</strong>
+            <div class="changelog-entry-meta">
+              ${isNewerThanPc ? '<span class="changelog-tag-new">Neu seit deiner PC-Version</span>' : ''}
+              ${entry.date ? `<span class="muted">${escapeHTML(entry.date)}</span>` : ''}
+              ${entry.url ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(entry.url)}">Original ↗</button>` : ''}
+            </div>
+          </div>
+          <div class="changelog-markdown">${renderMarkdownSafe(entry.body)}</div>
+        </article>
+      `;
+      })
+      .join('');
+
+    bodyEl.innerHTML = `
+    <div class="changelog-source-row">
+      <span class="muted">Quelle: ${escapeHTML(res.source)}</span>
+      ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Alle Releases ansehen ↗</button>` : ''}
+    </div>
+    ${entriesHtml}
+  `;
+  });
 
   const getSelectedArchiveFile = () => {
     const sel = modal.querySelector('#detailFileSelect');
@@ -393,6 +471,13 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
   };
 
   modal.onclick = async (e) => {
+    const anchor = e.target.closest('a[href]');
+    if (anchor) {
+      e.preventDefault();
+      window.electronAPI.openUrl(anchor.href);
+      return;
+    }
+
     const urlBtn = e.target.closest('[data-open-url]');
     if (urlBtn) {
       window.electronAPI.openUrl(urlBtn.dataset.openUrl);

@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVisualScraper: (url) => ipcRenderer.invoke('open-visual-scraper', url),
   openVisualLinkPicker: (url, knownVer) => ipcRenderer.invoke('open-visual-link-picker', url, knownVer),
 
+  fetchSoftwareMetadata: (payload) => ipcRenderer.invoke('fetch-software-metadata', payload),
+  fetchChangelog: (item) => ipcRenderer.invoke('fetch-changelog', item),
+
   // Einstellungen, Backup & Self-Update
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   getSettings: () => ipcRenderer.invoke('get-settings'),

@@ -49,6 +49,11 @@ export function renderEditModal(id, initialTab = 'general') {
     <div class="modal-body edit-body">
       <!-- TAB 1: ALLGEMEIN -->
       <section class="tab-panel" data-panel="general" ${initialTab === 'general' ? '' : 'hidden'}>
+      <div class="autofill-bar">
+        <span class="muted">Beschreibung, Tags & Links automatisch aus der Online-Quelle (Winget / GitHub / Web) laden:</span>
+        <button type="button" class="btn btn-ghost" data-edit-action="autofill-fetch">✨ Infos automatisch laden</button>
+      </div>
+      <div id="autofillPreviewBox" class="autofill-preview" hidden></div>
         <div class="form-grid-2">
           <label class="form-field">
             <span>Name</span>
@@ -122,7 +127,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
         <!-- WINGET PANEL -->
         <div class="source-panel" data-source-panel="winget" ${currentSourceType === 'winget' ? '' : 'hidden'}>
-          <p class="panel-hint">Winget liefert zuverlässig die neuste Version, den offiziellen Installer-Link und eine SHA-256 Prüfsumme – ganz ohne HTML-Scraper.</p>
+          <p class="panel-hint">Winget liefert zuverlässig die neuste Version, den offiziellen Installer-Link und eine SHA-256 Prüfsumme - ganz ohne HTML-Scraper.</p>
           <div class="input-action-row">
             <input type="text" id="wingetQueryInput" value="${escapeHTML(item.name)}" placeholder="Programm in Winget suchen...">
             <button type="button" class="btn btn-primary" data-edit-action="search-winget">🔎 In Winget suchen</button>
@@ -177,19 +182,19 @@ export function renderEditModal(id, initialTab = 'general') {
             <summary>Erweitert: Automatisch erkannte HTML-Regeln bearbeiten</summary>
             <div class="form-grid-2">
               <label class="form-field">
-                <span>Version – Davor (Präfix)</span>
+                <span>Version - Davor (Präfix)</span>
                 <input type="text" id="editWebPrefix" value="${escapeHTML(item.webVersionPrefix || '')}">
               </label>
               <label class="form-field">
-                <span>Version – Danach (Suffix)</span>
+                <span>Version - Danach (Suffix)</span>
                 <input type="text" id="editWebSuffix" value="${escapeHTML(item.webVersionSuffix || '')}">
               </label>
               <label class="form-field">
-                <span>Download-Link – Davor (Präfix)</span>
+                <span>Download-Link - Davor (Präfix)</span>
                 <input type="text" id="editDlPrefix" value="${escapeHTML(item.dlPrefix || '')}">
               </label>
               <label class="form-field">
-                <span>Download-Link – Danach (Suffix)</span>
+                <span>Download-Link - Danach (Suffix)</span>
                 <input type="text" id="editDlSuffix" value="${escapeHTML(item.dlSuffix || '')}">
               </label>
             </div>
@@ -214,7 +219,7 @@ export function renderEditModal(id, initialTab = 'general') {
         <p class="panel-hint">Damit die App erkennt, ob und in welcher Version dieses Programm auf deinem PC installiert ist.</p>
 
         <div class="form-field">
-          <span>Alternative Such-Namen in Windows „Apps & Features“ (kommagetrennt)</span>
+          <span>Alternative Such-Namen in Windows "Apps & Features" (kommagetrennt)</span>
           <div class="input-action-row">
             <input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="z. B. VLC media player">
             <div id="installedAppsSlot">
@@ -600,7 +605,7 @@ export function renderEditModal(id, initialTab = 'general') {
         if (res.mode === 'template') {
           showToast('Download-URL erkannt und automatisch als {version}-Vorlage gespeichert!', { type: 'success' });
         } else if (res.mode === 'direct-intercept') {
-          showToast('JS-Download sauber abgefangen – direkte URL übernommen!', { type: 'success' });
+          showToast('JS-Download sauber abgefangen - direkte URL übernommen!', { type: 'success' });
         } else {
           showToast('Download-Button erfolgreich erkannt!', { type: 'success' });
         }
@@ -690,7 +695,7 @@ export function renderEditModal(id, initialTab = 'general') {
         }
         showToast('Installationspfad gefunden!', { type: 'success' });
       } else {
-        showToast('Kein Registry-Eintrag gefunden – ggf. Such-Namen ergänzen.', { type: 'warn' });
+        showToast('Kein Registry-Eintrag gefunden - ggf. Such-Namen ergänzen.', { type: 'warn' });
       }
       return;
     }
@@ -724,6 +729,144 @@ export function renderEditModal(id, initialTab = 'general') {
       } else {
         showToast(res.error || 'Icon konnte nicht extrahiert werden.', { type: 'error' });
       }
+      return;
+    }
+
+    // Auto-Fill abrufen (überschreibt nichts automatisch -> zeigt Checkliste!)
+    if (act === 'autofill-fetch') {
+      const payload = {
+        sourceType: currentSourceType,
+        wingetId: modal.querySelector('#editWingetId').value.trim(),
+        url:
+          currentSourceType === 'github'
+            ? modal.querySelector('#editGithubUrl').value.trim()
+            : modal.querySelector('#editWebUrl').value.trim(),
+      };
+
+      actionBtn.disabled = true;
+      const orig = actionBtn.textContent;
+      actionBtn.textContent = '⏳ Lade Infos...';
+      const res = await window.electronAPI.fetchSoftwareMetadata(payload);
+      actionBtn.disabled = false;
+      actionBtn.textContent = orig;
+
+      if (!res.success) {
+        return showToast(res.error || 'Konnte keine Details laden.', { type: 'warn', duration: 5000 });
+      }
+
+      const m = res.metadata;
+      const box = modal.querySelector('#autofillPreviewBox');
+      const hasDesc = Boolean(modal.querySelector('#editDesc').textContent.trim());
+      const hasTags = Boolean(modal.querySelector('#editTags').value.trim());
+      const hasLinks = Boolean(modal.querySelector('#editLinks').value.trim());
+
+      const rows = [];
+      if (m.description) {
+        rows.push(`
+      <label class="autofill-row">
+        <input type="checkbox" data-af-field="description" ${hasDesc ? '' : 'checked'}>
+        <div>
+          <strong>Beschreibung</strong> ${hasDesc ? '<span class="muted">(vorhanden - überschreiben?)</span>' : '<span class="text-ok">(leer)</span>'}
+          <p class="autofill-snippet">${escapeHTML(m.description)}</p>
+        </div>
+      </label>
+    `);
+      }
+      if (m.tags?.length) {
+        rows.push(`
+      <label class="autofill-row">
+        <input type="checkbox" data-af-field="tags" ${hasTags ? '' : 'checked'}>
+        <div>
+          <strong>Tags ergänzen</strong>
+          <p class="autofill-snippet">${escapeHTML(m.tags.join(', '))}</p>
+        </div>
+      </label>
+    `);
+      }
+      if (m.links && Object.keys(m.links).length > 0) {
+        const linkSummary = Object.entries(m.links)
+          .map(([k, v]) => `${k} | ${v}`)
+          .join(' · ');
+        rows.push(`
+      <label class="autofill-row">
+        <input type="checkbox" data-af-field="links" ${hasLinks ? '' : 'checked'}>
+        <div>
+          <strong>Links ergänzen</strong>
+          <p class="autofill-snippet">${escapeHTML(linkSummary)}</p>
+        </div>
+      </label>
+    `);
+      }
+
+      if (rows.length === 0) {
+        return showToast(`Quelle "${res.sourceLabel}" liefert keine zusätzlichen Details.`, { type: 'info' });
+      }
+
+      box.dataset.payload = JSON.stringify(m);
+      box.hidden = false;
+      box.innerHTML = `
+    <div class="autofill-head">
+      <strong>Gefundene Details (${escapeHTML(res.sourceLabel)})</strong>
+      <div class="footer-group">
+        <button type="button" class="btn btn-primary btn-xs" data-edit-action="autofill-apply">Ausgewählte übernehmen</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-edit-action="autofill-close">Schließen</button>
+      </div>
+    </div>
+    <div class="autofill-list">${rows.join('')}</div>
+  `;
+      return;
+    }
+
+    if (act === 'autofill-close') {
+      const box = modal.querySelector('#autofillPreviewBox');
+      if (box) box.hidden = true;
+      return;
+    }
+
+    if (act === 'autofill-apply') {
+      const box = modal.querySelector('#autofillPreviewBox');
+      if (!box?.dataset.payload) return;
+      const m = JSON.parse(box.dataset.payload);
+      let applied = 0;
+
+      if (box.querySelector('[data-af-field="description"]')?.checked && m.description) {
+        modal.querySelector('#editDesc').textContent = m.description;
+        applied++;
+      }
+
+      if (box.querySelector('[data-af-field="tags"]')?.checked && m.tags?.length) {
+        const tagsInput = modal.querySelector('#editTags');
+        const existing = tagsInput.value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const merged = [...existing];
+        for (const t of m.tags) {
+          if (!merged.some((e) => e.toLowerCase() === t.toLowerCase())) merged.push(t);
+        }
+        tagsInput.value = merged.join(', ');
+        applied++;
+      }
+
+      if (box.querySelector('[data-af-field="links"]')?.checked && m.links) {
+        const linksEl = modal.querySelector('#editLinks');
+        const currentLines = linksEl.value
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+        for (const [label, url] of Object.entries(m.links)) {
+          if (!currentLines.some((l) => l.includes(url))) {
+            currentLines.push(`${label} | ${url}`);
+          }
+        }
+        linksEl.value = currentLines.join('\n');
+        applied++;
+      }
+
+      box.hidden = true;
+      showToast(applied > 0 ? `${applied} Bereich(e) übernommen.` : 'Nichts ausgewählt.', {
+        type: applied > 0 ? 'success' : 'info',
+      });
       return;
     }
 

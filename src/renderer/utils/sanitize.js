@@ -28,3 +28,29 @@ export function toMediaUrl(absPath) {
   if (!absPath) return '';
   return `catalog-media://local/?path=${encodeURIComponent(absPath)}`;
 }
+
+export function sanitizeChangelogHtml(html) {
+  if (!html) return '';
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [
+      'h3',
+      'h4',
+      'p',
+      'br',
+      'b',
+      'strong',
+      'i',
+      'em',
+      'code',
+      'pre',
+      'ul',
+      'ol',
+      'li',
+      'blockquote',
+      'a',
+      'hr',
+    ],
+    ALLOWED_ATTR: ['href'],
+    ALLOW_DATA_ATTR: false,
+  });
+}

@@ -159,6 +159,9 @@ function registerIpcHandlers() {
   ipcMain.handle('open-visual-scraper', (_e, url) => openVisualScraper(url));
   ipcMain.handle('open-visual-link-picker', (_e, url, knownVer) => openVisualLinkPicker(url, knownVer));
 
+  ipcMain.handle('fetch-software-metadata', (_e, payload) => fetchSoftwareMetadata(payload));
+  ipcMain.handle('fetch-changelog', (_e, item) => fetchChangelog(item));
+
   // Einstellungen, Backup & Reset
   ipcMain.handle('get-app-info', () => ({ version: app.getVersion() }));
   ipcMain.handle('get-settings', () => getConfig());
