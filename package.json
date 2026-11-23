@@ -26,6 +26,8 @@
     "prepare": "husky",
     "chk:biome": "biome check .",
     "fix:biome": "biome check --write .",
+    "typecheck": "tsc -p jsconfig.json",
+    "chk:unused": "knip",
     "release": "release-it"
   },
   "keywords": [
@@ -42,11 +44,14 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@release-it/conventional-changelog": "^12.0.2",
+    "@types/node": "^26.6.6",
     "electron": "^45.2.3",
     "electron-builder": "^25.1.0",
     "electron-vite": "^6.0.0",
     "husky": "^9.1.7",
+    "knip": "^6.48.0",
     "release-it": "^21.1.2",
+    "typescript": "^7.0.2",
     "vite": "^8.3.8"
   },
   "build": {

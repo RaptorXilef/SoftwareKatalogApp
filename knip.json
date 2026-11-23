@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/main/index.js",
+    "src/preload/index.js",
+    "src/renderer/main.js",
+    "src/scanner/scanner.mjs",
+    "electron.vite.config.mjs",
+    "tests/**/*.test.mjs"
+  ],
+  "project": ["src/**/*.js", "src/**/*.mjs"],
+  "ignoreDependencies": ["electron-builder", "@commitlint/config-conventional", "@release-it/conventional-changelog"]
+}
