@@ -1,3 +1,6 @@
 #npx lint-staged
 # .husky/pre-commit
 #sh scripts/pre-commit-check.sh
+npx biome check --staged --write --no-errors-on-unmatched
+git update-index --again
+#npm run typecheck

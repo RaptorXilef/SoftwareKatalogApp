@@ -1,13 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2023",
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "checkJs": true,
     "allowJs": true,
     "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noImplicitThis": false,
     "strictNullChecks": false,
+    "useUnknownInCatchVariables": false,
+    "maxNodeModuleJsDepth": 0,
     "skipLibCheck": true,
     "types": ["node"]
   },
