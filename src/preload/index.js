@@ -34,11 +34,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // PC-Versionen & Installation
   scanLocalVersions: (opts) => ipcRenderer.invoke('scan-local-versions', opts),
+  scanInstalledSoftware: (opts) => ipcRenderer.invoke('scan-installed-software', opts),
+  extractCachedAppIcon: (payload) => ipcRenderer.invoke('extract-cached-app-icon', payload),
+  uninstallSoftware: (payload) => ipcRenderer.invoke('uninstall-software', payload),
   autoDetectPath: (names) => ipcRenderer.invoke('auto-detect-path', names),
   autoDetectAll: () => ipcRenderer.invoke('auto-detect-all'),
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
   executeInstaller: (payload) => ipcRenderer.invoke('execute-installer', payload),
   copyFilesToPc: (files) => ipcRenderer.invoke('copy-files-to-pc', files),
+
+  // Paket-Provider & Archiv-Verknüpfung
+  listProviders: () => ipcRenderer.invoke('providers-list'),
+  setProviderEnabled: (id, enabled) => ipcRenderer.invoke('providers-set-enabled', id, enabled),
+  checkProviderAvailability: (id) => ipcRenderer.invoke('providers-check-availability', id),
+  searchProviders: (query, opts) => ipcRenderer.invoke('providers-search', query, opts),
+  showPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-show', providerId, packageId, opts),
+  listProviderUpgrades: (opts) => ipcRenderer.invoke('providers-list-upgrades', opts),
+  installPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-install', providerId, packageId, opts),
+  uninstallPackage: (providerId, packageId, opts) =>
+    ipcRenderer.invoke('providers-uninstall', providerId, packageId, opts),
+  checkArchiveCollision: (targetDir) => ipcRenderer.invoke('archive-check-collision', targetDir),
+  findArchiveLink: (packageManager, packageId) => ipcRenderer.invoke('archive-find-link', packageManager, packageId),
+  linkPackageToArchive: (payload) => ipcRenderer.invoke('archive-link-package', payload),
 
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),

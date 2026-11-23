@@ -20,6 +20,9 @@ const DEFAULT_CONFIG = {
   askSaveDialog: false, // Optional immer "Speichern unter" öffnen
   filenamePattern: '{Name}_v{Version}{Arch}{Ext}',
   keepOriginalNameIfVersioned: true,
+  // Paketquellen & Archiv-Verknüpfung
+  archiveSaveMode: 'ask', // 'ask' | 'auto-id' | 'none'
+  enabledProviders: ['winget', 'archive'],
 };
 
 const DEFAULT_STATE = {
@@ -121,6 +124,12 @@ export function getConfig() {
       : path.resolve(appFolder, config.customScriptPath)
     : getDefaultScannerPath(appFolder);
 
+  const validSaveModes = new Set(['ask', 'auto-id', 'none']);
+  const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
+  const enabledProviders = Array.isArray(config.enabledProviders)
+    ? config.enabledProviders.filter((id) => typeof id === 'string' && id.trim().length > 0)
+    : [...DEFAULT_CONFIG.enabledProviders];
+
   return {
     appFolder,
     dataDir,
@@ -130,6 +139,8 @@ export function getConfig() {
     absScriptPath,
     ...config,
     ...state,
+    archiveSaveMode,
+    enabledProviders,
   };
 }
 
@@ -164,8 +175,32 @@ export function saveConfig(newSettings) {
   fs.writeFileSync(statePath, JSON.stringify(newState, null, 2), 'utf-8');
 }
 
+function isPathInsideBase(targetPath, baseDir) {
+  if (!targetPath || !baseDir) return false;
+  const ensureSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
+  let resolvedTarget = ensureSlash(path.resolve(targetPath));
+  let resolvedBase = ensureSlash(path.resolve(baseDir));
+  if (process.platform === 'win32') {
+    resolvedTarget = resolvedTarget.toLowerCase();
+    resolvedBase = resolvedBase.toLowerCase();
+  }
+  return resolvedTarget.startsWith(resolvedBase);
+}
+
 export function isInsideTargetDir(targetPath) {
   const { absTargetPath } = getConfig();
-  const ensureSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
-  return ensureSlash(path.normalize(targetPath)).startsWith(ensureSlash(path.normalize(absTargetPath)));
+  return isPathInsideBase(targetPath, absTargetPath);
+}
+
+export function getIconCacheDir() {
+  const dir = path.join(app.getPath('userData'), 'icon-cache');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+export function isInsideIconCacheDir(filePath) {
+  const cacheDir = path.join(app.getPath('userData'), 'icon-cache');
+  return isPathInsideBase(filePath, cacheDir);
 }

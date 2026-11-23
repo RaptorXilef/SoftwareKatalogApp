@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
+import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArchive } from './archive-linker.js';
 import {
   addIconFile,
   addMediaFiles,
@@ -16,6 +17,17 @@ import {
 import { getAppFolder, getConfig, saveConfig } from './config.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
+import {
+  checkProviderAvailability,
+  initDefaultProviders,
+  installPackage,
+  listProvidersInfo,
+  listUpgradesAcrossProviders,
+  searchAcrossProviders,
+  setProviderEnabled,
+  showPackage,
+  uninstallPackage,
+} from './providers/registry.js';
 import { runArchiveScan, scanSingleFolder } from './scanner-bridge.js';
 import {
   checkAllWebVersions,
@@ -31,9 +43,12 @@ import {
   autoDetectAllMissingPaths,
   autoDetectPath,
   executeAndVerifyInstaller,
+  extractCachedAppIcon,
   extractExeIcon,
   getInstalledApps,
+  scanInstalledSoftware,
   scanLocalVersions,
+  uninstallSoftware,
 } from './windows-tools.js';
 
 // SMB/NAS-Kompatibilitäts-Flags
@@ -132,10 +147,34 @@ function registerIpcHandlers() {
 
   // Lokale PC-Tools & Installation
   ipcMain.handle('scan-local-versions', (_e, opts) => scanLocalVersions(opts || {}));
+  ipcMain.handle('scan-installed-software', (_e, opts) => scanInstalledSoftware(opts || {}));
+  ipcMain.handle('extract-cached-app-icon', (_e, payload) => extractCachedAppIcon(payload || {}));
+  ipcMain.handle('uninstall-software', (_e, payload) => uninstallSoftware(payload || {}));
   ipcMain.handle('auto-detect-path', (_e, names) => autoDetectPath(names));
   ipcMain.handle('auto-detect-all', () => autoDetectAllMissingPaths(loadCatalogWithLiveStatus()));
   ipcMain.handle('get-installed-apps', () => getInstalledApps());
   ipcMain.handle('execute-installer', (_e, payload) => executeAndVerifyInstaller(payload));
+
+  // Paket-Provider (Registry, Suche, Details, Updates, Install/Uninstall)
+  ipcMain.handle('providers-list', () => listProvidersInfo());
+  ipcMain.handle('providers-set-enabled', (_e, id, enabled) => setProviderEnabled(id, Boolean(enabled)));
+  ipcMain.handle('providers-check-availability', (_e, id) => checkProviderAvailability(id));
+  ipcMain.handle('providers-search', (_e, query, opts) => searchAcrossProviders(query, opts || {}));
+  ipcMain.handle('providers-show', (_e, providerId, packageId, opts) => showPackage(providerId, packageId, opts || {}));
+  ipcMain.handle('providers-list-upgrades', (_e, opts) => listUpgradesAcrossProviders(opts || {}));
+  ipcMain.handle('providers-install', (_e, providerId, packageId, opts) =>
+    installPackage(providerId, packageId, opts || {})
+  );
+  ipcMain.handle('providers-uninstall', (_e, providerId, packageId, opts) =>
+    uninstallPackage(providerId, packageId, opts || {})
+  );
+
+  // Archiv-Linker (Aufnehmen & Verknüpfen generischer Pakete im Archiv)
+  ipcMain.handle('archive-check-collision', (_e, targetDir) => checkArchiveTargetCollision(targetDir));
+  ipcMain.handle('archive-find-link', (_e, packageManager, packageId) =>
+    findExistingArchiveLink(packageManager, packageId)
+  );
+  ipcMain.handle('archive-link-package', (_e, payload) => linkPackageToArchive(payload || {}));
 
   ipcMain.handle('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -216,6 +255,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    initDefaultProviders();
     setupMediaProtocolHandler();
     registerIpcHandlers();
     createWindow();

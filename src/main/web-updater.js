@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import { buildArchiveFilename, extractVersion } from '../shared/version.js';
 import { persistWebVersion, writeCatalogAtomic } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { createJob } from './jobs.js';
+import { wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { getFileVersion } from './windows-tools.js';
 
@@ -72,228 +72,31 @@ export function extractBetween(html, prefix, suffix) {
 }
 
 // ==========================================
-// WINGET INTEGRATION (Suche & Show)
+// WINGET INTEGRATION (über Winget-Provider)
 // ==========================================
-function runWinget(args, signal = null) {
-  return new Promise((resolve) => {
-    const child = spawn('winget', args, { windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-
-    const onAbort = () => {
-      if (!child.killed) child.kill('SIGTERM');
-    };
-    if (signal) {
-      if (signal.aborted) onAbort();
-      else signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    child.stdout.on('data', (d) => {
-      stdout += d.toString('utf8');
-    });
-    child.stderr.on('data', (d) => {
-      stderr += d.toString('utf8');
-    });
-    child.on('error', (err) => {
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolve({ code: -1, stdout: '', stderr: err.message });
-    });
-    child.on('exit', (code) => {
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolve({ code, stdout, stderr });
-    });
-  });
+function getEffectiveWingetId(item) {
+  if (!item) return '';
+  if (item.packageManager === 'winget' && item.packageId) return item.packageId.trim();
+  return String(item.wingetId || '').trim();
 }
 
 export async function searchWinget(query) {
-  if (!query || query.trim().length < 2) return { success: false, error: 'Bitte mindestens 2 Zeichen eingeben.' };
-
-  const { code, stdout, stderr } = await runWinget([
-    'search',
-    '--query',
-    query.trim(),
-    '--source',
-    'winget',
-    '--accept-source-agreements',
-  ]);
-
-  if (code === -1) {
-    return { success: false, error: 'Winget ist auf diesem PC nicht verfügbar.' };
-  }
-
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((l) => l.replace(/\r/g, '').trimEnd())
-    .filter((l) => l.trim().length > 0);
-
-  // Suche die Trennlinie "------" unterhalb der Spaltenüberschriften
-  const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
-  if (sepIdx === -1) {
-    return { success: true, results: [], hint: stderr || 'Keine Winget-Treffer gefunden.' };
-  }
-
-  const results = [];
-  for (let i = sepIdx + 1; i < lines.length && results.length < 25; i++) {
-    const line = lines[i].trim();
-    // Trennt Spalten bei >=2 Leerzeichen: Name | Id | Version
-    const cols = line.split(/\s{2,}/);
-    if (cols.length >= 2) {
-      const id = cols[1]?.trim();
-      if (id?.includes('.')) {
-        results.push({
-          name: cols[0].trim(),
-          id,
-          version: cols[2]?.trim() || '',
-        });
-      }
-    }
-  }
-
-  return { success: true, results };
-}
-
-// ==========================================
-// WINGET SHOW PARSER (DE + EN, MEHRZEILIG)
-// ==========================================
-function parseWingetShowOutput(stdout) {
-  const lines = stdout.split(/\r?\n/);
-  const result = {
-    name: '',
-    publisher: '',
-    version: '',
-    description: '',
-    homepage: '',
-    licenseUrl: '',
-    releaseNotes: '',
-    releaseNotesUrl: '',
-    downloadUrl: '',
-    sha256: '',
-    tags: [],
-  };
-
-  // Erste Zeile enthält oft: "Gefunden VLC media player [VideoLAN.VLC]" oder "Found ..."
-  const headerLine = lines.find((l) => /\[[^\]]+\]\s*$/.test(l.trim()));
-  if (headerLine) {
-    const nameMatch = headerLine.trim().match(/^(?:Gefunden|Found)\s+(.+?)\s+\[[^\]]+\]$/i);
-    if (nameMatch?.[1]) result.name = nameMatch[1].trim();
-  }
-
-  const keyMap = new Map([
-    ['version', 'version'],
-    ['herausgeber', 'publisher'],
-    ['publisher', 'publisher'],
-    ['beschreibung', 'description'],
-    ['description', 'description'],
-    ['homepage', 'homepage'],
-    ['lizenz-url', 'licenseUrl'],
-    ['license url', 'licenseUrl'],
-    ['versionshinweise', 'releaseNotes'],
-    ['release notes', 'releaseNotes'],
-    ['versionshinweis-url', 'releaseNotesUrl'],
-    ['release notes url', 'releaseNotesUrl'],
-    ['installer-url', 'downloadUrl'],
-    ['installer url', 'downloadUrl'],
-    ['download-url', 'downloadUrl'],
-    ['download url', 'downloadUrl'],
-    ['installer-sha256', 'sha256'],
-    ['installer sha256', 'sha256'],
-    ['sha256', 'sha256'],
-    ['tags', 'tags'],
-  ]);
-
-  let activeField = null;
-  const multiLines = { description: [], releaseNotes: [], tags: [] };
-
-  for (const rawLine of lines) {
-    const isIndented = /^\s{2,}\S/.test(rawLine);
-    const trimmed = rawLine.trim();
-
-    if (!trimmed) {
-      if (activeField === 'releaseNotes' && multiLines.releaseNotes.length > 0) {
-        multiLines.releaseNotes.push('');
-      }
-      continue;
-    }
-
-    const kvMatch = !isIndented ? trimmed.match(/^([^:]+):(.*)$/) : null;
-    if (kvMatch) {
-      const normalizedKey = kvMatch[1].trim().toLowerCase();
-      const val = kvMatch[2].trim();
-      const mapped = keyMap.get(normalizedKey) || null;
-      activeField = mapped;
-
-      if (!mapped) continue;
-
-      if (mapped === 'tags') {
-        if (val)
-          multiLines.tags.push(
-            ...val
-              .split(',')
-              .map((t) => t.trim())
-              .filter(Boolean)
-          );
-      } else if (mapped === 'description' || mapped === 'releaseNotes') {
-        if (val) multiLines[mapped].push(val);
-      } else if (val) {
-        result[mapped] = val;
-      }
-      continue;
-    }
-
-    if (activeField && isIndented) {
-      if (activeField === 'tags') {
-        multiLines.tags.push(trimmed);
-      } else if (activeField === 'description' || activeField === 'releaseNotes') {
-        multiLines[activeField].push(trimmed);
-      }
-    }
-  }
-
-  result.description = multiLines.description.join(' ').replace(/\s+/g, ' ').trim();
-  result.releaseNotes = multiLines.releaseNotes.join('\n').trim();
-  result.tags = [...new Set(multiLines.tags.filter(Boolean))];
-  if (result.version) {
-    result.version = extractVersion(result.version) || result.version.trim();
-  }
-  if (result.sha256) {
-    result.sha256 = result.sha256.trim().toLowerCase();
-  }
-
-  return result;
-}
-
-async function runWingetShow(wingetId, { preferGerman = true, signal = null } = {}) {
-  const baseArgs = ['show', '--id', wingetId.trim(), '--exact', '--source', 'winget', '--accept-source-agreements'];
-
-  if (preferGerman) {
-    const deRes = await runWinget([...baseArgs, '--locale', 'de-DE'], signal);
-    if (deRes.code === 0 && deRes.stdout) {
-      const parsed = parseWingetShowOutput(deRes.stdout);
-      if (parsed.version) return { success: true, parsed, locale: 'de-DE' };
-    }
-  }
-
-  // Automatischer Fallback auf Standard-/Englisch-Manifest
-  const fallbackRes = await runWinget(baseArgs, signal);
-  if (fallbackRes.code !== 0 || !fallbackRes.stdout) {
-    return { success: false, error: `Winget-Paket "${wingetId}" nicht gefunden.` };
-  }
-
-  const parsed = parseWingetShowOutput(fallbackRes.stdout);
-  if (!parsed.version) {
-    return { success: false, error: 'Keine Versionsnummer in Winget-Ausgabe gefunden.' };
-  }
-  return { success: true, parsed, locale: 'default' };
+  return wingetProvider.search(query);
 }
 
 export async function fetchWingetInfo(wingetId, signal = null) {
-  const res = await runWingetShow(wingetId, { preferGerman: true, signal });
-  if (!res.success) return res;
+  const res = await wingetProvider.show(wingetId, { preferGerman: true, signal });
+  if (!res.success || !res.package) {
+    return { success: false, error: res.error || `Winget-Paket "${wingetId}" nicht gefunden.` };
+  }
   return {
     success: true,
-    version: res.parsed.version,
-    downloadUrl: res.parsed.downloadUrl,
-    sha256: res.parsed.sha256,
+    version: res.package.version,
+    downloadUrl: res.package.downloadUrl,
+    sha256: res.package.sha256,
+    package: res.package,
+    fromCache: res.fromCache,
+    isStale: res.isStale,
   };
 }
 
@@ -344,6 +147,8 @@ export async function checkSingleWebSource(
   {
     itemId = null,
     sourceType = '',
+    packageManager = '',
+    packageId = '',
     wingetId = '',
     githubAssetPattern = '',
     url = '',
@@ -354,14 +159,16 @@ export async function checkSingleWebSource(
   signal = null
 ) {
   try {
+    const resolvedWingetId = getEffectiveWingetId({ packageManager, packageId, wingetId });
     const effectiveType =
-      sourceType || (wingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
+      sourceType ||
+      (resolvedWingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
 
     let result = { success: false, error: 'Keine Online-Quelle konfiguriert.' };
 
     if (effectiveType === 'winget') {
-      if (!wingetId) return { success: false, error: 'Keine Winget-ID angegeben.' };
-      result = await fetchWingetInfo(wingetId, signal);
+      if (!resolvedWingetId) return { success: false, error: 'Keine Winget-ID angegeben.' };
+      result = await fetchWingetInfo(resolvedWingetId, signal);
     } else if (effectiveType === 'github') {
       if (!url) return { success: false, error: 'Keine GitHub-URL angegeben.' };
       result = await fetchGitHubRelease(url, githubAssetPattern, signal);
@@ -405,7 +212,8 @@ export async function checkAllWebVersions() {
   try {
     const catData = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
     const itemsToCheck = catData.filter(
-      (i) => (i.webSourceType && i.webSourceType !== 'none') || Boolean(i.wingetId) || Boolean(i.webVersionUrl)
+      (i) =>
+        (i.webSourceType && i.webSourceType !== 'none') || Boolean(getEffectiveWingetId(i)) || Boolean(i.webVersionUrl)
     );
 
     if (itemsToCheck.length === 0) {
@@ -419,7 +227,7 @@ export async function checkAllWebVersions() {
     const httpItems = [];
 
     for (const item of itemsToCheck) {
-      const isWinget = item.webSourceType === 'winget' || (!item.webSourceType && item.wingetId);
+      const isWinget = item.webSourceType === 'winget' || (!item.webSourceType && Boolean(getEffectiveWingetId(item)));
       if (isWinget) wingetItems.push(item);
       else httpItems.push(item);
     }
@@ -429,6 +237,8 @@ export async function checkAllWebVersions() {
       const res = await checkSingleWebSource(
         {
           sourceType: item.webSourceType,
+          packageManager: item.packageManager,
+          packageId: item.packageId,
           wingetId: item.wingetId,
           githubAssetPattern: item.githubAssetPattern,
           url: item.webVersionUrl,
@@ -724,8 +534,9 @@ export function openVisualLinkPicker(url, knownVersion = '') {
 // ==========================================
 async function resolveDownloadUrl(item, signal) {
   // 1. Winget liefert immer die frischeste direkte Installer-URL + SHA256
-  if (item.webSourceType === 'winget' && item.wingetId) {
-    const wg = await fetchWingetInfo(item.wingetId, signal);
+  const resolvedWingetId = getEffectiveWingetId(item);
+  if ((item.webSourceType === 'winget' || item.packageManager === 'winget') && resolvedWingetId) {
+    const wg = await fetchWingetInfo(resolvedWingetId, signal);
     if (!wg.success || !wg.downloadUrl) {
       throw new Error(wg.error || 'Winget liefert keine direkte Download-URL.');
     }
@@ -818,7 +629,7 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
     const knownVersion = resolved.version || item.webVersion || '';
 
     const urlExt = finalUrl.split('?')[0].toLowerCase().split('.').pop();
-    const isDirect = DIRECT_EXTS.has(urlExt) || item.webSourceType === 'winget';
+    const isDirect = DIRECT_EXTS.has(urlExt) || item.webSourceType === 'winget' || item.packageManager === 'winget';
 
     if (isDirect) {
       const rawName = decodeURIComponent(finalUrl.split('/').pop().split('?')[0] || 'setup.exe');
@@ -995,28 +806,36 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
 // ==========================================
 // AUTO-FILL SOFTWARE-DETAILS (WINGET / GITHUB / WEB)
 // ==========================================
-export async function fetchSoftwareMetadata({ sourceType = '', wingetId = '', url = '' }) {
+export async function fetchSoftwareMetadata({
+  sourceType = '',
+  packageManager = '',
+  packageId = '',
+  wingetId = '',
+  url = '',
+}) {
   try {
+    const resolvedWingetId = getEffectiveWingetId({ packageManager, packageId, wingetId });
     const effective =
-      sourceType || (wingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
+      sourceType ||
+      (resolvedWingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
 
     if (effective === 'winget') {
-      if (!wingetId) return { success: false, error: 'Bitte zuerst eine Winget-ID auswählen.' };
-      const res = await runWingetShow(wingetId, { preferGerman: true });
-      if (!res.success) return res;
+      if (!resolvedWingetId) return { success: false, error: 'Bitte zuerst eine Winget-ID auswählen.' };
+      const res = await wingetProvider.show(resolvedWingetId, { preferGerman: true });
+      if (!res.success || !res.package) return { success: false, error: res.error || 'Winget-Paket nicht gefunden.' };
 
-      const p = res.parsed;
+      const p = res.package;
       const links = {};
       if (p.homepage) links.Homepage = p.homepage;
       if (p.releaseNotesUrl) links.Changelog = p.releaseNotesUrl;
 
       return {
         success: true,
-        sourceLabel: res.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget (Standard/EN)',
+        sourceLabel: p.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget (Standard/EN)',
         metadata: {
           name: p.name,
           description: p.description,
-          tags: p.tags.slice(0, 10),
+          tags: (p.tags || []).slice(0, 10),
           links,
           version: p.version,
         },
@@ -1088,11 +907,12 @@ const changelogCache = new Map();
 const CHANGELOG_TTL_MS = 30 * 60 * 1000;
 
 export async function fetchChangelog(item) {
+  const resolvedWingetId = getEffectiveWingetId(item);
   const sourceType =
     item.webSourceType ||
-    (item.wingetId ? 'winget' : item.webVersionUrl?.toLowerCase().includes('github.com') ? 'github' : 'none');
+    (resolvedWingetId ? 'winget' : item.webVersionUrl?.toLowerCase().includes('github.com') ? 'github' : 'none');
 
-  const cacheKey = `${item.id}:${sourceType}:${item.wingetId || item.webVersionUrl || ''}`;
+  const cacheKey = `${item.id}:${sourceType}:${resolvedWingetId || item.webVersionUrl || ''}`;
   const cached = changelogCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CHANGELOG_TTL_MS) {
     return cached.data;
@@ -1129,11 +949,11 @@ export async function fetchChangelog(item) {
           externalUrl: `https://github.com/${repo}/releases`,
         };
       }
-    } else if (sourceType === 'winget' && item.wingetId) {
-      const res = await runWingetShow(item.wingetId, { preferGerman: true });
-      if (!res.success) return res;
+    } else if (sourceType === 'winget' && resolvedWingetId) {
+      const res = await wingetProvider.show(resolvedWingetId, { preferGerman: true });
+      if (!res.success || !res.package) return { success: false, error: res.error || 'Winget-Paket nicht gefunden.' };
 
-      const p = res.parsed;
+      const p = res.package;
       const entries =
         p.releaseNotes || p.releaseNotesUrl
           ? [
@@ -1150,7 +970,7 @@ export async function fetchChangelog(item) {
 
       payload = {
         success: true,
-        source: res.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget',
+        source: p.locale === 'de-DE' ? 'Winget (Deutsch)' : 'Winget',
         entries,
         externalUrl: p.releaseNotesUrl || p.homepage || '',
       };

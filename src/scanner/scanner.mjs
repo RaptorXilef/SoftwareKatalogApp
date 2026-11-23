@@ -94,7 +94,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   let autoPaths = [];
   let softwareType = 'default';
   let webSourceType = '';
+  let packageManager = '';
+  let packageId = '';
   let wingetId = '';
+  let keepAllVersions = false;
   let githubAssetPattern = '';
   let webVersionUrl = '';
   let webVersionPrefix = '';
@@ -189,9 +192,20 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
           autoPaths = Array.isArray(data.autoPaths) ? data.autoPaths.filter(Boolean) : [data.autoPaths].filter(Boolean);
         }
 
-        // Online-Update Felder (inkl. Abwärtskompatibilität)
-        if (data.webSourceType) webSourceType = data.webSourceType.trim();
-        if (data.wingetId) wingetId = data.wingetId.trim();
+        // Online-Update & Paketmanager-Felder (inkl. Abwärtskompatibilität auf wingetId)
+        if (data.webSourceType) webSourceType = String(data.webSourceType).trim();
+        if (data.packageManager) packageManager = String(data.packageManager).trim();
+        if (data.packageId) packageId = String(data.packageId).trim();
+        if (data.wingetId) wingetId = String(data.wingetId).trim();
+        if (typeof data.keepAllVersions === 'boolean') keepAllVersions = data.keepAllVersions;
+
+        if (!packageId && wingetId) {
+          packageId = wingetId;
+          if (!packageManager) packageManager = 'winget';
+        } else if (packageManager === 'winget' && packageId && !wingetId) {
+          wingetId = packageId;
+        }
+
         if (data.githubAssetPattern) githubAssetPattern = data.githubAssetPattern.trim();
         if (data.webVersionUrl) webVersionUrl = data.webVersionUrl.trim();
         if (data.webVersionPrefix) webVersionPrefix = data.webVersionPrefix;
@@ -203,7 +217,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
 
         // Automatische Ableitung für bestehende Einträge ohne webSourceType
         if (!webSourceType) {
-          if (wingetId) webSourceType = 'winget';
+          if (wingetId || packageManager === 'winget') webSourceType = 'winget';
           else if (webVersionUrl.toLowerCase().includes('github.com')) webSourceType = 'github';
           else if (webVersionUrl) webSourceType = 'web';
           else webSourceType = 'none';
@@ -284,7 +298,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     autoPaths,
     softwareType,
     webSourceType: webSourceType || 'none',
+    packageManager,
+    packageId,
     wingetId,
+    keepAllVersions,
     githubAssetPattern,
     webVersionUrl,
     webVersionPrefix,

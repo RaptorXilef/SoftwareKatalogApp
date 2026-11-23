@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, shell } from 'electron';
+import { mergeInstalledSoftware } from '../shared/installed-merger.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
-import { saveMetaJson } from './catalog-service.js';
-import { getConfig, saveConfig } from './config.js';
+import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
+import { getConfig, getIconCacheDir, saveConfig } from './config.js';
 import { createJob } from './jobs.js';
+import { wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
 function runPowerShell(script, { signal = null, asTempFile = false } = {}) {
@@ -527,5 +530,386 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     }
     job.finish('error', err.message, { autoRemoveMs: 5000 });
     return { success: false, error: err.message };
+  }
+}
+
+// ==========================================
+// ERWEITERTER PC-SCANNER, ICON-CACHE & DEINSTALLATION
+// ==========================================
+async function readRegistryUninstallEntries(signal = null) {
+  const psScript = `
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $ErrorActionPreference = 'SilentlyContinue'
+    $paths = @(
+      'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+      'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+      'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+      'HKCU:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+    )
+    $items = Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_.DisplayName) } |
+      ForEach-Object {
+        [PSCustomObject]@{
+          displayName = [string]$_.DisplayName
+          displayVersion = [string]$_.DisplayVersion
+          publisher = [string]$_.Publisher
+          uninstallString = [string]$_.UninstallString
+          quietUninstallString = [string]$_.QuietUninstallString
+          displayIcon = [string]$_.DisplayIcon
+          installLocation = [string]$_.InstallLocation
+          registryKey = [string]$_.PSChildName
+          systemComponent = if ($null -ne $_.SystemComponent) { [int]$_.SystemComponent } else { 0 }
+          parentKeyName = [string]$_.ParentKeyName
+        }
+      }
+    ConvertTo-Json -InputObject @($items) -Depth 3 -Compress
+  `;
+
+  const { code, stdout } = await runPowerShell(psScript, { signal, asTempFile: true });
+  if (signal?.aborted || code === -1 || !stdout) return [];
+
+  try {
+    const parsed = JSON.parse(stdout);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (e) {
+    console.warn('Registry-JSON konnte nicht geparst werden:', e.message);
+    return [];
+  }
+}
+
+function syncArchiveInstalledVersions(programs) {
+  const cfg = getConfig();
+  const nextVersions = { ...(cfg.installedVersions || {}) };
+  let changed = false;
+
+  for (const prog of programs) {
+    if (prog.archiveItemId && prog.installedVersion) {
+      const normalized = extractVersion(prog.installedVersion) || prog.installedVersion;
+      if (nextVersions[prog.archiveItemId] !== normalized) {
+        nextVersions[prog.archiveItemId] = normalized;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    saveConfig({ installedVersions: nextVersions });
+  }
+}
+
+/**
+ * Kombiniert `winget export`, `winget upgrade` und Windows-Registry-Uninstall-Daten
+ * zu einer vollständigen Liste aller auf diesem PC installierten Programme.
+ */
+export async function scanInstalledSoftware({ includeSystemComponents = false, silent = false } = {}) {
+  let job = null;
+  if (!silent) {
+    job = createJob({
+      type: 'pc-scan',
+      title: 'PC-Programme & Updates scannen',
+      dedupeKey: 'pc-scan',
+      cancelable: true,
+    });
+    if (!job) return { success: false, alreadyRunning: true, error: 'Ein PC-Scan läuft bereits.' };
+  }
+
+  const signal = job?.signal || null;
+
+  try {
+    job?.update(15, 'Lese Windows-Registry, Winget-Export & verfügbare Updates...');
+
+    const [registryEntries, exportRes, upgradeRes] = await Promise.all([
+      readRegistryUninstallEntries(signal),
+      wingetProvider.listInstalled({ signal }),
+      wingetProvider.listUpgrades({ signal }),
+    ]);
+
+    if (signal?.aborted) {
+      return { success: false, canceled: true };
+    }
+
+    job?.update(80, 'Verknüpfe installierte Programme mit Archiv-Katalog...');
+    const catalogItems = loadCatalogWithLiveStatus();
+
+    const wingetExports = exportRes.success ? exportRes.packages : [];
+    const wingetUpgrades = upgradeRes.success ? upgradeRes.upgrades : [];
+
+    const programs = mergeInstalledSoftware({
+      wingetExports,
+      wingetUpgrades,
+      registryEntries,
+      catalogItems,
+      includeSystemComponents,
+    });
+
+    syncArchiveInstalledVersions(programs);
+
+    const stats = {
+      total: programs.length,
+      updatesAvailable: programs.filter((p) => p.hasUpdate).length,
+      wingetManaged: programs.filter((p) => p.packageManager === 'winget').length,
+      inArchive: programs.filter((p) => p.inArchive).length,
+    };
+
+    job?.finish('done', `${stats.total} Programme erfasst (${stats.updatesAvailable} Updates verfügbar)`);
+    return {
+      success: true,
+      programs,
+      stats,
+      wingetAvailable: exportRes.success || upgradeRes.success,
+      scannedAt: Date.now(),
+    };
+  } catch (e) {
+    job?.finish('error', e.message, { autoRemoveMs: 5000 });
+    return { success: false, error: e.message };
+  }
+}
+
+function cleanDisplayIconPath(raw) {
+  if (!raw) return '';
+  return String(raw)
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/,-?\d+$/, '')
+    .trim();
+}
+
+async function resolveExecutableForIcon({ displayIcon = '', installLocation = '', executablePath = '' }) {
+  const candidates = [];
+  const cleanedIcon = cleanDisplayIconPath(displayIcon);
+  if (cleanedIcon) candidates.push(cleanedIcon);
+  if (executablePath)
+    candidates.push(
+      String(executablePath)
+        .trim()
+        .replace(/^["']|["']$/g, '')
+    );
+
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+
+  const cleanLoc = String(installLocation || '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
+  if (cleanLoc && fs.existsSync(cleanLoc)) {
+    try {
+      const entries = await fs.promises.readdir(cleanLoc, { withFileTypes: true });
+      const exeFiles = entries
+        .filter((e) => e.isFile() && /\.exe$/i.test(e.name) && !/unins|uninstall|setup|update|crash/i.test(e.name))
+        .map((e) => path.join(cleanLoc, e.name));
+      if (exeFiles.length > 0) return exeFiles[0];
+    } catch {
+      // Ordner nicht lesbar
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Extrahiert ein Programm-Icon on-demand sicher in `userData/icon-cache/` für `catalog-media://`.
+ */
+export async function extractCachedAppIcon({ id, displayIcon = '', installLocation = '', executablePath = '' }) {
+  if (!id) return { success: false, error: 'Keine Programm-ID für Icon-Cache angegeben.' };
+
+  try {
+    const cacheDir = getIconCacheDir();
+    const hash = crypto.createHash('sha256').update(String(id)).digest('hex').slice(0, 24);
+    const iconPath = path.join(cacheDir, `${hash}.png`);
+
+    if (fs.existsSync(iconPath)) {
+      return { success: true, iconPath, fromCache: true };
+    }
+
+    const sourceFile = await resolveExecutableForIcon({ displayIcon, installLocation, executablePath });
+    if (!sourceFile) {
+      return { success: false, error: 'Keine ausführbare Datei oder Icon-Quelle gefunden.' };
+    }
+
+    const icon = await app.getFileIcon(sourceFile, { size: 'normal' });
+    if (icon.isEmpty()) {
+      return { success: false, error: 'Kein Icon in Quelldatei gefunden.' };
+    }
+
+    const tmpPath = `${iconPath}.tmp`;
+    await fs.promises.writeFile(tmpPath, icon.toPNG());
+    await fs.promises.rename(tmpPath, iconPath);
+
+    return { success: true, iconPath, fromCache: false };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+function parseRegistryUninstallCommand(rawCommand, silent = false) {
+  const cmd = String(rawCommand || '').trim();
+  if (!cmd) return null;
+
+  if (/(?:^|[\\/])msiexec(?:\.exe)?\b/i.test(cmd)) {
+    let argsStr = cmd.replace(/^["']?[^"'\s]*msiexec(?:\.exe)?["']?\s*/i, '').trim();
+    argsStr = argsStr.replace(/(^|\s)\/I(?=\{|\s)/gi, '$1/X');
+    if (silent && !/\/q[nrb]?\b/i.test(argsStr)) {
+      argsStr = `${argsStr} /qn /norestart`.trim();
+    }
+    return { filePath: 'msiexec.exe', argsStr };
+  }
+
+  const quotedMatch = cmd.match(/^"([^"]+)"\s*(.*)$/);
+  if (quotedMatch) {
+    return { filePath: quotedMatch[1], argsStr: quotedMatch[2].trim() };
+  }
+
+  const exeMatch = cmd.match(/^(.*?\.exe)(?:\s+(.*))?$/i);
+  if (exeMatch) {
+    return { filePath: exeMatch[1].trim(), argsStr: (exeMatch[2] || '').trim() };
+  }
+
+  return { filePath: cmd, argsStr: '' };
+}
+
+async function runRegistryUninstall(rawCommand, silent = false) {
+  const parsed = parseRegistryUninstallCommand(rawCommand, silent);
+  if (!parsed?.filePath) {
+    return { success: false, error: 'Ungültiger Deinstallationsbefehl.' };
+  }
+
+  const safeFile = parsed.filePath.replace(/'/g, "''");
+  const safeArgs = parsed.argsStr.replace(/'/g, "''");
+  const argClause = safeArgs ? `-ArgumentList '${safeArgs}'` : '';
+
+  const psScript = `
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try {
+      $p = Start-Process -FilePath '${safeFile}' ${argClause} -Wait -PassThru
+      Write-Output "EXIT:$($p.ExitCode)"
+    } catch {
+      Write-Output "ERR:$($_.Exception.Message)"
+    }
+  `;
+
+  const { stdout } = await runPowerShell(psScript);
+  if (stdout.startsWith('ERR:')) {
+    const msg = stdout.replace('ERR:', '').trim();
+    const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
+    return { success: false, canceled: wasCanceled, error: msg };
+  }
+
+  const exitMatch = stdout.match(/EXIT:(-?\d+)/);
+  const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
+
+  if (exitCode === 1602 || exitCode === 1223) {
+    return { success: false, canceled: true, exitCode };
+  }
+  if (exitCode === 0 || exitCode === 3010) {
+    return { success: true, exitCode, rebootRequired: exitCode === 3010 };
+  }
+  return { success: false, exitCode, error: `Deinstaller meldete Fehlercode ${exitCode}.` };
+}
+
+function clearAndRefreshAffectedItems({ archiveItemId = null, packageId = '' }) {
+  const cfg = getConfig();
+  const affectedIds = new Set();
+  if (archiveItemId) affectedIds.add(archiveItemId);
+
+  if (packageId) {
+    const pkgLower = packageId.toLowerCase();
+    for (const item of loadCatalogWithLiveStatus()) {
+      const itemPkg = (item.packageId || item.wingetId || '').toLowerCase();
+      if (itemPkg && itemPkg === pkgLower) {
+        affectedIds.add(item.id);
+      }
+    }
+  }
+
+  if (affectedIds.size === 0) return [];
+
+  const updatedVersions = { ...(cfg.installedVersions || {}) };
+  let removed = false;
+  for (const id of affectedIds) {
+    if (Object.hasOwn(updatedVersions, id)) {
+      delete updatedVersions[id];
+      removed = true;
+    }
+  }
+  if (removed) {
+    saveConfig({ installedVersions: updatedVersions });
+  }
+
+  return [...affectedIds];
+}
+
+/**
+ * Deinstalliert ein Programm (bevorzugt über `winget uninstall --id <ID> --exact`, sonst Registry UninstallString),
+ * wartet auf Abschluss über den Job-Manager und aktualisiert den PC-Status.
+ */
+export async function uninstallSoftware({
+  packageId = '',
+  packageManager = '',
+  uninstallString = '',
+  quietUninstallString = '',
+  itemName = '',
+  archiveItemId = null,
+  silent = false,
+}) {
+  const displayTitle = itemName || packageId || 'Programm';
+  const useWinget = Boolean(packageId) && (!packageManager || packageManager === 'winget');
+  const regCommand = silent && quietUninstallString ? quietUninstallString : uninstallString;
+
+  if (!useWinget && !regCommand) {
+    return { success: false, error: 'Keine Winget-ID oder Deinstallations-Befehl vorhanden.' };
+  }
+
+  const job = createJob({
+    type: 'uninstall',
+    title: `Deinstallation: ${displayTitle}`,
+    dedupeKey: `uninstall:${packageId || displayTitle}`,
+    cancelable: false,
+  });
+  if (!job) return { success: false, alreadyRunning: true, error: 'Deinstallation läuft bereits.' };
+
+  try {
+    let res;
+    let method = 'registry';
+
+    if (useWinget) {
+      method = 'winget';
+      job.update(null, `Deinstalliere ${displayTitle} über Winget...`);
+      res = await wingetProvider.uninstall(packageId, { silent, itemName: displayTitle, useJob: false });
+
+      if (!res.success && !res.canceled && regCommand) {
+        method = 'registry-fallback';
+        job.update(null, 'Winget fehlgeschlagen – starte Registry-Deinstaller...');
+        res = await runRegistryUninstall(regCommand, silent);
+      }
+    } else {
+      job.update(null, 'Deinstallationsprogramm läuft – bitte abschließen...');
+      res = await runRegistryUninstall(regCommand, silent);
+    }
+
+    if (res.canceled) {
+      job.finish('canceled', 'Deinstallation wurde abgebrochen.', { autoRemoveMs: 3500 });
+      return { ...res, method };
+    }
+
+    if (!res.success) {
+      job.finish('error', res.error || 'Deinstallation fehlgeschlagen.', { autoRemoveMs: 6000 });
+      return { ...res, method };
+    }
+
+    job.update(85, 'Aktualisiere lokalen PC-Status...');
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const affectedIds = clearAndRefreshAffectedItems({ archiveItemId, packageId });
+    if (affectedIds.length > 0) {
+      await scanLocalVersions({ itemIds: affectedIds, silent: true });
+    }
+
+    const msg = res.rebootRequired ? 'Deinstalliert (Neustart empfohlen).' : 'Erfolgreich deinstalliert.';
+    job.finish('done', msg, { autoRemoveMs: 4000 });
+    return { success: true, method, exitCode: res.exitCode ?? 0, rebootRequired: Boolean(res.rebootRequired) };
+  } catch (e) {
+    job.finish('error', e.message, { autoRemoveMs: 5000 });
+    return { success: false, error: e.message };
   }
 }

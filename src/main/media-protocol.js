@@ -1,7 +1,10 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { net, protocol } from 'electron';
-import { isInsideTargetDir } from './config.js';
+import { isInsideIconCacheDir, isInsideTargetDir } from './config.js';
+
+const ICON_CACHE_EXT_RE = /\.(png|ico|jpg|jpeg|webp|svg)$/i;
 
 export function registerMediaScheme() {
   protocol.registerSchemesAsPrivileged([
@@ -23,7 +26,11 @@ export function setupMediaProtocolHandler() {
       const url = new URL(request.url);
       const filePath = url.searchParams.get('path');
 
-      if (!filePath || !isInsideTargetDir(filePath) || !fs.existsSync(filePath)) {
+      const allowedArchive = filePath && isInsideTargetDir(filePath);
+      const allowedIconCache =
+        filePath && isInsideIconCacheDir(filePath) && ICON_CACHE_EXT_RE.test(path.extname(filePath));
+
+      if (!filePath || (!allowedArchive && !allowedIconCache) || !fs.existsSync(filePath)) {
         return new Response('Not Found', { status: 404 });
       }
 
