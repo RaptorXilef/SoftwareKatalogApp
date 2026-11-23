@@ -4,8 +4,8 @@ import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { openDetailModal, triggerCatalogReload } from './index.js';
 
 function detectInitialSourceType(item) {
-  if (item.webSourceType) return item.webSourceType;
-  if (item.wingetId) return 'winget';
+  if (item.webSourceType && item.webSourceType !== 'none') return item.webSourceType;
+  if (item.wingetId || (item.packageManager === 'winget' && item.packageId)) return 'winget';
   if (item.webVersionUrl?.toLowerCase().includes('github.com')) return 'github';
   if (item.webVersionUrl) return 'web';
   return 'none';
@@ -28,6 +28,7 @@ export function renderEditModal(id, initialTab = 'general') {
     ...(item.installPaths || []).map((p) => ({ path: p, origin: 'manual' })),
   ];
   let currentSourceType = detectInitialSourceType(item);
+  const initialWingetId = item.wingetId || (item.packageManager === 'winget' ? item.packageId : '') || '';
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
   const cleanDesc = sanitizeRichHtml(item.description || '');
 
@@ -90,6 +91,11 @@ export function renderEditModal(id, initialTab = 'general') {
           <input type="text" id="editOS" value="${escapeHTML((item.os || []).join(', '))}" placeholder="Windows 10, Windows 11">
         </label>
 
+        <label class="check-row edit-keep-versions-row">
+          <input type="checkbox" id="editKeepAllVersions" ${item.keepAllVersions ? 'checked' : ''}>
+          <span>🔒 Alle Versionen im Archiv behalten (vom Aufräumer ausschließen)</span>
+        </label>
+
         <div class="form-field">
           <span>Beschreibung</span>
           <div class="editor-toolbar" id="descToolbar">
@@ -136,7 +142,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
           <label class="form-field">
             <span>Ausgewählte Winget-ID</span>
-            <input type="text" id="editWingetId" value="${escapeHTML(item.wingetId || '')}" placeholder="z. B. VideoLAN.VLC">
+            <input type="text" id="editWingetId" value="${escapeHTML(initialWingetId)}" placeholder="z. B. VideoLAN.VLC">
           </label>
         </div>
 
@@ -618,10 +624,13 @@ export function renderEditModal(id, initialTab = 'general') {
     // Live-Test Online-Quelle (kein alert, direktes Inline-Feedback!)
     if (act === 'test-online') {
       const fb = modal.querySelector('#onlineTestFeedback');
+      const wingetIdVal = modal.querySelector('#editWingetId').value.trim();
       const payload = {
         itemId: item.id,
         sourceType: currentSourceType,
-        wingetId: modal.querySelector('#editWingetId').value.trim(),
+        packageManager: currentSourceType === 'winget' ? 'winget' : '',
+        packageId: currentSourceType === 'winget' ? wingetIdVal : '',
+        wingetId: wingetIdVal,
         githubAssetPattern: modal.querySelector('#editGithubAssetPattern').value.trim(),
         url:
           currentSourceType === 'github'
@@ -734,9 +743,12 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Auto-Fill abrufen (überschreibt nichts automatisch -> zeigt Checkliste!)
     if (act === 'autofill-fetch') {
+      const wingetIdVal = modal.querySelector('#editWingetId').value.trim();
       const payload = {
         sourceType: currentSourceType,
-        wingetId: modal.querySelector('#editWingetId').value.trim(),
+        packageManager: currentSourceType === 'winget' ? 'winget' : '',
+        packageId: currentSourceType === 'winget' ? wingetIdVal : '',
+        wingetId: wingetIdVal,
         url:
           currentSourceType === 'github'
             ? modal.querySelector('#editGithubUrl').value.trim()
@@ -893,6 +905,13 @@ export function renderEditModal(id, initialTab = 'general') {
             ? modal.querySelector('#editWebUrl').value.trim()
             : '';
 
+      const savedWingetId = currentSourceType === 'winget' ? modal.querySelector('#editWingetId').value.trim() : '';
+      const hasNonWingetPkg = Boolean(item.packageManager && item.packageManager !== 'winget' && item.packageId);
+      const nextPackageManager =
+        currentSourceType === 'winget' && savedWingetId ? 'winget' : hasNonWingetPkg ? item.packageManager : '';
+      const nextPackageId =
+        currentSourceType === 'winget' && savedWingetId ? savedWingetId : hasNonWingetPkg ? item.packageId : '';
+
       const payload = {
         name: modal.querySelector('#editName').value.trim() || item.name,
         softwareType: modal.querySelector('#editSoftwareType').value,
@@ -913,6 +932,7 @@ export function renderEditModal(id, initialTab = 'general') {
           .value.split(',')
           .map((s) => s.trim())
           .filter(Boolean),
+        keepAllVersions: Boolean(modal.querySelector('#editKeepAllVersions')?.checked),
         description: sanitizeRichHtml(modal.querySelector('#editDesc').innerHTML.trim()),
         searchNames: modal
           .querySelector('#editSearchNames')
@@ -922,7 +942,9 @@ export function renderEditModal(id, initialTab = 'general') {
         autoPaths: draftPaths.filter((p) => p.origin === 'auto').map((p) => p.path),
         installPaths: draftPaths.filter((p) => p.origin === 'manual').map((p) => p.path),
         webSourceType: currentSourceType,
-        wingetId: currentSourceType === 'winget' ? modal.querySelector('#editWingetId').value.trim() : '',
+        packageManager: nextPackageManager,
+        packageId: nextPackageId,
+        wingetId: savedWingetId,
         githubAssetPattern:
           currentSourceType === 'github' ? modal.querySelector('#editGithubAssetPattern').value.trim() : '',
         webVersionUrl: webUrl,

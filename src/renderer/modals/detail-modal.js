@@ -1,10 +1,12 @@
+import { buildRemotePackageItem } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
 import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
-import { closeModal, openArchiveLinkModal, openEditModal, triggerCatalogReload } from './index.js';
+import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } from './archive-target-modal.js';
+import { closeModal, openEditModal, triggerCatalogReload } from './index.js';
 
 const SOURCE_LABELS = {
   winget: 'Winget',
@@ -19,13 +21,49 @@ const STATUS_BADGES = {
   newer: { label: 'PC neuer als Archiv', cls: 'is-newer' },
 };
 
+const ORIGIN_CHIPS = {
+  both: { label: 'PC & Archiv', cls: '' },
+  archive: { label: 'Nur im Archiv', cls: 'chip-origin-archive' },
+  pc: { label: 'Nur auf diesem PC', cls: 'chip-origin-pc' },
+};
+
+let activeRenderToken = 0;
+
+function formatCacheTimestamp(ts) {
+  if (!ts) return '';
+  try {
+    return new Intl.DateTimeFormat('de-DE', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(new Date(ts));
+  } catch {
+    return '';
+  }
+}
+
+function getEffectivePackageManager(item) {
+  if (item.packageManager) return String(item.packageManager).trim().toLowerCase();
+  if (item.wingetId) return 'winget';
+  return '';
+}
+
+function getEffectivePackageId(item) {
+  return String(item.packageId || item.wingetId || '').trim();
+}
+
 function canDownloadOnline(item) {
-  if (item.webSourceType === 'winget' && item.wingetId) return true;
+  if (item.webSourceType === 'winget' && getEffectivePackageId(item)) return true;
   if (item.webSourceType === 'github' && item.webVersionUrl) return true;
   return Boolean(item.downloadUrl);
 }
 
-function buildHeroAction(item, st) {
+function isCanUninstall(item, effectivePm, effectivePkgId) {
+  if (!item.isInstalled) return false;
+  if (item.canUninstall || item.uninstallString || item.quietUninstallString) return true;
+  return item.softwareType !== 'portable' && effectivePm === 'winget' && Boolean(effectivePkgId);
+}
+
+function buildArchiveHeroAction(item, st) {
   const onlineReady = canDownloadOnline(item);
   const firstFile = item.lastFiles?.[0] || null;
 
@@ -34,7 +72,6 @@ function buildHeroAction(item, st) {
       action: 'web-download',
       label: `⬇️ Update v${st.webVersion} ins Archiv laden`,
       cls: 'btn-online',
-      hint: 'Lädt die neuste Version aus dem Internet direkt in dein Archiv.',
     };
   }
 
@@ -45,7 +82,6 @@ function buildHeroAction(item, st) {
       version: st.archiveVersion,
       label: `⬆️ Jetzt aktualisieren (v${st.archiveVersion})`,
       cls: 'btn-archive',
-      hint: 'Kopiert das Setup lokal, startet es und prüft danach die neue Version.',
     };
   }
 
@@ -56,7 +92,6 @@ function buildHeroAction(item, st) {
       version: st.archiveVersion,
       label: st.archiveVersion ? `▶️ Installieren (v${st.archiveVersion})` : '▶️ Setup starten',
       cls: 'btn-primary',
-      hint: 'Startet die aktuelle Setup-Datei aus dem Archiv.',
     };
   }
 
@@ -65,393 +100,318 @@ function buildHeroAction(item, st) {
       action: 'launch-local',
       label: '🚀 Programm starten',
       cls: 'btn-local',
-      hint: 'Startet die lokal installierte Version auf diesem PC.',
     };
   }
 
   return null;
 }
 
-function renderPcDetailModal(item) {
-  const overlay = document.getElementById('modalOverlay');
-  const modal = document.getElementById('modalContent');
-  if (!overlay || !modal) return;
+function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive }) {
+  const buttons = [];
 
-  const st = getItemStatus(item);
-  const statusBadge = STATUS_BADGES[st.status];
-  const isWinget = item.packageManager === 'winget' && Boolean(item.packageId);
+  if (item.origin === 'remote') {
+    const installLabel =
+      item.isInstalled && st.hasWebUpdate
+        ? `⬆️ Über Winget aktualisieren (v${st.webVersion})`
+        : item.isInstalled
+          ? '🔄 Erneut über Winget installieren'
+          : '⬇️ Jetzt installieren';
+    buttons.push(
+      `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(installLabel)}</button>`
+    );
 
-  const iconHtml = item.icon
-    ? `<img class="detail-icon" src="${escapeHTML(toMediaUrl(item.icon))}" alt="">`
-    : '<div class="detail-icon-fallback">💻</div>';
+    if (matchedArchive) {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
+      );
+    } else if (isWingetPkg) {
+      buttons.push(
+        '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+      );
+    }
+  } else if (item.origin === 'pc') {
+    if (isWingetPkg && st.hasWebUpdate) {
+      buttons.push(
+        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über Winget aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+      );
+    } else if (item.validInstallPath) {
+      buttons.push(
+        '<button type="button" class="btn btn-lg btn-local" data-detail-action="launch-local">🚀 Programm starten</button>'
+      );
+    }
+    buttons.push(
+      '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+    );
+  } else {
+    const hero = buildArchiveHeroAction(item, st);
+    const onlineReady = canDownloadOnline(item);
 
-  const heroBtns = [];
-  if (isWinget && st.hasWebUpdate) {
-    heroBtns.push(
-      `<button type="button" class="btn btn-lg btn-online" data-pc-action="winget-update">⬆️ Über Winget aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+    if (hero) {
+      buttons.push(
+        `<button type="button" class="btn btn-lg ${hero.cls}" data-detail-action="${hero.action}" data-file="${escapeHTML(hero.file || '')}" data-version="${escapeHTML(hero.version || '')}">${escapeHTML(hero.label)}</button>`
+      );
+    }
+    if (item.isInstalled && item.validInstallPath && hero?.action !== 'launch-local') {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost" data-detail-action="launch-local">🚀 Programm starten</button>'
+      );
+    }
+    if (onlineReady && hero?.action !== 'web-download') {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost" data-detail-action="web-download">🌐 Aus Web laden</button>'
+      );
+    }
+  }
+
+  if (canUninstall) {
+    buttons.push(
+      '<button type="button" class="btn btn-danger" data-detail-action="uninstall">🗑️ Deinstallieren</button>'
     );
   }
-  if (isWinget) {
-    heroBtns.push(
-      '<button type="button" class="btn btn-archive" data-pc-action="link-archive">🗄️ Ins Archiv laden</button>'
-    );
-  }
-  if (item.canUninstall) {
-    heroBtns.push('<button type="button" class="btn btn-danger" data-pc-action="uninstall">🗑️ Deinstallieren</button>');
+
+  if (buttons.length === 0) return '';
+  return `<div class="detail-hero-bar">${buttons.join('')}</div>`;
+}
+
+function buildArchiveSaveChoiceHtml(item, { effectivePkgId, isWingetPkg, matchedArchive }) {
+  if (!isWingetPkg || item.inArchive || matchedArchive) return '';
+
+  const saveMode = state.settings.archiveSaveMode || 'ask';
+  const checked = saveMode === 'ask' || saveMode === 'auto-id';
+  let labelText = '🗄️ Setup-Datei bei Installation/Update zusätzlich im Archiv ablegen';
+  if (saveMode === 'auto-id') {
+    labelText = `🗄️ Setup-Datei automatisch im Archiv speichern (Ordner: ${effectivePkgId})`;
+  } else if (saveMode === 'none') {
+    labelText = '🗄️ Setup-Datei zusätzlich im Archiv ablegen (Standard in Einstellungen: Aus)';
   }
 
-  const techRows = [];
-  if (item.packageId) {
-    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(item.packageId)}</code></div>`);
-  }
-  techRows.push(
-    `<div class="tech-row"><span>Quelle</span><code>${escapeHTML(isWinget ? 'Winget' : 'Windows-Registry')}</code></div>`
-  );
-  if (item.publisher) {
-    techRows.push(`<div class="tech-row"><span>Herausgeber</span><code>${escapeHTML(item.publisher)}</code></div>`);
-  }
-  if (item.installLocation) {
-    techRows.push(
-      `<div class="tech-row"><span>Installationsordner</span><code>${escapeHTML(item.installLocation)}</code></div>`
-    );
-  }
-  if (item.registryKey) {
-    techRows.push(`<div class="tech-row"><span>Registry-Key</span><code>${escapeHTML(item.registryKey)}</code></div>`);
+  return `
+    <label class="detail-archive-save-box">
+      <input type="checkbox" id="detailAlsoSaveArchive" ${checked ? 'checked' : ''}>
+      <span>${escapeHTML(labelText)}</span>
+    </label>
+  `;
+}
+
+function buildVersionGridHtml(item, st, { matchedArchive }) {
+  const sourceLabel =
+    SOURCE_LABELS[item.webSourceType] ||
+    item.providerName ||
+    (getEffectivePackageManager(item) === 'winget' ? 'Winget' : '');
+
+  const archiveVersion =
+    st.archiveVersion || (matchedArchive?.lastFiles?.length > 0 ? getBaseName(matchedArchive.lastFiles[0]) : '') || '';
+
+  let archiveBoxVal = 'Nicht im Archiv';
+  if (item.inArchive || matchedArchive) {
+    archiveBoxVal = st.archiveVersion
+      ? `v${escapeHTML(st.archiveVersion)}`
+      : archiveVersion
+        ? escapeHTML(archiveVersion)
+        : 'Keine Setup-Datei';
   }
 
-  modal.innerHTML = `
-    <div class="modal-header detail-header">
-      <div class="detail-head-main">
-        ${iconHtml}
-        <div class="detail-head-text">
-          <div class="detail-title-row">
-            <h2>${escapeHTML(item.name)}</h2>
-            ${statusBadge ? `<span class="status-pill ${statusBadge.cls}">${escapeHTML(statusBadge.label)}</span>` : ''}
-            <span class="card-chip chip-origin-pc">Nur auf diesem PC</span>
-            ${isWinget ? '<span class="provider-badge">Winget</span>' : ''}
-          </div>
-          <div class="detail-meta-inline">
-            ${item.publisher ? `<span><strong>Herausgeber:</strong> ${escapeHTML(item.publisher)}</span>` : ''}
-            ${item.packageId ? `<span><strong>Paket-ID:</strong> <code>${escapeHTML(item.packageId)}</code></span>` : ''}
-          </div>
-        </div>
+  const onlineVal = st.webVersion
+    ? `v${escapeHTML(st.webVersion)}`
+    : sourceLabel === 'Winget' && item.origin === 'pc'
+      ? 'Aktuell'
+      : 'Nicht eingerichtet';
+
+  return `
+    <div class="detail-version-grid">
+      <div class="detail-ver-box ${st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasArchiveUpdate ? 'is-ok' : ''}">
+        <span class="ver-box-lbl">Installiert (PC)</span>
+        <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : item.isInstalled ? 'Installiert' : 'Nicht installiert'}</strong>
       </div>
-      <button type="button" class="icon-btn" data-pc-action="close" title="Schließen" aria-label="Schließen">✕</button>
-    </div>
-
-    <div class="modal-body detail-body">
-      <div class="detail-version-grid">
-        <div class="detail-ver-box ${st.hasWebUpdate ? '' : 'is-ok'}">
-          <span class="ver-box-lbl">Installiert (PC)</span>
-          <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : 'Unbekannt'}</strong>
-        </div>
-        <div class="detail-ver-box">
-          <span class="ver-box-lbl">Archiv</span>
-          <strong class="ver-box-val">Nicht im Archiv</strong>
-        </div>
-        <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
-          <span class="ver-box-lbl">Online${isWinget ? ' · Winget' : ''}</span>
-          <strong class="ver-box-val">${st.webVersion ? `v${escapeHTML(st.webVersion)}` : isWinget ? 'Aktuell' : 'Nicht verwaltet'}</strong>
-        </div>
+      <div class="detail-ver-box ${st.hasArchiveUpdate ? 'is-archive-update' : ''}">
+        <span class="ver-box-lbl">Archiv${item.hasPinnedLast ? ' · _last gepinnt' : ''}</span>
+        <strong class="ver-box-val">${archiveBoxVal}</strong>
       </div>
-
-      ${heroBtns.length > 0 ? `<div class="detail-hero-bar">${heroBtns.join('')}</div>` : ''}
-
-      <div class="detail-section" id="pcPkgDescSection" ${isWinget ? '' : 'hidden'}>
-        <h4>Paket-Informationen</h4>
-        <div id="pcPkgDescBody" class="detail-description">
-          <span class="muted">⏳ Lade Details von Winget...</span>
-        </div>
-      </div>
-
-      <details class="detail-tech-drawer">
-        <summary>Technische Details & Pfade</summary>
-        <div class="detail-tech-list">${techRows.join('')}</div>
-      </details>
-    </div>
-
-    <div class="modal-footer">
-      <div class="footer-group">
-        ${item.installLocation ? '<button type="button" class="btn btn-ghost" data-pc-action="open-install-dir">📂 Installationsordner</button>' : ''}
-      </div>
-      <div class="footer-group">
-        <button type="button" class="btn btn-primary" data-pc-action="close">Schließen</button>
+      <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
+        <span class="ver-box-lbl">Online${sourceLabel ? ` · ${escapeHTML(sourceLabel)}` : ''}</span>
+        <strong class="ver-box-val" id="detailOnlineVerVal">${onlineVal}</strong>
       </div>
     </div>
   `;
-
-  overlay.hidden = false;
-
-  let loadedWingetPkg = null;
-
-  if (isWinget) {
-    window.electronAPI.showPackage('winget', item.packageId).then((res) => {
-      if (state.currentModalId !== item.id || overlay.hidden) return;
-      const bodyEl = modal.querySelector('#pcPkgDescBody');
-      if (!bodyEl) return;
-      if (res?.success && res.package) {
-        loadedWingetPkg = res.package;
-        const desc = res.package.description || res.package.shortDescription || '';
-        const hp = res.package.homepage
-          ? `<div class="detail-links" style="margin-top: 10px;"><button type="button" class="link-chip" data-open-url="${escapeHTML(res.package.homepage)}">🔗 Homepage</button></div>`
-          : '';
-        bodyEl.innerHTML = `${desc ? escapeHTML(desc) : '<span class="muted">Keine Beschreibung hinterlegt.</span>'}${hp}`;
-      } else {
-        bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Keine Details verfügbar.')}</span>`;
-      }
-    });
-  }
-
-  modal.onclick = async (e) => {
-    const urlBtn = e.target.closest('[data-open-url]');
-    if (urlBtn) {
-      window.electronAPI.openUrl(urlBtn.dataset.openUrl);
-      return;
-    }
-
-    const btn = e.target.closest('[data-pc-action]');
-    if (!btn) return;
-    const act = btn.dataset.pcAction;
-
-    if (act === 'close') {
-      closeModal();
-    } else if (act === 'open-install-dir' && item.installLocation) {
-      window.electronAPI.openPath(item.installLocation);
-    } else if (act === 'link-archive' && isWinget) {
-      openArchiveLinkModal({
-        packageManager: 'winget',
-        packageId: item.packageId,
-        name: item.name,
-        version: st.webVersion || st.localVersion || '',
-        description: loadedWingetPkg?.description || loadedWingetPkg?.shortDescription || '',
-        tags: loadedWingetPkg?.tags || [],
-        homepage: loadedWingetPkg?.homepage || '',
-        releaseNotesUrl: loadedWingetPkg?.releaseNotesUrl || '',
-      });
-    } else if (act === 'winget-update' && isWinget) {
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = '⏳ Aktualisiere...';
-      showToast(`Starte Winget-Update für ${item.name}...`, { type: 'info' });
-      const res = await window.electronAPI.installPackage('winget', item.packageId, {
-        silent: false,
-        itemName: item.name,
-      });
-      btn.disabled = false;
-      btn.textContent = orig;
-      if (res?.alreadyRunning) {
-        showToast('Für dieses Paket läuft bereits eine Installation.', { type: 'warn' });
-      } else if (res?.canceled) {
-        showToast('Update wurde abgebrochen.', { type: 'info' });
-      } else if (res?.success) {
-        showToast(`${item.name} erfolgreich aktualisiert!`, { type: 'success' });
-        await triggerCatalogReload({ rescanInstalled: true });
-      } else {
-        showToast(`Update fehlgeschlagen: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
-      }
-    } else if (act === 'uninstall') {
-      if (btn.dataset.armed !== 'true') {
-        btn.dataset.armed = 'true';
-        btn.dataset.origText = btn.textContent;
-        btn.textContent = '⚠️ Wirklich deinstallieren?';
-        setTimeout(() => {
-          if (btn.dataset.armed === 'true') {
-            btn.dataset.armed = 'false';
-            btn.textContent = btn.dataset.origText;
-          }
-        }, 4000);
-        return;
-      }
-      btn.dataset.armed = 'false';
-      btn.disabled = true;
-      btn.textContent = '⏳ Deinstalliere...';
-      const res = await window.electronAPI.uninstallSoftware({
-        packageManager: item.packageManager,
-        packageId: item.packageId,
-        uninstallString: item.uninstallString,
-        quietUninstallString: item.quietUninstallString,
-        name: item.name,
-        silent: false,
-      });
-      btn.disabled = false;
-      btn.textContent = btn.dataset.origText || '🗑️ Deinstallieren';
-      if (res?.alreadyRunning) {
-        showToast('Deinstallation läuft bereits.', { type: 'warn' });
-      } else if (res?.canceled) {
-        showToast('Deinstallation abgebrochen.', { type: 'info' });
-      } else if (res?.success) {
-        showToast(`${item.name} wurde deinstalliert.`, { type: 'success' });
-        closeModal();
-        await triggerCatalogReload({ rescanInstalled: true });
-      } else {
-        showToast(`Deinstallationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
-      }
-    }
-  };
 }
 
-export function renderDetailModal(id, { freshDownload = null } = {}) {
-  const item = getItemById(id);
-  if (!item) return;
+function buildCustomMetaSectionHtml(item, hasPackageProfile) {
+  const cleanDesc = sanitizeRichHtml(item.description);
+  const hasLinks = Array.isArray(item.links) && item.links.length > 0;
+  const hasMedia = Array.isArray(item.screenshots) && item.screenshots.length > 0;
+  const hasFormats = Array.isArray(item.formats) && item.formats.length > 0;
+  const hasOs = Array.isArray(item.os) && item.os.length > 0;
+  const hasCats = Boolean(item.mainCategory || item.subCategories?.length);
 
-  state.currentModalId = id;
-  state.isEditModalOpen = false;
+  const hasAnyCustomInfo = Boolean(cleanDesc || hasLinks || hasMedia || hasFormats || hasOs || hasCats);
 
-  if (item.origin === 'pc') {
-    renderPcDetailModal(item);
-    return;
-  }
-
-  const overlay = document.getElementById('modalOverlay');
-  const modal = document.getElementById('modalContent');
-  if (!overlay || !modal) return;
-
-  const st = getItemStatus(item);
-  const statusBadge = STATUS_BADGES[st.status];
-  const hero = buildHeroAction(item, st);
-  const onlineReady = canDownloadOnline(item);
-  const sourceLabel = SOURCE_LABELS[item.webSourceType] || '';
-
-  const iconHtml = item.icon
-    ? `<img class="detail-icon" src="${escapeHTML(toMediaUrl(item.icon))}" alt="">`
-    : '<div class="detail-icon-fallback">📦</div>';
-
-  const typeChip =
-    item.softwareType === 'portable'
-      ? '<span class="card-chip">Portabel</span>'
-      : item.softwareType === 'driver'
-        ? '<span class="card-chip">Treiber</span>'
-        : '';
-
-  const newChip = isItemNew(item) ? '<span class="card-chip chip-new">NEU</span>' : '';
-
-  const postDownloadBanner = freshDownload
-    ? `
-      <div class="detail-inline-banner is-success">
-        <div class="banner-text">
-          <strong>✅ Download im Archiv gespeichert!</strong>
-          <span>Datei: <code>${escapeHTML(getBaseName(freshDownload.filePath))}</code></span>
-        </div>
-        <button type="button" class="btn btn-local" data-detail-action="install-fresh" data-file="${escapeHTML(freshDownload.filePath)}" data-version="${escapeHTML(freshDownload.version || '')}">
-          ▶️ Jetzt installieren
-        </button>
-      </div>
-    `
-    : '';
-
-  const pinnedNotice =
-    item.hasPinnedLast && onlineReady
-      ? `
-      <label class="detail-pin-choice">
-        <input type="checkbox" id="detailSaveIntoLast">
-        <span><code>_last</code>-Ordner ist aktiv (gepinnte Version). Neuen Web-Download ebenfalls in <code>_last</code> speichern?</span>
-      </label>
-    `
-      : '';
-
-  // Archiv-Dateiauswahl (immer zugänglich für Setup oder Kopie auf PC)
-  let archiveFilesHtml = '';
-  if (item.lastFiles?.length > 0) {
-    const firstFile = item.lastFiles[0];
-    const selectorHtml =
-      item.lastFiles.length > 1
-        ? `<select id="detailFileSelect" class="detail-file-select">${item.lastFiles
-            .map((f, idx) => `<option value="${idx}">${escapeHTML(getBaseName(f))}</option>`)
-            .join('')}</select>`
-        : `<span class="detail-file-name" title="${escapeHTML(getBaseName(firstFile))}">${escapeHTML(getBaseName(firstFile))}</span>`;
-
-    archiveFilesHtml = `
-      <div class="detail-archive-bar">
-        <span class="detail-archive-label">Archiv-Datei:</span>
-        ${selectorHtml}
-        <div class="detail-archive-btns">
-          <button type="button" class="btn btn-ghost" data-detail-action="run-selected">▶️ Ausführen</button>
-          <button type="button" class="btn btn-ghost" data-detail-action="copy-selected">💾 Auf PC kopieren</button>
+  if (!hasAnyCustomInfo) {
+    if (hasPackageProfile) return '';
+    return `
+      <div class="detail-section">
+        <h4>Eigene Infos & Medien</h4>
+        <div class="detail-description">
+          <span class="muted">Keine eigenen Zusatzinfos oder Medien hinterlegt (<code>meta.json</code> ist optional).</span>
         </div>
       </div>
     `;
   }
 
-  // Sekundäre Schnellaktionen neben dem Hero-Button
-  const secondaryHeroBtns = [];
-  if (item.isInstalled && item.validInstallPath && hero?.action !== 'launch-local') {
-    secondaryHeroBtns.push(
-      '<button type="button" class="btn btn-ghost" data-detail-action="launch-local">🚀 Programm starten</button>'
-    );
+  const infoChips = [];
+  if (item.mainCategory) infoChips.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
+  if (item.subCategories?.length) {
+    infoChips.push(`<span><strong>Eigene Tags:</strong> ${escapeHTML(item.subCategories.join(', '))}</span>`);
   }
-  if (onlineReady && hero?.action !== 'web-download') {
-    secondaryHeroBtns.push(
-      '<button type="button" class="btn btn-ghost" data-detail-action="web-download">🌐 Aus Web laden</button>'
-    );
-  }
+  if (hasFormats) infoChips.push(`<span><strong>Dateiformate:</strong> ${escapeHTML(item.formats.join(', '))}</span>`);
+  if (hasOs) infoChips.push(`<span><strong>Systeme:</strong> ${escapeHTML(item.os.join(', '))}</span>`);
 
-  // Metadaten-Pills (Kategorie, OS, Formate)
-  const metaPills = [];
-  if (item.mainCategory) metaPills.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
-  if (item.subCategories?.length)
-    metaPills.push(`<span><strong>Tags:</strong> ${escapeHTML(item.subCategories.join(', '))}</span>`);
-  if (item.os?.length) metaPills.push(`<span><strong>OS:</strong> ${escapeHTML(item.os.join(', '))}</span>`);
-  if (item.formats?.length)
-    metaPills.push(`<span><strong>Formate:</strong> ${escapeHTML(item.formats.join(', '))}</span>`);
-
-  // Beschreibung (XSS-sicher über DOMPurify)
-  const cleanDesc = sanitizeRichHtml(item.description);
-
-  // Links
-  const linksHtml =
-    item.links?.length > 0
-      ? `
-      <div class="detail-section">
-        <h4>Links</h4>
-        <div class="detail-links">
-          ${item.links
-            .map(
-              (l) =>
-                `<button type="button" class="link-chip" data-open-url="${escapeHTML(l.url)}">🔗 ${escapeHTML(l.label)}</button>`
-            )
-            .join('')}
-        </div>
+  const linksHtml = hasLinks
+    ? `
+      <div class="detail-links">
+        ${item.links
+          .map(
+            (l) =>
+              `<button type="button" class="link-chip" data-open-url="${escapeHTML(l.url)}">🔗 ${escapeHTML(l.label)}</button>`
+          )
+          .join('')}
       </div>
     `
-      : '';
+    : '';
 
-  // Medien-Galerie
-  const mediaHtml =
-    item.screenshots?.length > 0
-      ? `
-      <div class="detail-section">
-        <h4>Vorschau (${item.screenshots.length})</h4>
-        <div class="detail-media-strip">
-          ${item.screenshots
-            .map((s, idx) => {
-              const url = escapeHTML(toMediaUrl(s));
-              const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
-              if (isVid) {
-                return `
-                  <button type="button" class="media-thumb is-video" data-lightbox-idx="${idx}" title="Video abspielen">
-                    <video src="${url}#t=1" muted preload="metadata"></video>
-                    <span class="play-badge">▶</span>
-                  </button>
-                `;
-              }
+  const mediaHtml = hasMedia
+    ? `
+      <div class="detail-media-strip">
+        ${item.screenshots
+          .map((s, idx) => {
+            const url = escapeHTML(toMediaUrl(s));
+            const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
+            if (isVid) {
               return `
-                <button type="button" class="media-thumb" data-lightbox-idx="${idx}" title="Vergrößern">
-                  <img src="${url}" loading="lazy" alt="Screenshot">
+                <button type="button" class="media-thumb is-video" data-lightbox-idx="${idx}" title="Video abspielen">
+                  <video src="${url}#t=1" muted preload="metadata"></video>
+                  <span class="play-badge">▶</span>
                 </button>
               `;
-            })
-            .join('')}
-        </div>
+            }
+            return `
+              <button type="button" class="media-thumb" data-lightbox-idx="${idx}" title="Vergrößern">
+                <img src="${url}" loading="lazy" alt="Screenshot">
+              </button>
+            `;
+          })
+          .join('')}
       </div>
     `
+    : '';
+
+  return `
+    <section class="custom-info-card">
+      <div class="custom-info-head">
+        <h4>📝 Eigene Infos & Medien</h4>
+        <span class="muted">Optional aus <code>meta.json</code></span>
+      </div>
+      ${cleanDesc ? `<div class="detail-description">${cleanDesc}</div>` : ''}
+      ${infoChips.length > 0 ? `<div class="custom-info-chips">${infoChips.join('')}</div>` : ''}
+      ${linksHtml}
+      ${mediaHtml}
+    </section>
+  `;
+}
+
+function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive }) {
+  const originLabel =
+    item.origin === 'both'
+      ? 'PC & Archiv'
+      : item.origin === 'archive'
+        ? 'Nur im Archiv'
+        : item.origin === 'pc'
+          ? 'Nur auf diesem PC'
+          : 'Online-Quelle (Neu installieren)';
+
+  let archiveSectionHtml = '';
+  if (item.inArchive) {
+    let filesBarHtml = '<p class="muted">Keine Setup-Datei im Archiv-Ordner gefunden.</p>';
+    if (item.lastFiles?.length > 0) {
+      const firstFile = item.lastFiles[0];
+      const selectorHtml =
+        item.lastFiles.length > 1
+          ? `<select id="detailFileSelect" class="detail-file-select">${item.lastFiles
+              .map((f, idx) => `<option value="${idx}">${escapeHTML(getBaseName(f))}</option>`)
+              .join('')}</select>`
+          : `<span class="detail-file-name" title="${escapeHTML(getBaseName(firstFile))}">${escapeHTML(getBaseName(firstFile))}</span>`;
+
+      filesBarHtml = `
+        <div class="detail-archive-bar">
+          <span class="detail-archive-label">Setup-Datei:</span>
+          ${selectorHtml}
+          <div class="detail-archive-btns">
+            <button type="button" class="btn btn-ghost" data-detail-action="run-selected">▶️ Ausführen</button>
+            <button type="button" class="btn btn-ghost" data-detail-action="copy-selected">💾 Auf PC kopieren</button>
+          </div>
+        </div>
+      `;
+    }
+
+    const pinNoticeHtml = item.hasPinnedLast
+      ? `
+        <div class="archive-pin-banner">
+          <strong>📌 <code>_last</code>-Ordner aktiv:</strong>
+          <span>Dieses Programm nutzt einen gepinnten <code>_last</code>-Unterordner. Der Archiv-Aufräumer fasst ihn niemals an.</span>
+        </div>
+      `
       : '';
 
-  // Eingeklappte Technik-Details
-  const techRows = [`<div class="tech-row"><span>Archiv-Ordner</span><code>${escapeHTML(item.path)}</code></div>`];
-  if (item.packageId) {
-    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(item.packageId)}</code></div>`);
-  } else if (item.wingetId) {
-    techRows.push(`<div class="tech-row"><span>Winget-ID</span><code>${escapeHTML(item.wingetId)}</code></div>`);
+    const keepNoticeHtml = item.keepAllVersions
+      ? `
+        <div class="archive-keep-banner">
+          <strong>🔒 Alle Versionen behalten:</strong>
+          <span>Dieses Programm ist dauerhaft vom Archiv-Aufräumer ausgeschlossen.</span>
+        </div>
+      `
+      : '';
+
+    archiveSectionHtml = `
+      <div class="detail-section">
+        <h4>Setup-Dateien im Archiv</h4>
+        ${filesBarHtml}
+        ${pinNoticeHtml}
+        ${keepNoticeHtml}
+      </div>
+    `;
+  } else {
+    archiveSectionHtml = `
+      <div class="archive-status-card">
+        <div>
+          <strong>${matchedArchive ? 'Bereits im Archiv vorhanden' : 'Noch nicht im Archiv gespeichert'}</strong>
+          <p class="muted">
+            ${
+              matchedArchive
+                ? `Verknüpfter Archiv-Ordner: <code>${escapeHTML(matchedArchive.path)}</code>`
+                : 'Dieses Paket liegt aktuell nicht im lokalen Software-Archiv.'
+            }
+          </p>
+        </div>
+        ${
+          matchedArchive
+            ? '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
+            : '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+        }
+      </div>
+    `;
+  }
+
+  const techRows = [`<div class="tech-row"><span>Herkunft</span><strong>${escapeHTML(originLabel)}</strong></div>`];
+  if (item.path) {
+    techRows.push(`<div class="tech-row"><span>Archiv-Ordner</span><code>${escapeHTML(item.path)}</code></div>`);
+  }
+  if (effectivePm) {
+    techRows.push(`<div class="tech-row"><span>Paketmanager</span><code>${escapeHTML(effectivePm)}</code></div>`);
+  }
+  if (effectivePkgId) {
+    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(effectivePkgId)}</code></div>`);
+  }
+  if (item.publisher) {
+    techRows.push(`<div class="tech-row"><span>Herausgeber</span><code>${escapeHTML(item.publisher)}</code></div>`);
   }
   if (item.webVersionUrl) {
     techRows.push(
@@ -473,29 +433,214 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       `<div class="tech-row"><span>PC-Pfad (Manuell)</span><code>${item.installPaths.map(escapeHTML).join('<br>')}</code></div>`
     );
   }
+  if (item.installLocation) {
+    techRows.push(
+      `<div class="tech-row"><span>Installationsordner</span><code>${escapeHTML(item.installLocation)}</code></div>`
+    );
+  }
+  if (item.registryKey) {
+    techRows.push(`<div class="tech-row"><span>Registry-Key</span><code>${escapeHTML(item.registryKey)}</code></div>`);
+  }
   if (item.searchNames?.length) {
     techRows.push(
       `<div class="tech-row"><span>Such-Namen</span><code>${escapeHTML(item.searchNames.join(', '))}</code></div>`
     );
   }
+  if (item.inArchive) {
+    techRows.push(
+      `<div class="tech-row"><span>Aufräum-Schutz</span><code>${item.keepAllVersions ? 'Aktiv (Alle Versionen behalten)' : 'Standard'}</code></div>`
+    );
+  }
 
-  const supportsChangelog =
-    (item.webSourceType === 'winget' && Boolean(item.wingetId)) ||
-    (item.webSourceType === 'github' && Boolean(item.webVersionUrl));
-
-  const changelogHtml = supportsChangelog
-    ? `
-    <details class="detail-changelog-drawer" id="detailChangelogDrawer">
-      <summary>
-        <span>📋 Was ist neu? (Changelog)</span>
-        ${st.hasWebUpdate ? `<span class="changelog-new-pill">Neu: v${escapeHTML(st.webVersion)}</span>` : ''}
-      </summary>
-      <div id="detailChangelogBody" class="changelog-body">
-        <span class="muted">Wird beim Öffnen geladen...</span>
+  return `
+    ${archiveSectionHtml}
+    <div class="detail-section">
+      <h4>Technische Pfade & Kennungen</h4>
+      <div class="detail-tech-list">
+        ${techRows.join('')}
+        <div id="detailTechInstallerRows"></div>
       </div>
-    </details>
-  `
+    </div>
+  `;
+}
+
+function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedAt, fallbackPm, fallbackPkgId }) {
+  const descText = pkg.shortDescription || pkg.description || '';
+  const tags = Array.isArray(pkg.tags) ? pkg.tags : [];
+  const pmLabel =
+    (pkg.packageManager || fallbackPm || 'winget') === 'winget' ? 'Winget' : pkg.packageManager || fallbackPm;
+  const pidLabel = pkg.packageId || fallbackPkgId;
+  const formattedTime = formatCacheTimestamp(updatedAt);
+
+  const staleNoticeHtml = isStale
+    ? `
+      <div class="pkg-stale-notice">
+        ⚠️ Offline-Modus: Live-Abruf fehlgeschlagen – zeige zwischengespeicherten Steckbrief${formattedTime ? ` (Stand: ${escapeHTML(formattedTime)})` : ''}.
+      </div>
+    `
     : '';
+
+  const tagsHtml =
+    tags.length > 0
+      ? `
+        <div class="pkg-tags-list">
+          ${tags.map((t) => `<span class="pkg-tag-chip">${escapeHTML(t)}</span>`).join('')}
+        </div>
+      `
+      : '';
+
+  const gridItems = [];
+  if (pkg.publisher) {
+    const pubContent = pkg.publisherUrl
+      ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.publisherUrl)}">${escapeHTML(pkg.publisher)} ↗</button>`
+      : escapeHTML(pkg.publisher);
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Herausgeber</span><div class="pkg-profile-val">${pubContent}</div></div>`
+    );
+  }
+  if (pkg.author) {
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Autor</span><div class="pkg-profile-val">${escapeHTML(pkg.author)}</div></div>`
+    );
+  }
+  if (pkg.license || pkg.licenseUrl) {
+    const licText = pkg.license ? escapeHTML(pkg.license) : 'Lizenz';
+    const licLink = pkg.licenseUrl
+      ? ` <button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.licenseUrl)}">(Lizenztext ↗)</button>`
+      : '';
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Lizenz</span><div class="pkg-profile-val">${licText}${licLink}</div></div>`
+    );
+  }
+  if (pkg.homepage) {
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Startseite</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.homepage)}">${escapeHTML(pkg.homepage)} ↗</button></div></div>`
+    );
+  }
+  if (pmLabel) {
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Paketmanager</span><div class="pkg-profile-val">${escapeHTML(pmLabel)}</div></div>`
+    );
+  }
+  if (pidLabel) {
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Paket-ID</span><div class="pkg-profile-val"><code>${escapeHTML(pidLabel)}</code></div></div>`
+    );
+  }
+
+  container.innerHTML = `
+    ${staleNoticeHtml}
+    ${descText ? `<p class="pkg-profile-desc">${escapeHTML(descText)}</p>` : '<p class="muted">Keine Kurzbeschreibung im Paket-Manifest hinterlegt.</p>'}
+    ${tagsHtml}
+    <div class="pkg-profile-grid">${gridItems.join('')}</div>
+  `;
+
+  return {
+    cacheLabel: isStale
+      ? `Offline-Cache (${formattedTime || 'veraltet'})`
+      : fromCache
+        ? `Cache: ${formattedTime || 'aktuell'}`
+        : `Live aktualisiert (${formattedTime || 'gerade eben'})`,
+  };
+}
+
+function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overview' } = {}) {
+  const overlay = document.getElementById('modalOverlay');
+  const modal = document.getElementById('modalContent');
+  if (!overlay || !modal) return;
+
+  const renderToken = ++activeRenderToken;
+  state.currentModalId = item.id;
+  state.isEditModalOpen = false;
+
+  const st = getItemStatus(item);
+  const statusBadge = STATUS_BADGES[st.status];
+  const effectivePm = getEffectivePackageManager(item);
+  const effectivePkgId = getEffectivePackageId(item);
+  const isWingetPkg = effectivePm === 'winget' && Boolean(effectivePkgId);
+  const hasPackageProfile = isWingetPkg;
+  const matchedArchive = item.matchedArchiveItem || null;
+  const canUninstall = isCanUninstall(item, effectivePm, effectivePkgId);
+  const onlineReady = canDownloadOnline(item);
+  const supportsChangelog = (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) || isWingetPkg;
+
+  const fallbackEmoji = item.origin === 'pc' ? '💻' : item.origin === 'remote' ? '🛍️' : '📦';
+  const iconHtml = item.icon
+    ? `<img class="detail-icon" src="${escapeHTML(toMediaUrl(item.icon))}" alt="">`
+    : `<div class="detail-icon-fallback">${fallbackEmoji}</div>`;
+
+  const originChip = ORIGIN_CHIPS[item.origin]
+    ? `<span class="card-chip ${ORIGIN_CHIPS[item.origin].cls}">${escapeHTML(ORIGIN_CHIPS[item.origin].label)}</span>`
+    : `<span class="provider-badge">${escapeHTML(item.providerName || effectivePm || 'Online')}</span>`;
+
+  const newChip = isItemNew(item) ? '<span class="card-chip chip-new">NEU</span>' : '';
+  const typeChip =
+    item.softwareType === 'portable'
+      ? '<span class="card-chip">Portabel</span>'
+      : item.softwareType === 'driver'
+        ? '<span class="card-chip">Treiber</span>'
+        : '';
+  const keepChip = item.keepAllVersions ? '<span class="card-chip">🔒 Alle Versionen</span>' : '';
+  const inArchiveRemoteChip =
+    item.origin === 'remote' && matchedArchive ? '<span class="discover-status-badge">Im Archiv</span>' : '';
+
+  const headerMeta = [];
+  if (item.mainCategory) headerMeta.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
+  if (item.publisher) headerMeta.push(`<span><strong>Herausgeber:</strong> ${escapeHTML(item.publisher)}</span>`);
+  if (effectivePkgId)
+    headerMeta.push(`<span><strong>Paket-ID:</strong> <code>${escapeHTML(effectivePkgId)}</code></span>`);
+
+  const postDownloadBanner = freshDownload
+    ? `
+      <div class="detail-inline-banner is-success">
+        <div class="banner-text">
+          <strong>✅ Download im Archiv gespeichert!</strong>
+          <span>Datei: <code>${escapeHTML(getBaseName(freshDownload.filePath))}</code></span>
+        </div>
+        <button type="button" class="btn btn-local" data-detail-action="install-fresh" data-file="${escapeHTML(freshDownload.filePath)}" data-version="${escapeHTML(freshDownload.version || '')}">
+          ▶️ Jetzt installieren
+        </button>
+      </div>
+    `
+    : '';
+
+  const pinnedNotice =
+    item.inArchive && item.hasPinnedLast && onlineReady
+      ? `
+      <label class="detail-pin-choice">
+        <input type="checkbox" id="detailSaveIntoLast">
+        <span><code>_last</code>-Ordner ist aktiv (gepinnte Version). Neuen Web-Download ebenfalls in <code>_last</code> speichern?</span>
+      </label>
+    `
+      : '';
+
+  const packageProfileHtml = hasPackageProfile
+    ? `
+      <section class="pkg-profile-card">
+        <div class="pkg-profile-head">
+          <div class="pkg-profile-title">
+            <h4>📦 Automatischer Paket-Steckbrief</h4>
+            <span id="pkgProfileCacheBadge" class="pkg-cache-meta">Lade...</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-xs" id="btnRefreshPkgProfile" data-detail-action="refresh-pkg-profile" title="Steckbrief neu abrufen">🔄 Aktualisieren</button>
+        </div>
+        <div id="pkgProfileBody">
+          <span class="muted">⏳ Lade Paket-Informationen aus Cache / Winget...</span>
+        </div>
+      </section>
+    `
+    : '';
+
+  const footerLeftBtns = [];
+  if (item.inArchive && item.path) {
+    footerLeftBtns.push(
+      '<button type="button" class="btn btn-ghost" data-detail-action="open-folder">📂 Archiv-Ordner</button>'
+    );
+  } else if (item.installLocation) {
+    footerLeftBtns.push(
+      '<button type="button" class="btn btn-ghost" data-detail-action="open-install-dir">📂 Installationsordner</button>'
+    );
+  }
 
   modal.innerHTML = `
     <div class="modal-header detail-header">
@@ -505,74 +650,56 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
           <div class="detail-title-row">
             <h2>${escapeHTML(item.name)}</h2>
             ${statusBadge ? `<span class="status-pill ${statusBadge.cls}">${escapeHTML(statusBadge.label)}</span>` : ''}
+            ${originChip}
+            ${inArchiveRemoteChip}
             ${newChip}
             ${typeChip}
+            ${keepChip}
           </div>
-          <div class="detail-meta-inline">${metaPills.join('')}</div>
+          ${headerMeta.length > 0 ? `<div class="detail-meta-inline">${headerMeta.join('')}</div>` : ''}
         </div>
       </div>
       <button type="button" class="icon-btn" data-detail-action="close" title="Schließen" aria-label="Schließen">✕</button>
     </div>
 
+    <nav class="modal-tabs detail-tabs" role="tablist">
+      <button type="button" class="tab-btn ${initialTab === 'overview' ? 'active' : ''}" data-detail-tab="overview">✨ Übersicht</button>
+      <button type="button" class="tab-btn ${initialTab === 'changelog' ? 'active' : ''}" data-detail-tab="changelog">
+        📋 Changelog ${st.hasWebUpdate && supportsChangelog ? `<span class="detail-tab-badge">Neu</span>` : ''}
+      </button>
+      <button type="button" class="tab-btn ${initialTab === 'archive-tech' ? 'active' : ''}" data-detail-tab="archive-tech">📂 Archiv & Technik</button>
+    </nav>
+
     <div class="modal-body detail-body">
-      <!-- 3-Spalten Versionsübersicht -->
-      <div class="detail-version-grid">
-        <div class="detail-ver-box ${st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasArchiveUpdate ? 'is-ok' : ''}">
-          <span class="ver-box-lbl">Installiert (PC)</span>
-          <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : 'Nicht erkannt'}</strong>
-        </div>
-        <div class="detail-ver-box ${st.hasArchiveUpdate ? 'is-archive-update' : ''}">
-          <span class="ver-box-lbl">Archiv${item.hasPinnedLast ? ' · _last gepinnt' : ''}</span>
-          <strong class="ver-box-val">${st.archiveVersion ? `v${escapeHTML(st.archiveVersion)}` : 'Keine Version'}</strong>
-        </div>
-        <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
-          <span class="ver-box-lbl">Online${sourceLabel ? ` · ${escapeHTML(sourceLabel)}` : ''}</span>
-          <strong class="ver-box-val">${st.webVersion ? `v${escapeHTML(st.webVersion)}` : 'Nicht eingerichtet'}</strong>
-        </div>
-      </div>
-
-      ${postDownloadBanner}
-
-      <!-- Haupt-Aktionsbereich -->
-      ${
-        hero || secondaryHeroBtns.length > 0
-          ? `
-        <div class="detail-hero-bar">
-          ${
-            hero
-              ? `<button type="button" class="btn btn-lg ${hero.cls}" data-detail-action="${hero.action}" data-file="${escapeHTML(hero.file || '')}" data-version="${escapeHTML(hero.version || '')}">${escapeHTML(hero.label)}</button>`
-              : ''
-          }
-          ${secondaryHeroBtns.join('')}
-        </div>
+      <section class="tab-panel" data-detail-panel="overview" ${initialTab === 'overview' ? '' : 'hidden'}>
+        ${buildVersionGridHtml(item, st, { matchedArchive })}
+        ${postDownloadBanner}
+        ${buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive })}
+        ${buildArchiveSaveChoiceHtml(item, { effectivePkgId, isWingetPkg, matchedArchive })}
         ${pinnedNotice}
-      `
-          : ''
-      }
+        ${packageProfileHtml}
+        ${buildCustomMetaSectionHtml(item, hasPackageProfile)}
+      </section>
 
-      ${archiveFilesHtml}
-      ${changelogHtml}
+      <section class="tab-panel" data-detail-panel="changelog" ${initialTab === 'changelog' ? '' : 'hidden'}>
+        <div id="detailChangelogBody" class="changelog-body">
+          ${
+            supportsChangelog
+              ? '<span class="muted">Wird beim Öffnen geladen...</span>'
+              : '<span class="muted">Für diese Quelle sind keine automatischen Changelogs verfügbar.</span>'
+          }
+        </div>
+      </section>
 
-      <div class="detail-section">
-        <h4>Beschreibung</h4>
-        <div class="detail-description">${cleanDesc || '<span class="muted">Keine Beschreibung vorhanden.</span>'}</div>
-      </div>
-
-      ${linksHtml}
-      ${mediaHtml}
-
-      <details class="detail-tech-drawer">
-        <summary>Technische Details & Pfade</summary>
-        <div class="detail-tech-list">${techRows.join('')}</div>
-      </details>
+      <section class="tab-panel" data-detail-panel="archive-tech" ${initialTab === 'archive-tech' ? '' : 'hidden'}>
+        ${buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive })}
+      </section>
     </div>
 
     <div class="modal-footer">
+      <div class="footer-group">${footerLeftBtns.join('')}</div>
       <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-detail-action="open-folder">📂 Archiv-Ordner</button>
-      </div>
-      <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-detail-action="edit">✏️ Bearbeiten</button>
+        ${item.inArchive ? '<button type="button" class="btn btn-ghost" data-detail-action="edit">✏️ Bearbeiten</button>' : ''}
         <button type="button" class="btn btn-primary" data-detail-action="close">Schließen</button>
       </div>
     </div>
@@ -580,30 +707,101 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
 
   overlay.hidden = false;
 
-  const changelogDrawer = modal.querySelector('#detailChangelogDrawer');
+  let loadedPkgProfile = null;
   let changelogLoaded = false;
 
-  changelogDrawer?.addEventListener('toggle', async () => {
-    if (!changelogDrawer.open || changelogLoaded) return;
+  const isStillActive = () => renderToken === activeRenderToken && !overlay.hidden;
+
+  const loadPackageProfile = async (forceRefresh = false) => {
+    if (!hasPackageProfile) return;
+    const bodyEl = modal.querySelector('#pkgProfileBody');
+    const badgeEl = modal.querySelector('#pkgProfileCacheBadge');
+    const refreshBtn = modal.querySelector('#btnRefreshPkgProfile');
+    if (!bodyEl) return;
+
+    if (refreshBtn) refreshBtn.disabled = true;
+    if (badgeEl) badgeEl.textContent = forceRefresh ? 'Aktualisiere...' : 'Lade...';
+    if (forceRefresh) {
+      bodyEl.innerHTML = '<span class="muted">⏳ Frage aktuelle Paketdaten von Winget ab...</span>';
+    }
+
+    const res = await window.electronAPI.showPackage(effectivePm, effectivePkgId, { forceRefresh });
+    if (!isStillActive()) return;
+
+    if (refreshBtn) refreshBtn.disabled = false;
+
+    if (res?.success && res.package) {
+      loadedPkgProfile = res.package;
+      const meta = renderPackageProfileBody(bodyEl, res.package, {
+        fromCache: res.fromCache,
+        isStale: res.isStale,
+        updatedAt: res.updatedAt,
+        fallbackPm: effectivePm,
+        fallbackPkgId: effectivePkgId,
+      });
+      if (badgeEl) badgeEl.textContent = meta.cacheLabel;
+
+      const onlineEl = modal.querySelector('#detailOnlineVerVal');
+      if (onlineEl && res.package.version && !st.webVersion) {
+        onlineEl.textContent = `v${res.package.version}`;
+      }
+
+      const techInstallerSlot = modal.querySelector('#detailTechInstallerRows');
+      if (techInstallerSlot) {
+        const extraRows = [];
+        if (res.package.installerType) {
+          extraRows.push(
+            `<div class="tech-row"><span>Installer-Typ</span><code>${escapeHTML(res.package.installerType)}</code></div>`
+          );
+        }
+        if (res.package.releaseDate) {
+          extraRows.push(
+            `<div class="tech-row"><span>Freigabedatum</span><code>${escapeHTML(res.package.releaseDate)}</code></div>`
+          );
+        }
+        if (res.package.sha256) {
+          extraRows.push(
+            `<div class="tech-row"><span>SHA-256</span><code>${escapeHTML(res.package.sha256)}</code></div>`
+          );
+        }
+        techInstallerSlot.innerHTML = extraRows.join('');
+      }
+    } else {
+      if (badgeEl) badgeEl.textContent = 'Nicht verfügbar';
+      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Paket-Steckbrief konnte nicht geladen werden.')}</span>`;
+    }
+  };
+
+  const loadChangelog = async () => {
+    if (!supportsChangelog || changelogLoaded) return;
     changelogLoaded = true;
 
     const bodyEl = modal.querySelector('#detailChangelogBody');
     if (!bodyEl) return;
     bodyEl.innerHTML = '<span class="muted">⏳ Lade Versionshinweise...</span>';
 
-    const res = await window.electronAPI.fetchChangelog(item);
-    if (!res.success) {
-      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res.error || 'Kein Changelog verfügbar.')}</span>`;
+    const res = await window.electronAPI.fetchChangelog({
+      id: item.id,
+      webSourceType: item.webSourceType,
+      packageManager: effectivePm,
+      packageId: effectivePkgId,
+      wingetId: isWingetPkg ? effectivePkgId : item.wingetId,
+      webVersionUrl: item.webVersionUrl,
+    });
+    if (!isStillActive()) return;
+
+    if (!res?.success) {
+      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Kein Changelog verfügbar.')}</span>`;
       return;
     }
 
     if (!res.entries?.length) {
       bodyEl.innerHTML = `
-      <div class="changelog-empty">
-        <span class="muted">Keine direkten Versionshinweise hinterlegt.</span>
-        ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Im Browser öffnen ↗</button>` : ''}
-      </div>
-    `;
+        <div class="changelog-empty">
+          <span class="muted">Keine direkten Versionshinweise hinterlegt.</span>
+          ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Im Browser öffnen ↗</button>` : ''}
+        </div>
+      `;
       return;
     }
 
@@ -613,29 +811,64 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
         const isNewerThanPc =
           st.localVersion && entry.version && compareVersions(entry.version, st.localVersion, depth) > 0;
         return `
-        <article class="changelog-entry ${isNewerThanPc ? 'is-unread' : ''}">
-          <div class="changelog-entry-head">
-            <strong>${escapeHTML(entry.title)}</strong>
-            <div class="changelog-entry-meta">
-              ${isNewerThanPc ? '<span class="changelog-tag-new">Neu seit deiner PC-Version</span>' : ''}
-              ${entry.date ? `<span class="muted">${escapeHTML(entry.date)}</span>` : ''}
-              ${entry.url ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(entry.url)}">Original ↗</button>` : ''}
+          <article class="changelog-entry ${isNewerThanPc ? 'is-unread' : ''}">
+            <div class="changelog-entry-head">
+              <strong>${escapeHTML(entry.title)}</strong>
+              <div class="changelog-entry-meta">
+                ${isNewerThanPc ? '<span class="changelog-tag-new">Neu seit deiner PC-Version</span>' : ''}
+                ${entry.date ? `<span class="muted">${escapeHTML(entry.date)}</span>` : ''}
+                ${entry.url ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(entry.url)}">Original ↗</button>` : ''}
+              </div>
             </div>
-          </div>
-          <div class="changelog-markdown">${renderMarkdownSafe(entry.body)}</div>
-        </article>
-      `;
+            <div class="changelog-markdown">${renderMarkdownSafe(entry.body)}</div>
+          </article>
+        `;
       })
       .join('');
 
     bodyEl.innerHTML = `
-    <div class="changelog-source-row">
-      <span class="muted">Quelle: ${escapeHTML(res.source)}</span>
-      ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Alle Releases ansehen ↗</button>` : ''}
-    </div>
-    ${entriesHtml}
-  `;
-  });
+      <div class="changelog-source-row">
+        <span class="muted">Quelle: ${escapeHTML(res.source)}</span>
+        ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Alle Releases ansehen ↗</button>` : ''}
+      </div>
+      ${entriesHtml}
+    `;
+  };
+
+  if (hasPackageProfile) {
+    loadPackageProfile(false);
+  }
+  if (initialTab === 'changelog') {
+    loadChangelog();
+  }
+
+  const switchDetailTab = (tabName) => {
+    modal.querySelectorAll('[data-detail-tab]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.detailTab === tabName);
+    });
+    modal.querySelectorAll('[data-detail-panel]').forEach((p) => {
+      p.hidden = p.dataset.detailPanel !== tabName;
+    });
+    if (tabName === 'changelog') {
+      loadChangelog();
+    }
+  };
+
+  const buildArchivePayloadFromItem = () => {
+    const installPaths = item.installLocation ? [item.installLocation] : item.installPaths || [];
+    return {
+      packageManager: effectivePm,
+      packageId: effectivePkgId,
+      name: loadedPkgProfile?.name || item.name,
+      version: loadedPkgProfile?.version || st.webVersion || st.localVersion || '',
+      description: loadedPkgProfile?.description || loadedPkgProfile?.shortDescription || item.shortDescription || '',
+      tags: loadedPkgProfile?.tags || item.tags || [],
+      homepage: loadedPkgProfile?.homepage || '',
+      releaseNotesUrl: loadedPkgProfile?.releaseNotesUrl || '',
+      searchNames: item.name ? [item.name] : [],
+      installPaths,
+    };
+  };
 
   const getSelectedArchiveFile = () => {
     const sel = modal.querySelector('#detailFileSelect');
@@ -659,7 +892,7 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
     }
 
     await triggerCatalogReload({ rescanInstalled: Boolean(res.success) });
-    if (state.currentModalId === item.id) {
+    if (isStillActive()) {
       renderDetailModal(item.id);
     }
 
@@ -690,8 +923,74 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
 
     await triggerCatalogReload();
     showToast(`${item.name} wurde im Archiv gespeichert.`, { type: 'success' });
-    if (state.currentModalId === item.id) {
+    if (isStillActive()) {
       renderDetailModal(item.id, { freshDownload: { filePath: res.filePath, version: res.version } });
+    }
+  };
+
+  const runProviderInstallFlow = async (btn) => {
+    if (!isWingetPkg) return;
+    const archiveCheck = modal.querySelector('#detailAlsoSaveArchive');
+    const shouldSaveToArchive = Boolean(archiveCheck?.checked);
+
+    let archiveTargetSpec = null;
+    if (shouldSaveToArchive) {
+      const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
+      archiveTargetSpec = await resolveArchiveSaveTarget(buildArchivePayloadFromItem(), { mode: targetMode });
+      if (archiveTargetSpec.canceled) {
+        return;
+      }
+    }
+
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = item.isInstalled ? '⏳ Aktualisiere...' : '⏳ Installiere...';
+    showToast(`Starte Winget-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name}...`, {
+      type: 'info',
+    });
+
+    const res = await window.electronAPI.installPackage(effectivePm, effectivePkgId, {
+      silent: false,
+      itemName: item.name,
+    });
+
+    btn.disabled = false;
+    btn.textContent = origText;
+
+    if (res?.alreadyRunning) {
+      showToast('Für dieses Paket läuft bereits eine Installation.', { type: 'warn' });
+      return;
+    }
+    if (res?.canceled) {
+      showToast('Vorgang wurde abgebrochen.', { type: 'info' });
+      return;
+    }
+    if (!res?.success) {
+      showToast(`Fehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+      return;
+    }
+
+    showToast(`${item.name} erfolgreich ${item.isInstalled ? 'aktualisiert' : 'installiert'}!`, { type: 'success' });
+
+    if (shouldSaveToArchive && archiveTargetSpec && !archiveTargetSpec.skipped) {
+      const linkRes = await executeArchiveLink(buildArchivePayloadFromItem(), archiveTargetSpec, {
+        downloadSetup: true,
+      });
+      await triggerCatalogReload({ rescanInstalled: true });
+      if (linkRes?.success && linkRes.item?.id && isStillActive()) {
+        renderDetailModal(linkRes.item.id);
+        return;
+      }
+    } else {
+      await triggerCatalogReload({ rescanInstalled: true });
+    }
+
+    if (isStillActive()) {
+      if (item.origin === 'remote') {
+        renderRemoteDetailModal(effectivePm, effectivePkgId, loadedPkgProfile || item);
+      } else {
+        renderDetailModal(item.id);
+      }
     }
   };
 
@@ -715,16 +1014,33 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       return;
     }
 
+    const tabBtn = e.target.closest('[data-detail-tab]');
+    if (tabBtn) {
+      switchDetailTab(tabBtn.dataset.detailTab);
+      return;
+    }
+
     const btn = e.target.closest('[data-detail-action]');
     if (!btn) return;
-
     const action = btn.dataset.detailAction;
-    if (action === 'close') closeModal();
-    else if (action === 'edit') openEditModal(item.id);
-    else if (action === 'open-folder') window.electronAPI.openPath(item.path);
-    else if (action === 'launch-local' && item.validInstallPath) window.electronAPI.openPath(item.validInstallPath);
-    else if (action === 'web-download') await runWebDownloadFlow();
-    else if (action === 'install-file' || action === 'install-fresh') {
+
+    if (action === 'close') {
+      closeModal();
+    } else if (action === 'edit' && item.inArchive) {
+      openEditModal(item.id);
+    } else if (action === 'open-folder' && item.path) {
+      window.electronAPI.openPath(item.path);
+    } else if (action === 'open-install-dir' && item.installLocation) {
+      window.electronAPI.openPath(item.installLocation);
+    } else if (action === 'open-archive-item' && matchedArchive) {
+      renderDetailModal(matchedArchive.id);
+    } else if (action === 'launch-local' && item.validInstallPath) {
+      window.electronAPI.openPath(item.validInstallPath);
+    } else if (action === 'refresh-pkg-profile') {
+      await loadPackageProfile(true);
+    } else if (action === 'web-download') {
+      await runWebDownloadFlow();
+    } else if (action === 'install-file' || action === 'install-fresh') {
       await runInstallerFlow(btn.dataset.file, btn.dataset.version);
     } else if (action === 'run-selected') {
       await runInstallerFlow(getSelectedArchiveFile(), null);
@@ -736,6 +1052,81 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       btn.disabled = false;
       if (res.success) showToast(`Gespeichert unter: ${res.dest}`, { type: 'success' });
       else if (res.error) showToast(`Kopierfehler: ${res.error}`, { type: 'error' });
+    } else if (action === 'provider-install') {
+      await runProviderInstallFlow(btn);
+    } else if (action === 'save-to-archive') {
+      const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
+      const res = await savePackageToArchive(buildArchivePayloadFromItem(), {
+        mode: targetMode,
+        downloadSetup: isWingetPkg,
+      });
+      if (res?.success && res.item?.id && isStillActive()) {
+        renderDetailModal(res.item.id);
+      }
+    } else if (action === 'uninstall') {
+      if (btn.dataset.armed !== 'true') {
+        btn.dataset.armed = 'true';
+        btn.dataset.origText = btn.textContent;
+        btn.textContent = '⚠️ Wirklich deinstallieren?';
+        setTimeout(() => {
+          if (btn.dataset.armed === 'true') {
+            btn.dataset.armed = 'false';
+            btn.textContent = btn.dataset.origText;
+          }
+        }, 4000);
+        return;
+      }
+
+      btn.dataset.armed = 'false';
+      btn.disabled = true;
+      btn.textContent = '⏳ Deinstalliere...';
+
+      const res = await window.electronAPI.uninstallSoftware({
+        packageManager: effectivePm,
+        packageId: effectivePkgId,
+        uninstallString: item.uninstallString,
+        quietUninstallString: item.quietUninstallString,
+        itemName: item.name,
+        archiveItemId: item.archiveItemId || (item.inArchive ? item.id : null),
+        silent: false,
+      });
+
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origText || '🗑️ Deinstallieren';
+
+      if (res?.alreadyRunning) {
+        showToast('Deinstallation läuft bereits.', { type: 'warn' });
+      } else if (res?.canceled) {
+        showToast('Deinstallation abgebrochen.', { type: 'info' });
+      } else if (res?.success) {
+        showToast(`${item.name} wurde deinstalliert.`, { type: 'success' });
+        await triggerCatalogReload({ rescanInstalled: true });
+        if (item.inArchive) {
+          if (isStillActive()) renderDetailModal(item.id);
+        } else {
+          closeModal();
+        }
+      } else {
+        showToast(`Deinstallationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+      }
     }
   };
+}
+
+export function renderDetailModal(id, options = {}) {
+  const item = getItemById(id);
+  if (!item) return;
+  renderDetailModalCore(item, options);
+}
+
+export function renderRemoteDetailModal(providerId, packageId, summary = {}, options = {}) {
+  const providerObj = state.providers.find((p) => p.id === providerId);
+  const remoteItem = buildRemotePackageItem({
+    providerId,
+    packageId,
+    summary,
+    providerName: providerObj?.name || summary.providerName || providerId,
+    existingPackages: state.packages,
+  });
+  renderDetailModalCore(remoteItem, options);
 }

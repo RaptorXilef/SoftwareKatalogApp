@@ -333,6 +333,19 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
     }
 
     if (action === 'install') {
+      const archiveMatch = findMatchingArchivePackage(pkg);
+      const canDownloadToArchive =
+        providerId !== 'archive' && !archiveMatch && getProviderCapability(providerId, 'supportsArchiveDownload');
+      const saveMode = state.settings.archiveSaveMode || 'ask';
+
+      const linkPayload = {
+        packageManager: providerId,
+        packageId,
+        name: pkg.name || packageId,
+        version: pkg.version || '',
+        shortDescription: pkg.shortDescription || '',
+      };
+
       btn.disabled = true;
       const origText = btn.textContent;
       btn.textContent = '⏳ Installiere...';
@@ -351,8 +364,22 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
       } else if (res?.canceled) {
         showToast('Installation wurde abgebrochen.', { type: 'info' });
       } else if (res?.success) {
-        showToast(`${pkg.name || packageId} erfolgreich installiert!`, { type: 'success' });
         await onReload?.({ rescanInstalled: true });
+        if (canDownloadToArchive && saveMode === 'auto-id') {
+          showToast(`${pkg.name || packageId} installiert – speichere automatisch im Archiv...`, { type: 'info' });
+          await onLinkToArchive?.(linkPayload, { mode: 'auto-id', downloadSetup: true });
+        } else if (canDownloadToArchive && saveMode === 'ask') {
+          showToast(`${pkg.name || packageId} erfolgreich installiert!`, {
+            type: 'success',
+            duration: 6000,
+            action: {
+              label: '📥 Ins Archiv',
+              onClick: () => onLinkToArchive?.(linkPayload, { mode: 'ask', downloadSetup: true }),
+            },
+          });
+        } else {
+          showToast(`${pkg.name || packageId} erfolgreich installiert!`, { type: 'success' });
+        }
       } else {
         showToast(`Installationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
       }

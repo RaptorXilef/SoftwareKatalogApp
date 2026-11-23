@@ -52,6 +52,19 @@ export function checkArchiveTargetCollision(targetDir) {
     };
   }
 
+  const { absTargetPath } = getConfig();
+  const resolvedRoot = path.resolve(absTargetPath);
+  const isSameAsRoot =
+    process.platform === 'win32'
+      ? resolvedDir.toLowerCase() === resolvedRoot.toLowerCase()
+      : resolvedDir === resolvedRoot;
+  if (isSameAsRoot) {
+    return {
+      valid: false,
+      error: 'Bitte einen Unterordner innerhalb des Archivs wählen (nicht das Archiv-Stammverzeichnis selbst).',
+    };
+  }
+
   const dirExists = fs.existsSync(resolvedDir);
   const metaDir = path.join(resolvedDir, '_metadata');
   const metaFile = path.join(metaDir, 'meta.json');
@@ -116,8 +129,8 @@ function buildLinksObject(pkgMeta) {
  * Kollisionsauflösung (`create`, `link`, `overwrite`) und optionalen Direkt-Download.
  */
 export async function linkPackageToArchive({
-  packageManager = 'winget',
-  packageId,
+  packageManager = '',
+  packageId = '',
   softwareName = '',
   targetDir = '',
   saveMode = null,
@@ -127,12 +140,20 @@ export async function linkPackageToArchive({
   saveIntoLastFolder = false,
   keepAllVersions = false,
 }) {
-  const cleanPm = String(packageManager || 'winget')
-    .trim()
-    .toLowerCase();
   const cleanPid = String(packageId || '').trim();
-  if (!cleanPid) {
-    return { success: false, error: 'Keine Paket-ID angegeben.' };
+  const cleanPm = cleanPid
+    ? String(packageManager || 'winget')
+        .trim()
+        .toLowerCase()
+    : '';
+  const effectiveDownloadSetup = Boolean(downloadSetup && cleanPid);
+
+  if (!cleanPid && !targetDir) {
+    return {
+      success: false,
+      needsTargetDir: true,
+      error: 'Bitte einen Zielordner im Archiv auswählen.',
+    };
   }
 
   const cfg = getConfig();
@@ -175,26 +196,30 @@ export async function linkPackageToArchive({
   }
 
   let fetchedPkg = metadata || null;
-  if ((!fetchedPkg || !softwareName) && normalizedMode !== 'link') {
-    const provider = getProvider(cleanPm);
-    if (provider?.capabilities.show) {
-      const showRes = await provider.show(cleanPid, { preferGerman: true });
-      if (showRes?.success && showRes.package) {
-        fetchedPkg = { ...showRes.package, ...(fetchedPkg || {}) };
+  if (cleanPid && cleanPm) {
+    if ((!fetchedPkg || !softwareName) && normalizedMode !== 'link') {
+      const provider = getProvider(cleanPm);
+      if (provider?.capabilities.show) {
+        const showRes = await provider.show(cleanPid, { preferGerman: true });
+        if (showRes?.success && showRes.package) {
+          fetchedPkg = { ...showRes.package, ...(fetchedPkg || {}) };
+        }
       }
-    }
-  } else if (!fetchedPkg && normalizedMode === 'link') {
-    const provider = getProvider(cleanPm);
-    if (provider?.capabilities.show) {
-      const showRes = await provider.show(cleanPid, { preferGerman: true });
-      if (showRes?.success && showRes.package) {
-        fetchedPkg = showRes.package;
+    } else if (!fetchedPkg && normalizedMode === 'link') {
+      const provider = getProvider(cleanPm);
+      if (provider?.capabilities.show) {
+        const showRes = await provider.show(cleanPid, { preferGerman: true });
+        if (showRes?.success && showRes.package) {
+          fetchedPkg = showRes.package;
+        }
       }
     }
   }
 
   // Anzeigename != Ordnername: In meta.json steht zwingend der echte Softwarename
-  const realDisplayName = String(softwareName || fetchedPkg?.name || collision.existingMeta?.name || cleanPid).trim();
+  const realDisplayName = String(
+    softwareName || fetchedPkg?.name || collision.existingMeta?.name || cleanPid || path.basename(resolvedTargetDir)
+  ).trim();
 
   const metaDir = path.join(resolvedTargetDir, '_metadata');
   const metaFile = path.join(metaDir, 'meta.json');
@@ -209,10 +234,12 @@ export async function linkPackageToArchive({
     nextMeta = {
       ...existingSummary.raw,
       name: existingSummary.raw.name || realDisplayName,
-      packageManager: cleanPm,
-      packageId: cleanPid,
     };
-    if (cleanPm === 'winget') {
+    if (cleanPm && cleanPid) {
+      nextMeta.packageManager = cleanPm;
+      nextMeta.packageId = cleanPid;
+    }
+    if (cleanPm === 'winget' && cleanPid) {
       nextMeta.wingetId = cleanPid;
       if (!nextMeta.webSourceType || nextMeta.webSourceType === 'none') {
         nextMeta.webSourceType = 'winget';
@@ -234,13 +261,14 @@ export async function linkPackageToArchive({
       formats: [],
       os: ['Windows 10', 'Windows 11'],
       description: fetchedPkg?.description || fetchedPkg?.shortDescription || '',
-      installPaths: [],
+      searchNames: Array.isArray(metadata?.searchNames) ? metadata.searchNames : [],
+      installPaths: Array.isArray(metadata?.installPaths) ? metadata.installPaths : [],
       autoPaths: [],
       packageManager: cleanPm,
       packageId: cleanPid,
       wingetId: cleanPm === 'winget' ? cleanPid : '',
       keepAllVersions: Boolean(keepAllVersions),
-      webSourceType: cleanPm === 'winget' ? 'winget' : 'none',
+      webSourceType: cleanPm === 'winget' && cleanPid ? 'winget' : 'none',
       webVersion: fetchedPkg?.version || '',
       links: buildLinksObject(fetchedPkg),
     };
@@ -257,7 +285,7 @@ export async function linkPackageToArchive({
   let linkedItem = catalogItems.find((i) => path.resolve(i.path) === resolvedTargetDir) || null;
   let downloadResult = null;
 
-  if (downloadSetup && linkedItem) {
+  if (effectiveDownloadSetup && linkedItem) {
     downloadResult = await downloadWebUpdate(linkedItem, { saveIntoLastFolder });
     const refreshedItems = loadCatalogWithLiveStatus();
     linkedItem = refreshedItems.find((i) => path.resolve(i.path) === resolvedTargetDir) || linkedItem;

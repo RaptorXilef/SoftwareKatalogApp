@@ -909,8 +909,13 @@ const CHANGELOG_TTL_MS = 30 * 60 * 1000;
 export async function fetchChangelog(item) {
   const resolvedWingetId = getEffectiveWingetId(item);
   const sourceType =
-    item.webSourceType ||
-    (resolvedWingetId ? 'winget' : item.webVersionUrl?.toLowerCase().includes('github.com') ? 'github' : 'none');
+    item.webSourceType && item.webSourceType !== 'none'
+      ? item.webSourceType
+      : resolvedWingetId
+        ? 'winget'
+        : item.webVersionUrl?.toLowerCase().includes('github.com')
+          ? 'github'
+          : 'none';
 
   const cacheKey = `${item.id}:${sourceType}:${resolvedWingetId || item.webVersionUrl || ''}`;
   const cached = changelogCache.get(cacheKey);

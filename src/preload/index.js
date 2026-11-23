@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-install', providerId, packageId, opts),
   uninstallPackage: (providerId, packageId, opts) =>
     ipcRenderer.invoke('providers-uninstall', providerId, packageId, opts),
+  getProviderCacheStats: () => ipcRenderer.invoke('providers-cache-stats'),
+  clearProviderCache: () => ipcRenderer.invoke('providers-cache-clear'),
   checkArchiveCollision: (targetDir) => ipcRenderer.invoke('archive-check-collision', targetDir),
   findArchiveLink: (packageManager, packageId) => ipcRenderer.invoke('archive-find-link', packageManager, packageId),
   linkPackageToArchive: (payload) => ipcRenderer.invoke('archive-link-package', payload),
@@ -72,7 +74,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
-  selectDir: () => ipcRenderer.invoke('select-dir'),
+  selectDir: (opts) => ipcRenderer.invoke('select-dir', opts),
   selectFile: (filters, returnAbsolute = false) => ipcRenderer.invoke('select-file', filters, returnAbsolute),
   resetPaths: (type) => ipcRenderer.invoke('reset-paths', type),
   resetLocalVersions: () => ipcRenderer.invoke('reset-local-versions'),

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildUnifiedPackages, computeTabCounts, getPackageStatus } from '../src/shared/unified-packages.js';
+import {
+  buildRemotePackageItem,
+  buildUnifiedPackages,
+  computeTabCounts,
+  getPackageStatus,
+} from '../src/shared/unified-packages.js';
 
 describe('buildUnifiedPackages', () => {
   it('verknüpft Archiv- und PC-Einträge über archiveItemId, packageId/wingetId, Installationspfad und searchNames', () => {
@@ -212,5 +217,71 @@ describe('getPackageStatus & computeTabCounts', () => {
 
     const countsWithHidden = computeTabCounts(packages, { visibleHiddenCats: ['Secret'], bundlesCount: 0 });
     assert.deepEqual(countsWithHidden, { updates: 3, installed: 3, archive: 3, bundles: 0 });
+  });
+});
+
+describe('buildRemotePackageItem & remote status', () => {
+  it('markiert nicht installierte Remote-Pakete nicht fälschlich als Web-Update', () => {
+    const remoteItem = buildRemotePackageItem({
+      providerId: 'winget',
+      packageId: 'Mozilla.Firefox',
+      providerName: 'Winget',
+      summary: {
+        name: 'Mozilla Firefox',
+        version: '135.0.1',
+        shortDescription: 'Schneller Open-Source-Browser',
+      },
+      existingPackages: [],
+    });
+
+    assert.equal(remoteItem.id, 'remote:winget:Mozilla.Firefox');
+    assert.equal(remoteItem.origin, 'remote');
+    assert.equal(remoteItem.inArchive, false);
+    assert.equal(remoteItem.isInstalled, false);
+    assert.equal(remoteItem.webVersion, '135.0.1');
+
+    const st = getPackageStatus(remoteItem);
+    assert.equal(st.status, 'none');
+    assert.equal(st.hasWebUpdate, false);
+    assert.equal(st.webVersion, '135.0.1');
+  });
+
+  it('verknüpft Remote-Pakete mit vorhandenen Archiv- und PC-Einträgen und erkennt Updates', () => {
+    const existingPackages = [
+      {
+        id: 'arch-vlc',
+        name: 'VLC Media Player',
+        origin: 'both',
+        inArchive: true,
+        isInstalled: true,
+        installedVersion: '3.0.20',
+        lastFiles: ['C:\\Archiv\\VLC\\vlc-3.0.20-win64.exe'],
+        packageManager: 'winget',
+        packageId: 'VideoLAN.VLC',
+        wingetId: 'VideoLAN.VLC',
+        canUninstall: true,
+        validInstallPath: 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe',
+      },
+    ];
+
+    const remoteVlc = buildRemotePackageItem({
+      providerId: 'winget',
+      packageId: 'VideoLAN.VLC',
+      providerName: 'Winget',
+      summary: { name: 'VLC', version: '3.0.21' },
+      existingPackages,
+    });
+
+    assert.equal(remoteVlc.isInstalled, true);
+    assert.equal(remoteVlc.installedVersion, '3.0.20');
+    assert.equal(remoteVlc.archiveItemId, 'arch-vlc');
+    assert.equal(remoteVlc.matchedArchiveItem?.id, 'arch-vlc');
+    assert.equal(remoteVlc.canUninstall, true);
+    assert.equal(remoteVlc.lastFiles.length, 1);
+
+    const st = getPackageStatus(remoteVlc);
+    assert.equal(st.status, 'webupdate');
+    assert.equal(st.hasWebUpdate, true);
+    assert.equal(st.archiveVersion, '3.0.20');
   });
 });

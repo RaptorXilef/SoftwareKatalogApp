@@ -1,6 +1,6 @@
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
-import { wingetProvider } from './winget-provider.js';
+import { getWingetCache, wingetProvider } from './winget-provider.js';
 
 const CAPABILITY_KEYS = [
   'search',
@@ -230,4 +230,24 @@ export async function uninstallPackage(providerId, packageId, opts = {}) {
     return { success: false, error: `Provider "${providerId}" unterstützt keine Deinstallation.` };
   }
   return provider.uninstall(packageId, opts);
+}
+
+export function getProviderCacheStats() {
+  const stats = getWingetCache().getStats();
+  return {
+    success: true,
+    totalEntries: stats.totalEntries,
+    expiredEntries: stats.expiredEntries,
+    ttlMs: stats.ttlMs,
+    filePath: stats.filePath,
+  };
+}
+
+export function clearProviderCache() {
+  getWingetCache().clear();
+  return {
+    success: true,
+    totalEntries: 0,
+    expiredEntries: 0,
+  };
 }

@@ -139,8 +139,11 @@ export async function refreshProviders() {
     providersInitialized = true;
     state.discoverSelectedProviders = searchableEnabled;
   } else {
-    const validIds = new Set(state.providers.filter((p) => p.capabilities?.search).map((p) => p.id));
+    const validIds = new Set(searchableEnabled);
     state.discoverSelectedProviders = state.discoverSelectedProviders.filter((id) => validIds.has(id));
+    if (state.discoverSelectedProviders.length === 0 && searchableEnabled.length > 0) {
+      state.discoverSelectedProviders = searchableEnabled;
+    }
   }
 }
 

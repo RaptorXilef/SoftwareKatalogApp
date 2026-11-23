@@ -134,6 +134,7 @@ function setupGlobalDragAndDrop() {
     e.preventDefault();
     if (state.activeTab !== 'archive') return;
     if (!document.getElementById('modalOverlay').hidden) return;
+    if (!document.getElementById('dialogOverlay')?.hidden) return;
     if (e.target.closest('.media-dropzone')) return;
     dragDepth++;
     if (overlay) overlay.hidden = false;
@@ -157,6 +158,7 @@ function setupGlobalDragAndDrop() {
     if (state.activeTab !== 'archive') return;
     // Drops innerhalb offener Modals werden vom jeweiligen Modal verarbeitet
     if (!document.getElementById('modalOverlay').hidden) return;
+    if (!document.getElementById('dialogOverlay')?.hidden) return;
 
     const files = Array.from(e.dataTransfer?.files || []);
     if (files.length === 0) return;
@@ -180,12 +182,17 @@ function setupKeyboardShortcuts() {
   const discoverInput = document.getElementById('discoverSearchInput');
   const clearDiscoverBtn = document.getElementById('clearDiscoverSearchBtn');
   const modalOverlay = document.getElementById('modalOverlay');
+  const dialogOverlay = document.getElementById('dialogOverlay');
 
   document.addEventListener('keydown', (e) => {
     if (isLightboxOpen()) {
       if (e.key === 'Escape') closeLightbox();
       else if (e.key === 'ArrowRight') nextLightbox();
       else if (e.key === 'ArrowLeft') prevLightbox();
+      return;
+    }
+
+    if (dialogOverlay && !dialogOverlay.hidden) {
       return;
     }
 
@@ -262,7 +269,7 @@ async function bootstrap() {
     onReload: reloadUI,
     onOpenArchiveDetail: (id) => openDetailModal(id),
     onOpenPackageDetail: (providerId, packageId, summary) => openProviderPackageModal(providerId, packageId, summary),
-    onLinkToArchive: (pkg) => openArchiveLinkModal(pkg),
+    onLinkToArchive: (pkg, opts) => openArchiveLinkModal(pkg, opts),
   });
 
   initToolbar({

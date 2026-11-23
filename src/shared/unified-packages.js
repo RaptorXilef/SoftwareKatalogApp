@@ -317,6 +317,98 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
 }
 
 /**
+ * Erstellt ein vereinheitlichtes Paket-Objekt für Remote-Suchergebnisse (`origin: 'remote'`),
+ * verknüpft es optional mit bereits vorhandenen Archiv- oder PC-Einträgen.
+ */
+export function buildRemotePackageItem({
+  providerId = 'winget',
+  packageId = '',
+  summary = {},
+  providerName = '',
+  existingPackages = [],
+} = {}) {
+  const cleanProviderId = String(providerId || 'winget')
+    .trim()
+    .toLowerCase();
+  const cleanPkgId = String(packageId || summary.packageId || summary.id || '').trim();
+  const cleanPidLower = cleanPkgId.toLowerCase();
+
+  let matchedArchiveItem = null;
+  let matchedPcItem = null;
+
+  if (cleanPidLower && Array.isArray(existingPackages)) {
+    for (const entry of existingPackages) {
+      const entryPid = String(entry.packageId || entry.wingetId || '')
+        .trim()
+        .toLowerCase();
+      const entryPm = String(entry.packageManager || (entry.wingetId ? 'winget' : ''))
+        .trim()
+        .toLowerCase();
+
+      if (!entryPid || entryPid !== cleanPidLower) continue;
+      if (entryPm && entryPm !== cleanProviderId) continue;
+
+      if (entry.inArchive && !matchedArchiveItem) {
+        matchedArchiveItem = entry;
+      }
+      if (entry.isInstalled && !matchedPcItem) {
+        matchedPcItem = entry;
+      }
+    }
+  }
+
+  const pcOrArchiveInstalled = Boolean(
+    matchedPcItem?.isInstalled || matchedArchiveItem?.isInstalled || summary.isInstalled
+  );
+  const installedVersion =
+    matchedPcItem?.installedVersion || matchedArchiveItem?.installedVersion || summary.installedVersion || null;
+  const rawWebVersion = summary.version || matchedPcItem?.webVersion || matchedArchiveItem?.webVersion || null;
+  const webVersion = rawWebVersion ? extractVersion(String(rawWebVersion)) || String(rawWebVersion).trim() : null;
+
+  return {
+    id: `remote:${cleanProviderId}:${cleanPkgId}`,
+    name: summary.name || matchedArchiveItem?.name || matchedPcItem?.name || cleanPkgId,
+    origin: 'remote',
+    inArchive: false,
+    archiveItemId: matchedArchiveItem?.id || null,
+    matchedArchiveItem: matchedArchiveItem || null,
+    isInstalled: pcOrArchiveInstalled,
+    installedVersion,
+    webVersion,
+    packageManager: cleanProviderId,
+    packageId: cleanPkgId,
+    wingetId: cleanProviderId === 'winget' ? cleanPkgId : '',
+    webSourceType: cleanProviderId === 'winget' ? 'winget' : 'none',
+    providerName: providerName || (cleanProviderId === 'winget' ? 'Winget' : cleanProviderId),
+    publisher: summary.publisher || matchedPcItem?.publisher || '',
+    shortDescription: summary.shortDescription || '',
+    description: summary.description || '',
+    tags: Array.isArray(summary.tags) ? summary.tags : [],
+    mainCategory: '',
+    subCategories: [],
+    hiddenCategory: '',
+    formats: [],
+    os: [],
+    searchNames: [],
+    links: [],
+    lastFiles: matchedArchiveItem?.lastFiles || [],
+    screenshots: [],
+    autoPaths: [],
+    installPaths: [],
+    validInstallPath: matchedPcItem?.validInstallPath || matchedArchiveItem?.validInstallPath || null,
+    icon: matchedArchiveItem?.icon || matchedPcItem?.icon || null,
+    canUninstall: Boolean(matchedPcItem?.canUninstall || matchedArchiveItem?.canUninstall),
+    uninstallString: matchedPcItem?.uninstallString || matchedArchiveItem?.uninstallString || '',
+    quietUninstallString: matchedPcItem?.quietUninstallString || matchedArchiveItem?.quietUninstallString || '',
+    installLocation: matchedPcItem?.installLocation || matchedArchiveItem?.installLocation || '',
+    displayIcon: matchedPcItem?.displayIcon || matchedArchiveItem?.displayIcon || '',
+    registryKey: matchedPcItem?.registryKey || '',
+    pcSource: matchedPcItem?.pcSource || null,
+    hasWingetUpgrade: Boolean(matchedPcItem?.hasWingetUpgrade),
+  };
+}
+
+/**
  * Ermittelt Status & Versionen für Karte und Detailansicht.
  * Priorität für Kartenfarbe: webupdate (Lila) > update (Orange) > newer (Blau) > installed (Grün) > none
  */
@@ -334,7 +426,11 @@ export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
   );
 
   let hasWebUpdate = false;
-  if (item.origin === 'pc') {
+  if (item.origin === 'remote') {
+    hasWebUpdate = Boolean(
+      item.isInstalled && webVersion && localVersion && compareVersions(webVersion, localVersion, depth) > 0
+    );
+  } else if (item.origin === 'pc') {
     hasWebUpdate = Boolean(
       webVersion &&
         ((localVersion && compareVersions(webVersion, localVersion, depth) > 0) ||

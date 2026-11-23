@@ -1,7 +1,7 @@
 import { state } from '../state.js';
-import { renderDetailModal } from './detail-modal.js';
+import { savePackageToArchive } from './archive-target-modal.js';
+import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
-import { renderArchiveLinkModal, renderProviderPackageModal } from './package-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 
 let reloadHandler = async () => {};
@@ -37,10 +37,15 @@ export function openSettingsModal() {
   renderSettingsModal();
 }
 
-export function openProviderPackageModal(providerId, packageId, summary = {}) {
-  renderProviderPackageModal(providerId, packageId, summary);
+export function openProviderPackageModal(providerId, packageId, summary = {}, options = {}) {
+  renderRemoteDetailModal(providerId, packageId, summary, options);
 }
 
 export function openArchiveLinkModal(pkg, options = {}) {
-  renderArchiveLinkModal(pkg, options);
+  const defaultMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
+  return savePackageToArchive(pkg, {
+    mode: options.mode || defaultMode,
+    downloadSetup: options.downloadSetup ?? true,
+    onLinked: options.onLinked || null,
+  });
 }

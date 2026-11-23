@@ -12,7 +12,44 @@ export async function renderSettingsModal() {
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
 
-  const [s, info] = await Promise.all([window.electronAPI.getSettings(), window.electronAPI.getAppInfo()]);
+  const [s, info, providersInfo, cacheStats] = await Promise.all([
+    window.electronAPI.getSettings(),
+    window.electronAPI.getAppInfo(),
+    window.electronAPI.listProviders(),
+    window.electronAPI.getProviderCacheStats(),
+  ]);
+
+  const providers = Array.isArray(providersInfo?.providers) ? providersInfo.providers : [];
+  const plannedProviders = Array.isArray(providersInfo?.planned) ? providersInfo.planned : [];
+  const enabledSet = new Set(
+    (Array.isArray(s.enabledProviders) ? s.enabledProviders : ['winget', 'archive']).map((p) => p.toLowerCase())
+  );
+  const saveMode = s.archiveSaveMode || 'ask';
+  const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
+  const expiredCacheEntries = Number(cacheStats?.expiredEntries) || 0;
+
+  const providerCheckboxes = providers
+    .map((p) => {
+      const checked = enabledSet.has(p.id) ? 'checked' : '';
+      return `
+        <label class="provider-setting-row">
+          <input type="checkbox" name="enabledProviderCheck" value="${escapeHTML(p.id)}" ${checked}>
+          <div class="provider-setting-info">
+            <strong>${escapeHTML(p.name)}</strong>
+            ${p.description ? `<span class="muted">${escapeHTML(p.description)}</span>` : ''}
+          </div>
+        </label>
+      `;
+    })
+    .join('');
+
+  const plannedHintText =
+    plannedProviders.length > 0
+      ? `Künftig erweiterbar um weitere Quellen wie ${plannedProviders
+          .slice(0, 5)
+          .map((p) => p.name)
+          .join(', ')} u. a.`
+      : '';
 
   const hiddenCheckboxes =
     state.availableHiddenCats.length === 0
@@ -31,7 +68,38 @@ export async function renderSettingsModal() {
     </div>
 
     <div class="modal-body settings-body">
-      <!-- 1. Downloads & Dateibenennung -->
+      <!-- 1. Paketmanager & Quellen -->
+      <section class="settings-section">
+        <h3>📦 Paketmanager & Quellen</h3>
+        <div class="form-field">
+          <span>Aktivierte Quellen</span>
+          <div class="provider-settings-list">${providerCheckboxes}</div>
+          ${plannedHintText ? `<p class="planned-providers-hint">${escapeHTML(plannedHintText)}</p>` : ''}
+        </div>
+
+        <label class="form-field">
+          <span>Archiv-Speichermodus bei Erstinstallation/Update</span>
+          <select id="cfgArchiveSaveMode">
+            <option value="ask" ${saveMode === 'ask' ? 'selected' : ''}>Nachfragen (Standard)</option>
+            <option value="auto-id" ${saveMode === 'auto-id' ? 'selected' : ''}>Automatisch im Archiv speichern (Ordnername = Paket-ID, Anzeigename = Softwarename)</option>
+            <option value="none" ${saveMode === 'none' ? 'selected' : ''}>Nicht automatisch im Archiv speichern</option>
+          </select>
+        </label>
+
+        <div class="cache-status-bar">
+          <div class="cache-status-text">
+            <strong>Provider-Offline-Cache (7 Tage)</strong>
+            <span id="providerCacheCount" class="muted">
+              ${totalCacheEntries} ${totalCacheEntries === 1 ? 'Eintrag' : 'Einträge'} gespeichert${expiredCacheEntries > 0 ? ` (${expiredCacheEntries} abgelaufen, offline verfügbar)` : ''}
+            </span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-xs" id="btnClearProviderCache" data-settings-action="clear-provider-cache" ${totalCacheEntries === 0 ? 'disabled' : ''}>
+            🧹 Cache leeren
+          </button>
+        </div>
+      </section>
+
+      <!-- 2. Downloads & Dateibenennung -->
       <section class="settings-section">
         <h3>⬇️ Downloads & Dateibenennung</h3>
         <label class="check-row">
@@ -260,6 +328,17 @@ export async function renderSettingsModal() {
     else if (act === 'browse-target') {
       const dir = await window.electronAPI.selectDir();
       if (dir) modal.querySelector('#cfgTarget').value = dir;
+    } else if (act === 'clear-provider-cache') {
+      btn.disabled = true;
+      const res = await window.electronAPI.clearProviderCache();
+      if (res?.success) {
+        const countEl = modal.querySelector('#providerCacheCount');
+        if (countEl) countEl.textContent = '0 Einträge gespeichert';
+        showToast('Provider-Cache wurde geleert.', { type: 'success' });
+      } else {
+        btn.disabled = false;
+        showToast('Cache konnte nicht geleert werden.', { type: 'error' });
+      }
     } else if (act === 'backup-create') {
       const res = await window.electronAPI.createBackup();
       if (res.success) showToast('Backup erfolgreich gespeichert.', { type: 'success' });
@@ -277,8 +356,13 @@ export async function renderSettingsModal() {
       const checkedCats = Array.from(modal.querySelectorAll('input[name="hiddenCatCheck"]:checked')).map(
         (cb) => cb.value
       );
+      const checkedProviders = Array.from(modal.querySelectorAll('input[name="enabledProviderCheck"]:checked')).map(
+        (cb) => cb.value
+      );
       const autoSave = modal.querySelector('#cfgAutoSave').checked;
       const newSettings = {
+        enabledProviders: checkedProviders,
+        archiveSaveMode: modal.querySelector('#cfgArchiveSaveMode')?.value || 'ask',
         targetPath: modal.querySelector('#cfgTarget').value,
         scanNested: modal.querySelector('#cfgScanNested').checked,
         nestedDepth: parseInt(modal.querySelector('#cfgNestedDepth').value, 10) || 1,

@@ -19,6 +19,8 @@ import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
 import {
   checkProviderAvailability,
+  clearProviderCache,
+  getProviderCacheStats,
   initDefaultProviders,
   installPackage,
   listProvidersInfo,
@@ -168,6 +170,8 @@ function registerIpcHandlers() {
   ipcMain.handle('providers-uninstall', (_e, providerId, packageId, opts) =>
     uninstallPackage(providerId, packageId, opts || {})
   );
+  ipcMain.handle('providers-cache-stats', () => getProviderCacheStats());
+  ipcMain.handle('providers-cache-clear', () => clearProviderCache());
 
   // Archiv-Linker (Aufnehmen & Verknüpfen generischer Pakete im Archiv)
   ipcMain.handle('archive-check-collision', (_e, targetDir) => checkArchiveTargetCollision(targetDir));
@@ -214,10 +218,12 @@ function registerIpcHandlers() {
       return { success: false, error: e.message };
     }
   });
-  ipcMain.handle('select-dir', async () => {
+  ipcMain.handle('select-dir', async (_e, opts = {}) => {
+    const defaultPath = opts?.defaultToArchive ? getConfig().absTargetPath : opts?.defaultPath || undefined;
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Ordner auswählen',
-      properties: ['openDirectory'],
+      title: opts?.title || 'Ordner auswählen',
+      defaultPath,
+      properties: ['openDirectory', 'createDirectory'],
     });
     return canceled ? null : filePaths[0];
   });
