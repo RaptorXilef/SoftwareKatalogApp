@@ -1,5 +1,7 @@
 import { state } from '../state.js';
 import { savePackageToArchive } from './archive-target-modal.js';
+import { renderBundleEditorModal } from './bundle-editor-modal.js';
+import { renderBundleRunnerModal } from './bundle-runner-modal.js';
 import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
@@ -58,4 +60,12 @@ export function openWingetMatcherModal() {
 
 export function openCleanupModal() {
   return renderCleanupModal();
+}
+
+export function openBundleEditorModal(options = {}) {
+  return renderBundleEditorModal(options);
+}
+
+export function openBundleRunnerModal(bundleId, options = {}) {
+  return renderBundleRunnerModal(bundleId, options);
 }

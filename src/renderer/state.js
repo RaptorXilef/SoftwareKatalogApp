@@ -26,6 +26,7 @@ export const state = {
   filterMode: 'all',
   activeTag: null,
   searchQuery: '',
+  bundleSearchQuery: '',
   discoverQuery: '',
   discoverSelectedProviders: [],
   discoverResults: [],
@@ -41,6 +42,7 @@ export const state = {
   hasCheckedAppUpdate: false,
   selectedUpdateIds: new Set(),
   isBatchActionRunning: false,
+  isBundleInstallRunning: false,
 };
 
 export function rebuildUnifiedPackages() {
@@ -162,4 +164,14 @@ export async function toggleFavorite(id) {
   else state.favorites.push(id);
 
   await window.electronAPI.saveSettings({ favorites: state.favorites });
+}
+
+export async function refreshBundles() {
+  try {
+    const res = await window.electronAPI.loadBundles();
+    state.bundles = Array.isArray(res?.bundles) ? res.bundles : [];
+  } catch (err) {
+    console.error('Fehler beim Laden der Bündel:', err);
+    state.bundles = [];
+  }
 }

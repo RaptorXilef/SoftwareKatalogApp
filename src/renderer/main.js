@@ -1,3 +1,5 @@
+import { buildBundleDraftFromInstalled } from '../shared/bundles-logic.js';
+import { initBundlesView, renderBundlesView } from './components/bundles-view.js';
 import {
   getPendingArchiveWebUpdateItems,
   getVisibleUpdateEntries,
@@ -9,11 +11,13 @@ import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
 import { initToolbar, renderTagChips, syncToolbarForTab, updateNavCounts } from './components/toolbar.js';
-import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
+import { askBatchArchiveSaveChoice, openNestedDialog, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
 import {
   closeModal,
   initModals,
   openArchiveLinkModal,
+  openBundleEditorModal,
+  openBundleRunnerModal,
   openCleanupModal,
   openDetailModal,
   openProviderPackageModal,
@@ -22,6 +26,7 @@ import {
 } from './modals/index.js';
 import {
   getItemStatus,
+  refreshBundles,
   refreshCatalogData,
   refreshProviders,
   setInstalledApps,
@@ -30,22 +35,6 @@ import {
 } from './state.js';
 import { escapeHTML } from './utils/sanitize.js';
 
-function renderBundlesPlaceholder() {
-  const container = document.getElementById('bundlesView');
-  if (!container) return;
-
-  container.innerHTML = `
-    <div class="bundles-placeholder">
-      <span class="bundles-badge">Vorbereitet für Schritt F</span>
-      <h2>📦 Software-Bündel</h2>
-      <p>
-        Hier kannst du künftig kuratierte Programmpakete für neue PCs zusammenstellen
-        (z. B. "Basis-Setup", "Entwicklung", "Multimedia") und mit einem Klick installieren.
-      </p>
-    </div>
-  `;
-}
-
 function renderActiveView() {
   syncToolbarForTab();
   updateNavCounts();
@@ -53,7 +42,7 @@ function renderActiveView() {
   if (state.activeTab === 'discover') {
     renderDiscoverView();
   } else if (state.activeTab === 'bundles') {
-    renderBundlesPlaceholder();
+    renderBundlesView();
   } else {
     renderCatalogGrid();
   }
@@ -93,7 +82,7 @@ async function runInstalledScan({ silent = false } = {}) {
 
 async function reloadUI({ preserveScroll = true, rescanInstalled = false } = {}) {
   const y = window.scrollY;
-  await Promise.all([refreshCatalogData(), refreshProviders()]);
+  await Promise.all([refreshCatalogData(), refreshProviders(), refreshBundles()]);
   renderTagChips();
   renderActiveView();
   if (preserveScroll) window.scrollTo(0, y);
@@ -382,7 +371,9 @@ function setupKeyboardShortcuts() {
       e.preventDefault();
       if (state.activeTab === 'discover') {
         discoverInput?.focus();
-      } else if (state.activeTab !== 'bundles') {
+      } else if (state.activeTab === 'bundles') {
+        document.getElementById('bundleSearchInput')?.focus();
+      } else {
         searchInput?.focus();
       }
     } else if (e.key === 'Escape' && active === searchInput) {
@@ -445,6 +436,84 @@ async function bootstrap() {
     onOpenArchiveDetail: (id) => openDetailModal(id),
     onOpenPackageDetail: (providerId, packageId, summary) => openProviderPackageModal(providerId, packageId, summary),
     onLinkToArchive: (pkg, opts) => openArchiveLinkModal(pkg, opts),
+  });
+
+  initBundlesView({
+    onNewBundle: () => openBundleEditorModal(),
+    onSnapshotFromPc: async () => {
+      if (!state.hasScannedInstalled) {
+        showToast('Scanne installierte PC-Programme für den Snapshot...', { type: 'info' });
+        await runInstalledScan({ silent: false });
+      }
+      const snapshot = buildBundleDraftFromInstalled(state.packages);
+      if (snapshot.includedCount === 0) {
+        showToast('Keine übernehmbaren Archiv- oder Winget-Programme auf diesem PC erkannt.', { type: 'warn' });
+        return;
+      }
+      openBundleEditorModal({
+        snapshotDraft: snapshot.draft,
+        snapshotStats: snapshot,
+      });
+    },
+    onEditBundle: (bundle) => openBundleEditorModal({ bundle }),
+    onRunBundle: (bundleId) =>
+      openBundleRunnerModal(bundleId, {
+        onRescanPc: () => runInstalledScan({ silent: false }),
+      }),
+    onDuplicateBundle: async (bundleId) => {
+      const res = await window.electronAPI.duplicateBundle(bundleId);
+      if (res?.success) {
+        await reloadUI();
+        showToast(`Bündel "${res.bundle?.name || 'Kopie'}" erstellt.`, { type: 'success' });
+      } else {
+        showToast(res?.error || 'Bündel konnte nicht dupliziert werden.', { type: 'error' });
+      }
+    },
+    onDeleteBundle: async (bundle) => {
+      const decision = await openNestedDialog({
+        defaultAction: 'cancel',
+        html: `
+          <div class="modal-header">
+            <h2>🗑️ Bündel löschen</h2>
+            <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+          </div>
+          <div class="modal-body collision-warning-body">
+            <p>Möchtest du das Bündel <strong>${escapeHTML(bundle.name)}</strong> (${bundle.items?.length || 0} Pakete) wirklich löschen?</p>
+            <div class="collision-actions-grid">
+              <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+              <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ Endgültig löschen</button>
+            </div>
+          </div>
+        `,
+        onAction: (act) => (act === 'confirm' ? 'confirm' : 'cancel'),
+      });
+      if (decision !== 'confirm') return;
+
+      const res = await window.electronAPI.deleteBundle(bundle.id);
+      if (res?.success) {
+        await reloadUI();
+        showToast(`Bündel "${bundle.name}" gelöscht.`, { type: 'success' });
+      } else {
+        showToast(res?.error || 'Bündel konnte nicht gelöscht werden.', { type: 'error' });
+      }
+    },
+    onExportBundle: async (bundleId) => {
+      const res = await window.electronAPI.exportBundle(bundleId);
+      if (res?.success) {
+        showToast('Bündel erfolgreich als JSON exportiert.', { type: 'success' });
+      } else if (res?.error && !res.canceled) {
+        showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error' });
+      }
+    },
+    onImportBundle: async () => {
+      const res = await window.electronAPI.importBundle();
+      if (res?.success) {
+        await reloadUI();
+        showToast(`Bündel "${res.bundle?.name || 'Import'}" importiert.`, { type: 'success' });
+      } else if (res?.error && !res.canceled) {
+        showToast(`Import fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+      }
+    },
   });
 
   initToolbar({
@@ -538,7 +607,6 @@ async function bootstrap() {
     const verEl = document.getElementById('appVersion');
     if (verEl) verEl.textContent = `(v${info.version})`;
 
-    renderBundlesPlaceholder();
     await reloadUI({ preserveScroll: false });
     checkAppUpdateInBackground();
     runInstalledScan({ silent: true });

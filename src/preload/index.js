@@ -71,6 +71,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('archive-cleanup-set-keep', itemPath, keepAllVersions),
   executeArchiveCleanup: (opts) => ipcRenderer.invoke('archive-cleanup-execute', opts),
 
+  // Paketbündel
+  loadBundles: () => ipcRenderer.invoke('bundles-load'),
+  saveBundle: (bundle) => ipcRenderer.invoke('bundles-save', bundle),
+  deleteBundle: (bundleId) => ipcRenderer.invoke('bundles-delete', bundleId),
+  duplicateBundle: (bundleId) => ipcRenderer.invoke('bundles-duplicate', bundleId),
+  exportBundle: (bundleId) => ipcRenderer.invoke('bundles-export', bundleId),
+  importBundle: () => ipcRenderer.invoke('bundles-import'),
+  runBundleInstall: (bundleId, selectedItemIds, opts) =>
+    ipcRenderer.invoke('bundles-run-install', bundleId, selectedItemIds, opts),
+
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
   checkSingleWeb: (payload) => ipcRenderer.invoke('check-single-web', payload),

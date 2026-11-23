@@ -1,0 +1,222 @@
+import { evaluateBundleStatus } from '../../shared/bundles-logic.js';
+import { state } from '../state.js';
+import { escapeHTML } from '../utils/sanitize.js';
+
+let viewHandlers = {};
+
+function renderEmptyBundlesHtml(hasSearch) {
+  if (hasSearch) {
+    return `
+      <div class="bundles-empty">
+        <h3>Keine passenden Bündel gefunden</h3>
+        <p class="muted">Passe den Suchbegriff an oder setze die Suche zurück.</p>
+        <div class="bundles-empty-actions">
+          <button type="button" class="btn btn-ghost" data-bundle-action="clear-search">Suche zurücksetzen</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="bundles-empty">
+      <div class="bundles-empty-icon">📦</div>
+      <h3>Noch keine Paketbündel vorhanden</h3>
+      <p class="muted">
+        Stelle kuratierte Programmpakete für neue PCs zusammen oder erstelle mit einem Klick
+        einen Snapshot aller aktuell auf diesem PC installierten Programme.
+        Alle Bündel liegen zentral in <code>data/bundles.json</code> im Archiv.
+      </p>
+      <div class="bundles-empty-actions">
+        <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
+        <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 JSON importieren</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderBundleCardHtml(bundle) {
+  const depth = state.settings.versionCompareDepth ?? 3;
+  const evaluation = evaluateBundleStatus(bundle, {
+    packages: state.packages,
+    versionCompareDepth: depth,
+  });
+  const { items, summary } = evaluation;
+
+  const archiveCount = items.filter((it) => it.source === 'archive').length;
+  const wingetCount = items.filter((it) => it.source === 'winget').length;
+  const pct = summary.total > 0 ? Math.round((summary.installedCount / summary.total) * 100) : 0;
+
+  const previewItems = items.slice(0, 5);
+  const remainingCount = Math.max(0, items.length - previewItems.length);
+  const previewHtml = previewItems
+    .map((entry) => {
+      const icon = entry.status === 'up-to-date' ? '✅' : entry.status === 'outdated' ? '⬆️' : '⬇️';
+      const shield = entry.adwareProtected ? ' 🛡️' : '';
+      return `<span class="bundle-preview-chip" title="${escapeHTML(entry.statusLabel)}">#${entry.order} ${icon} ${escapeHTML(entry.name)}${shield}</span>`;
+    })
+    .join('');
+
+  return `
+    <article class="bundle-card" data-bundle-id="${escapeHTML(bundle.id)}">
+      <div class="bundle-card-head">
+        <div class="bundle-card-title-row">
+          <span class="bundle-card-icon">${escapeHTML(bundle.icon || '📦')}</span>
+          <div class="bundle-card-title-text">
+            <h3>${escapeHTML(bundle.name)}</h3>
+            <span class="bundle-card-counts">${summary.total} Paket(e) · ${archiveCount} Archiv · ${wingetCount} Winget</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="Bündel als JSON exportieren">📤 Export</button>
+      </div>
+
+      ${bundle.description ? `<p class="bundle-card-desc">${escapeHTML(bundle.description)}</p>` : ''}
+
+      <div class="bundle-progress-block">
+        <div class="bundle-progress-labels">
+          <strong>${escapeHTML(summary.statusText)}</strong>
+          <span class="muted">${pct}%</span>
+        </div>
+        <div class="bundle-progress-track">
+          <div class="bundle-progress-fill" style="width: ${pct}%"></div>
+        </div>
+        <div class="bundle-status-pills">
+          ${summary.upToDateCount > 0 ? `<span class="bundle-pill is-ok">✅ ${summary.upToDateCount} aktuell</span>` : ''}
+          ${summary.outdatedCount > 0 ? `<span class="bundle-pill is-outdated">⬆️ ${summary.outdatedCount} veraltet</span>` : ''}
+          ${summary.missingCount > 0 ? `<span class="bundle-pill is-missing">⬇️ ${summary.missingCount} fehlt</span>` : ''}
+          ${summary.adwareProtectedCount > 0 ? `<span class="bundle-pill is-protected">🛡️ ${summary.adwareProtectedCount} Interaktiv-Schutz</span>` : ''}
+        </div>
+      </div>
+
+      <div class="bundle-preview-list">
+        ${previewHtml}
+        ${remainingCount > 0 ? `<span class="bundle-preview-more">+${remainingCount} weitere</span>` : ''}
+      </div>
+
+      <div class="bundle-card-actions">
+        <button
+          type="button"
+          class="btn btn-primary"
+          data-bundle-action="run"
+          data-bundle-id="${escapeHTML(bundle.id)}"
+          ${summary.total === 0 || state.isBundleInstallRunning ? 'disabled' : ''}
+        >
+          🚀 Bündel installieren / abgleichen
+        </button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="edit" data-bundle-id="${escapeHTML(bundle.id)}">✏️ Bearbeiten</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="duplicate" data-bundle-id="${escapeHTML(bundle.id)}">📋 Duplizieren</button>
+        <button type="button" class="btn btn-danger" data-bundle-action="delete" data-bundle-id="${escapeHTML(bundle.id)}">🗑️ Löschen</button>
+      </div>
+    </article>
+  `;
+}
+
+export function renderBundlesView() {
+  const container = document.getElementById('bundlesView');
+  if (!container) return;
+
+  const q = state.bundleSearchQuery.trim().toLowerCase();
+  const filtered = state.bundles.filter((b) => {
+    if (!q) return true;
+    const itemNames = (b.items || []).map((i) => `${i.name} ${i.packageId}`).join(' ');
+    return `${b.name} ${b.description} ${itemNames}`.toLowerCase().includes(q);
+  });
+
+  const activeElId = document.activeElement?.id || '';
+  const selStart = document.activeElement?.selectionStart ?? null;
+  const selEnd = document.activeElement?.selectionEnd ?? null;
+
+  container.innerHTML = `
+    <div class="bundles-header">
+      <div class="bundles-header-main">
+        <div>
+          <h2>📦 Paketbündel</h2>
+          <p class="muted">Zentral im Archiv gespeichert (<code>data/bundles.json</code>) – auf allen PCs direkt abgleichbar</p>
+        </div>
+        <div class="bundles-header-actions">
+          <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
+          <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Importieren</button>
+        </div>
+      </div>
+
+      <div class="bundles-search-row">
+        <div class="bundles-search-box">
+          <input type="text" id="bundleSearchInput" value="${escapeHTML(state.bundleSearchQuery)}" placeholder="Bündel oder enthaltene Programme suchen (Strg+F)..." autocomplete="off">
+          <button type="button" id="clearBundleSearchBtn" class="clear-btn" title="Suche leeren" ${state.bundleSearchQuery ? '' : 'hidden'}>✕</button>
+        </div>
+        <span class="muted">${filtered.length} von ${state.bundles.length} Bündel(n)</span>
+      </div>
+    </div>
+
+    ${
+      filtered.length === 0
+        ? renderEmptyBundlesHtml(Boolean(q))
+        : `<div class="bundles-grid">${filtered.map(renderBundleCardHtml).join('')}</div>`
+    }
+  `;
+
+  const searchInput = container.querySelector('#bundleSearchInput');
+  const clearBtn = container.querySelector('#clearBundleSearchBtn');
+  if (searchInput) {
+    searchInput.oninput = () => {
+      state.bundleSearchQuery = searchInput.value;
+      if (clearBtn) clearBtn.hidden = state.bundleSearchQuery.length === 0;
+      renderBundlesView();
+    };
+  }
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      state.bundleSearchQuery = '';
+      renderBundlesView();
+      container.querySelector('#bundleSearchInput')?.focus();
+    };
+  }
+
+  if (activeElId === 'bundleSearchInput') {
+    const refocused = container.querySelector('#bundleSearchInput');
+    refocused?.focus();
+    if (selStart !== null && typeof refocused?.setSelectionRange === 'function') {
+      try {
+        refocused.setSelectionRange(selStart, selEnd);
+      } catch {
+        // Ignorieren
+      }
+    }
+  }
+}
+
+export function initBundlesView(handlers) {
+  viewHandlers = handlers || {};
+  const container = document.getElementById('bundlesView');
+  if (!container) return;
+
+  container.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-bundle-action]');
+    if (!btn) return;
+    const action = btn.dataset.bundleAction;
+    const bundleId = btn.dataset.bundleId || '';
+    const bundle = bundleId ? state.bundles.find((b) => b.id === bundleId) || null : null;
+
+    if (action === 'new') {
+      viewHandlers.onNewBundle?.();
+    } else if (action === 'snapshot') {
+      viewHandlers.onSnapshotFromPc?.();
+    } else if (action === 'import') {
+      viewHandlers.onImportBundle?.();
+    } else if (action === 'clear-search') {
+      state.bundleSearchQuery = '';
+      renderBundlesView();
+    } else if (action === 'run' && bundle) {
+      viewHandlers.onRunBundle?.(bundle.id);
+    } else if (action === 'edit' && bundle) {
+      viewHandlers.onEditBundle?.(bundle);
+    } else if (action === 'duplicate' && bundle) {
+      viewHandlers.onDuplicateBundle?.(bundle.id);
+    } else if (action === 'export' && bundle) {
+      viewHandlers.onExportBundle?.(bundle.id);
+    } else if (action === 'delete' && bundle) {
+      viewHandlers.onDeleteBundle?.(bundle);
+    }
+  });
+}

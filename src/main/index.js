@@ -7,6 +7,15 @@ import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArch
 import { applyWingetMatches, runWingetMatcherScan } from './archive-matcher.js';
 import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-updater.js';
 import {
+  deleteBundle,
+  duplicateBundle,
+  exportBundle,
+  importBundle,
+  loadBundles,
+  runBundleInstall,
+  saveBundle,
+} from './bundles-service.js';
+import {
   addIconFile,
   addMediaFiles,
   createBackup,
@@ -197,6 +206,17 @@ function registerIpcHandlers() {
     setKeepAllVersions(itemPath, keepAllVersions)
   );
   ipcMain.handle('archive-cleanup-execute', (_e, opts) => executeArchiveCleanup(opts || {}));
+
+  // Paketbündel (zentral in data/bundles.json)
+  ipcMain.handle('bundles-load', () => loadBundles());
+  ipcMain.handle('bundles-save', (_e, bundle) => saveBundle(bundle));
+  ipcMain.handle('bundles-delete', (_e, bundleId) => deleteBundle(bundleId));
+  ipcMain.handle('bundles-duplicate', (_e, bundleId) => duplicateBundle(bundleId));
+  ipcMain.handle('bundles-export', (_e, bundleId) => exportBundle(bundleId));
+  ipcMain.handle('bundles-import', () => importBundle());
+  ipcMain.handle('bundles-run-install', (_e, bundleId, selectedItemIds, opts) =>
+    runBundleInstall(bundleId, selectedItemIds, opts || {})
+  );
 
   ipcMain.handle('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
