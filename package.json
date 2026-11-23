@@ -14,7 +14,7 @@
     "url": "https://github.com/RaptorXilef/SoftwareKatalogApp/issues"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "start": "electron-vite preview",
     "build:vite": "electron-vite build",
     "scan": "node src/scanner/scanner.mjs",
@@ -22,7 +22,7 @@
     "build:dir": "electron-vite build && electron-builder --dir",
     "build:dist": "electron-vite build && electron-builder",
     "build:portable": "electron-vite build && electron-builder --win portable",
-    "test": "node --test tests/**/*.test.mjs",
+    "test": "node --test tests",
     "prepare": "husky",
     "chk:biome": "biome check .",
     "fix:biome": "biome check --write .",

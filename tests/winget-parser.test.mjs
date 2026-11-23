@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+import { createProviderCache, DEFAULT_CACHE_TTL_MS } from '../src/shared/provider-cache.js';
 import {
   cleanCliLines,
   mergeWingetShowResults,
@@ -98,6 +102,48 @@ describe('parseWingetShowOutput', () => {
     assert.equal(parsed.installerType, 'nullsoft');
     assert.equal(parsed.downloadUrl, 'https://get.videolan.org/vlc/3.0.24/win64/vlc-3.0.24-win64.exe');
     assert.equal(parsed.sha256, 'aaaa1111bbbb2222');
+  });
+
+  it('behandelt fehlende optionale Felder, mehrzeilige Release-Notes und unterschiedliche Versionsformate stabil', () => {
+    const minimalDe = [
+      'Gefunden Minimal Tool [Vendor.MinimalTool]',
+      'Version: 4.0.2.263060742',
+      'Herausgeber: Vendor Corp',
+      'Versionshinweise:',
+      '  Erste Zeile der Hinweise.',
+      '  Zweite Zeile mit Details.',
+    ].join('\n');
+
+    const parsedMinimal = parseWingetShowOutput(minimalDe);
+    assert.equal(parsedMinimal.name, 'Minimal Tool');
+    assert.equal(parsedMinimal.packageId, 'Vendor.MinimalTool');
+    assert.equal(parsedMinimal.version, '4.0.2.263060742');
+    assert.equal(parsedMinimal.releaseNotes, 'Erste Zeile der Hinweise.\nZweite Zeile mit Details.');
+    assert.deepEqual(parsedMinimal.tags, []);
+    assert.equal(parsedMinimal.homepage, '');
+    assert.equal(parsedMinimal.license, '');
+    assert.equal(parsedMinimal.downloadUrl, '');
+    assert.equal(parsedMinimal.installerType, '');
+
+    const betaEn = [
+      'Found Beta App [Acme.BetaApp]',
+      'Version: 1.5.0-beta.2',
+      'Publisher: Acme',
+      'Description:',
+      '  Line one of description.',
+      '  Line two of description.',
+      'Release Notes:',
+      '  - Added beta feature',
+      '  - Fixed crash on startup',
+    ].join('\n');
+
+    const parsedBeta = parseWingetShowOutput(betaEn);
+    assert.equal(parsedBeta.version, '1.5.0');
+    assert.equal(parsedBeta.description, 'Line one of description.\nLine two of description.');
+    assert.equal(parsedBeta.releaseNotes, '- Added beta feature\n- Fixed crash on startup');
+
+    const dateVer = parseWingetShowOutput(['Found CalVer [Acme.CalVer]', 'Version: 2026.11.01'].join('\n'));
+    assert.equal(dateVer.version, '2026.11.01');
   });
 });
 
@@ -214,5 +260,75 @@ describe('parseWingetExportJson', () => {
       version: '26.04',
       source: 'winget',
     });
+  });
+});
+
+describe('createProviderCache (Winget-Cache-Logik)', () => {
+  let tempDir;
+  let cacheFile;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-winget-cache-'));
+    cacheFile = path.join(tempDir, 'provider-cache.json');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('liefert frischen Cache (< 7 Tage) direkt ohne erneuten Abruf', async () => {
+    let clock = 1_700_000_000_000;
+    const cache = createProviderCache({ filePath: cacheFile, now: () => clock });
+    let calls = 0;
+
+    const initial = await cache.getOrFetch('winget:show:7zip.7zip', async () => {
+      calls++;
+      return { name: '7-Zip', version: '26.06' };
+    });
+    assert.equal(initial.fromCache, false);
+    assert.equal(initial.isStale, false);
+
+    clock += 2 * 24 * 60 * 60 * 1000;
+    const freshHit = await cache.getOrFetch('winget:show:7zip.7zip', async () => {
+      calls++;
+      return { name: '7-Zip', version: '27.00' };
+    });
+    assert.equal(calls, 1);
+    assert.equal(freshHit.fromCache, true);
+    assert.equal(freshHit.isStale, false);
+    assert.equal(freshHit.data.version, '26.06');
+  });
+
+  it('aktualisiert abgelaufenen Cache (> 7 Tage) bei erfolgreicher Online-Abfrage', async () => {
+    let clock = 1_700_000_000_000;
+    const cache = createProviderCache({ filePath: cacheFile, now: () => clock });
+
+    await cache.getOrFetch('winget:show:videolan.vlc', async () => ({ name: 'VLC', version: '3.0.21' }));
+
+    clock += DEFAULT_CACHE_TTL_MS + 5000;
+    const updated = await cache.getOrFetch('winget:show:videolan.vlc', async () => ({
+      name: 'VLC',
+      version: '3.0.24',
+    }));
+    assert.equal(updated.fromCache, false);
+    assert.equal(updated.isStale, false);
+    assert.equal(updated.data.version, '3.0.24');
+  });
+
+  it('erhält abgelaufenen Cache im Offline-Modus und liefert isStale: true', async () => {
+    let clock = 1_700_000_000_000;
+    const cache = createProviderCache({ filePath: cacheFile, now: () => clock });
+
+    await cache.getOrFetch('winget:show:git.git', async () => ({ name: 'Git', version: '2.55.0' }));
+
+    clock += DEFAULT_CACHE_TTL_MS + 86_400_000;
+    const offline = await cache.getOrFetch('winget:show:git.git', async () => {
+      throw new Error('Netzwerk nicht erreichbar');
+    });
+
+    assert.equal(offline.fromCache, true);
+    assert.equal(offline.isStale, true);
+    assert.equal(offline.data.version, '2.55.0');
+    assert.match(offline.error, /Netzwerk/);
   });
 });

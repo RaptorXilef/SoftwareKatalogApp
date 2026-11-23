@@ -1,92 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  buildAutoIdFolderName,
+  buildLinkedMetaObject,
+  inspectArchiveTargetCollision,
+  readExistingMetaSummary,
+  resolveAutoIdTargetDir,
+} from './archive-linker-core.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
-import { getConfig, isInsideTargetDir } from './config.js';
+import { getConfig } from './config.js';
 import { getProvider } from './providers/registry.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { downloadWebUpdate } from './web-updater.js';
 
-/**
- * Erzeugt aus einer Paket-ID (z. B. "VideoLAN.VLC") einen sicheren Ordnernamen für Modus `auto-id`.
- */
-export function buildAutoIdFolderName(packageId) {
-  const cleaned = String(packageId || '')
-    .trim()
-    .replace(/\.\.+/g, '.')
-    .replace(/[<>:"/\\|?*]+/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/^[._]+|[._]+$/g, '');
-  return cleaned || 'Package';
-}
-
-function readExistingMetaSummary(metaFilePath) {
-  if (!fs.existsSync(metaFilePath)) return null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(metaFilePath, 'utf-8'));
-    return {
-      name: raw.name || '',
-      packageManager: raw.packageManager || (raw.wingetId ? 'winget' : ''),
-      packageId: raw.packageId || raw.wingetId || '',
-      wingetId: raw.wingetId || '',
-      keepAllVersions: Boolean(raw.keepAllVersions),
-      raw,
-    };
-  } catch {
-    return null;
-  }
-}
+export { buildAutoIdFolderName };
 
 /**
  * Prüft vor dem Schreiben, ob der Zielordner im Archiv liegt und ob bereits `_metadata/` existiert.
  */
 export function checkArchiveTargetCollision(targetDir) {
-  if (!targetDir) {
-    return { valid: false, error: 'Kein Zielordner angegeben.' };
-  }
-
-  const resolvedDir = path.resolve(targetDir);
-  if (!isInsideTargetDir(resolvedDir)) {
-    return {
-      valid: false,
-      error: 'Sicherheitsverletzung: Zielordner liegt außerhalb des konfigurierten Archiv-Verzeichnisses.',
-    };
-  }
-
   const { absTargetPath } = getConfig();
-  const resolvedRoot = path.resolve(absTargetPath);
-  const isSameAsRoot =
-    process.platform === 'win32'
-      ? resolvedDir.toLowerCase() === resolvedRoot.toLowerCase()
-      : resolvedDir === resolvedRoot;
-  if (isSameAsRoot) {
-    return {
-      valid: false,
-      error: 'Bitte einen Unterordner innerhalb des Archivs wählen (nicht das Archiv-Stammverzeichnis selbst).',
-    };
-  }
-
-  const dirExists = fs.existsSync(resolvedDir);
-  const metaDir = path.join(resolvedDir, '_metadata');
-  const metaFile = path.join(metaDir, 'meta.json');
-  const metaDirExists = fs.existsSync(metaDir);
-  const metaFileExists = fs.existsSync(metaFile);
-  const existing = readExistingMetaSummary(metaFile);
-
-  return {
-    valid: true,
-    targetDir: resolvedDir,
-    dirExists,
-    hasMetadata: metaDirExists || metaFileExists,
-    existingMeta: existing
-      ? {
-          name: existing.name,
-          packageManager: existing.packageManager,
-          packageId: existing.packageId,
-          wingetId: existing.wingetId,
-          keepAllVersions: existing.keepAllVersions,
-        }
-      : null,
-  };
+  return inspectArchiveTargetCollision(targetDir, absTargetPath);
 }
 
 /**
@@ -111,16 +45,6 @@ export function findExistingArchiveLink(packageManager, packageId) {
       return itemPid === cleanId;
     }) || null
   );
-}
-
-function buildLinksObject(pkgMeta) {
-  if (pkgMeta?.links && !Array.isArray(pkgMeta.links) && typeof pkgMeta.links === 'object') {
-    return { ...pkgMeta.links };
-  }
-  const links = {};
-  if (pkgMeta?.homepage) links.Homepage = pkgMeta.homepage;
-  if (pkgMeta?.releaseNotesUrl) links.Changelog = pkgMeta.releaseNotesUrl;
-  return links;
 }
 
 /**
@@ -173,7 +97,7 @@ export async function linkPackageToArchive({
   if (targetDir) {
     resolvedTargetDir = path.resolve(targetDir);
   } else if (effectiveSaveMode === 'auto-id') {
-    resolvedTargetDir = path.join(cfg.absTargetPath, buildAutoIdFolderName(cleanPid));
+    resolvedTargetDir = resolveAutoIdTargetDir(cfg.absTargetPath, cleanPid);
   } else {
     return {
       success: false,
@@ -218,11 +142,6 @@ export async function linkPackageToArchive({
     }
   }
 
-  // Anzeigename != Ordnername: In meta.json steht zwingend der echte Softwarename
-  const realDisplayName = String(
-    softwareName || fetchedPkg?.name || collision.existingMeta?.name || cleanPid || path.basename(resolvedTargetDir)
-  ).trim();
-
   const metaDir = path.join(resolvedTargetDir, '_metadata');
   const metaFile = path.join(metaDir, 'meta.json');
   if (!fs.existsSync(metaDir)) {
@@ -230,54 +149,17 @@ export async function linkPackageToArchive({
   }
 
   const existingSummary = readExistingMetaSummary(metaFile);
-  let nextMeta;
-
-  if (normalizedMode === 'link' && existingSummary?.raw) {
-    nextMeta = {
-      ...existingSummary.raw,
-      name: existingSummary.raw.name || realDisplayName,
-    };
-    if (cleanPm && cleanPid) {
-      nextMeta.packageManager = cleanPm;
-      nextMeta.packageId = cleanPid;
-    }
-    if (cleanPm === 'winget' && cleanPid) {
-      nextMeta.wingetId = cleanPid;
-      if (!nextMeta.webSourceType || nextMeta.webSourceType === 'none') {
-        nextMeta.webSourceType = 'winget';
-      }
-    }
-    if (fetchedPkg?.version && !nextMeta.webVersion) {
-      nextMeta.webVersion = fetchedPkg.version;
-    }
-    if (nextMeta.keepAllVersions === undefined) {
-      nextMeta.keepAllVersions = Boolean(keepAllVersions);
-    }
-  } else {
-    nextMeta = {
-      name: realDisplayName,
-      softwareType: 'default',
-      category: '',
-      hiddenCategory: '',
-      tags: Array.isArray(fetchedPkg?.tags) ? fetchedPkg.tags.slice(0, 12) : [],
-      formats: [],
-      os: ['Windows 10', 'Windows 11'],
-      description: fetchedPkg?.description || fetchedPkg?.shortDescription || '',
-      searchNames: Array.isArray(metadata?.searchNames) ? metadata.searchNames : [],
-      installPaths: Array.isArray(metadata?.installPaths) ? metadata.installPaths : [],
-      autoPaths: [],
-      packageManager: cleanPm,
-      packageId: cleanPid,
-      wingetId: cleanPm === 'winget' ? cleanPid : '',
-      keepAllVersions: Boolean(keepAllVersions),
-      installMode: 'interactive',
-      silentArgs: '',
-      innoInfFile: '',
-      webSourceType: cleanPm === 'winget' && cleanPid ? 'winget' : 'none',
-      webVersion: fetchedPkg?.version || '',
-      links: buildLinksObject(fetchedPkg),
-    };
-  }
+  const nextMeta = buildLinkedMetaObject({
+    collisionMode: normalizedMode,
+    existingSummary,
+    packageManager: cleanPm,
+    packageId: cleanPid,
+    softwareName,
+    fetchedPkg,
+    metadata,
+    keepAllVersions,
+    resolvedTargetDir,
+  });
 
   fs.writeFileSync(metaFile, JSON.stringify(nextMeta, null, 2), 'utf-8');
 

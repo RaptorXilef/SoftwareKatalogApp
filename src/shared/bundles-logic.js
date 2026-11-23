@@ -300,12 +300,15 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
   }
 
   let status = 'missing';
+  let action = 'install';
   let statusLabel = '⬇️ Fehlt - installieren';
   if (isInstalled && isOutdated) {
     status = 'outdated';
+    action = 'update';
     statusLabel = '⬆️ Veraltet - aktualisieren';
   } else if (isInstalled) {
     status = 'up-to-date';
+    action = 'skip';
     statusLabel = '✅ Bereits aktuell - überspringen';
   }
 
@@ -342,6 +345,7 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
     key,
     name: normalizedItem.name || matchedPackage?.name || normalizedItem.packageId || normalizedItem.refId,
     status,
+    action,
     statusLabel,
     installedVersion,
     availableVersion,

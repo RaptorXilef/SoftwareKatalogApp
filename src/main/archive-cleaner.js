@@ -6,26 +6,17 @@ import {
   buildCleanupPlan,
   clampKeepVersions,
   formatBytes,
-  isCleanupCandidateFile,
 } from '../shared/archive-cleaner-logic.js';
+import {
+  moveFileSafe,
+  readLiveKeepAllVersions,
+  resolveUniqueArchiveDest,
+  scanArchiveFolderForCleanup,
+} from './archive-cleaner-core.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig, isInsideTargetDir } from './config.js';
 import { createJob } from './jobs.js';
 import { scanSingleFolder } from './scanner-bridge.js';
-
-function readLiveKeepAllVersions(folderPath, fallbackValue) {
-  const metaFile = path.join(folderPath, '_metadata', 'meta.json');
-  if (!fs.existsSync(metaFile)) return Boolean(fallbackValue);
-  try {
-    const raw = JSON.parse(fs.readFileSync(metaFile, 'utf-8'));
-    if (typeof raw.keepAllVersions === 'boolean') {
-      return raw.keepAllVersions;
-    }
-  } catch {
-    // Fallback verwenden
-  }
-  return Boolean(fallbackValue);
-}
 
 async function collectLiveArchiveProgramEntries() {
   const cfg = getConfig();
@@ -38,41 +29,15 @@ async function collectLiveArchiveProgramEntries() {
     const resolvedDir = path.resolve(item.path);
     if (!isInsideTargetDir(resolvedDir) || !fs.existsSync(resolvedDir)) continue;
 
-    // Zwingender Schutz für _last und keepAllVersions (frisch vom Dateisystem geprüft)
-    const hasLastDir = Boolean(item.hasPinnedLast) || fs.existsSync(path.join(resolvedDir, '_last'));
-    const keepAllVersions = readLiveKeepAllVersions(resolvedDir, item.keepAllVersions);
-
-    const files = [];
-    try {
-      const dirEntries = await fs.promises.readdir(resolvedDir, { withFileTypes: true });
-      for (const dirEntry of dirEntries) {
-        if (!dirEntry.isFile()) continue;
-        if (!isCleanupCandidateFile(dirEntry.name, autoExtensions)) continue;
-        const filePath = path.join(resolvedDir, dirEntry.name);
-        try {
-          const st = await fs.promises.stat(filePath);
-          files.push({
-            name: dirEntry.name,
-            filePath,
-            size: st.size,
-            mtimeMs: st.mtimeMs,
-          });
-        } catch {
-          // Datei zwischenzeitlich nicht lesbar
-        }
-      }
-    } catch {
-      // Ordner nicht lesbar
-    }
-
-    entries.push({
-      id: item.id,
-      name: item.name,
-      path: resolvedDir,
-      hasLastDir,
-      keepAllVersions,
-      files,
-    });
+    entries.push(
+      await scanArchiveFolderForCleanup(resolvedDir, {
+        id: item.id,
+        name: item.name,
+        autoExtensions,
+        hasPinnedLast: Boolean(item.hasPinnedLast),
+        keepAllVersions: Boolean(item.keepAllVersions),
+      })
+    );
   }
 
   return entries;
@@ -126,33 +91,6 @@ export async function setKeepAllVersions(itemPath, keepAllVersions = true) {
   } catch (e) {
     return { success: false, error: e.message };
   }
-}
-
-async function moveFileSafe(srcPath, destPath) {
-  try {
-    await fs.promises.rename(srcPath, destPath);
-  } catch (err) {
-    if (err.code === 'EXDEV') {
-      await fs.promises.copyFile(srcPath, destPath);
-      await fs.promises.unlink(srcPath);
-    } else {
-      throw err;
-    }
-  }
-}
-
-function resolveUniqueArchiveDest(archiveDir, fileName) {
-  const direct = path.join(archiveDir, fileName);
-  if (!fs.existsSync(direct)) return direct;
-
-  const parsed = path.parse(fileName);
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  let candidate = path.join(archiveDir, `${parsed.name}_${stamp}${parsed.ext}`);
-  let counter = 1;
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(archiveDir, `${parsed.name}_${stamp}_${counter++}${parsed.ext}`);
-  }
-  return candidate;
 }
 
 /**

@@ -174,7 +174,7 @@ export async function renderWingetMatcherModal() {
       <div class="modal-body matcher-body">
         ${
           scanRes.partial
-            ? '<div class="pkg-stale-notice">⚠️ Suche wurde vorzeitig abgebrochen – bereits gefundene Treffer werden angezeigt.</div>'
+            ? '<div class="pkg-stale-notice">⚠️ Suche wurde vorzeitig abgebrochen - bereits gefundene Treffer werden angezeigt.</div>'
             : ''
         }
 
