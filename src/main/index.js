@@ -288,7 +288,7 @@ function registerIpcHandlers() {
   ipcMain.handle('install-app-update', (_e, url, isPortable) => downloadAndInstallAppUpdate(url, isPortable));
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {

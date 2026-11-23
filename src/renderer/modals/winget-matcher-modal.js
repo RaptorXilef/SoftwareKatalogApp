@@ -1,7 +1,7 @@
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
-import { closeModal, triggerCatalogReload } from './index.js';
+import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeMatcherToken = 0;
 
@@ -19,6 +19,7 @@ export async function renderWingetMatcherModal() {
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
 
   const token = ++activeMatcherToken;
   state.currentModalId = null;

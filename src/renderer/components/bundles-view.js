@@ -126,6 +126,10 @@ export function renderBundlesView() {
   const selStart = document.activeElement?.selectionStart ?? null;
   const selEnd = document.activeElement?.selectionEnd ?? null;
 
+  const ipcNoticeHtml = state.bundlesIpcUnavailable
+    ? `<div class="discover-notice">⚠️ Die Bündel-Funktion im Hauptprozess ist noch nicht aktiv (alte Electron-Instanz läuft noch). Bitte beende alle laufenden Electron-Fenster und starte <code>npm run dev</code> bzw. die App einmal neu.</div>`
+    : '';
+
   container.innerHTML = `
     <div class="bundles-header">
       <div class="bundles-header-main">
@@ -148,6 +152,8 @@ export function renderBundlesView() {
         <span class="muted">${filtered.length} von ${state.bundles.length} Bündel(n)</span>
       </div>
     </div>
+
+    ${ipcNoticeHtml}
 
     ${
       filtered.length === 0

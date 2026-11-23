@@ -20,9 +20,23 @@ export async function triggerCatalogReload(opts) {
   await reloadHandler(opts);
 }
 
+export function resetModalContent() {
+  const content = document.getElementById('modalContent');
+  if (!content) return;
+  content.onclick = null;
+  content.onchange = null;
+  content.oninput = null;
+  content.ondragstart = null;
+  content.ondragover = null;
+  content.ondragleave = null;
+  content.ondrop = null;
+  content.ondragend = null;
+}
+
 export function closeModal() {
   const overlay = document.getElementById('modalOverlay');
   const content = document.getElementById('modalContent');
+  resetModalContent();
   if (overlay) overlay.hidden = true;
   if (content) content.innerHTML = '';
   state.currentModalId = null;

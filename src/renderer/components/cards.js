@@ -106,7 +106,7 @@ function matchesTabAndFilter(item, st) {
 
   if (state.filterMode === 'any-update' && !st.hasWebUpdate && !st.hasArchiveUpdate) return false;
   if (state.filterMode === 'webupdate' && !st.hasWebUpdate) return false;
-  if ((state.filterMode === 'archiveupdate' || state.filterMode === 'nasupdate') && !st.hasArchiveUpdate) return false;
+  if (state.filterMode === 'archiveupdate' && !st.hasArchiveUpdate) return false;
   if (state.filterMode === 'installed' && !item.isInstalled) return false;
   if (state.filterMode === 'missing-path') {
     const isStandard = !item.softwareType || item.softwareType === 'default';
@@ -170,7 +170,7 @@ function getFilteredAndSortedEntries() {
       const rank = (s) => (s.hasWebUpdate ? 2 : s.hasArchiveUpdate ? 1 : 0);
       const diff = rank(b.st) - rank(a.st);
       if (diff !== 0) return diff;
-    } else if (sortMode === 'webarchive' || sortMode === 'webnas') {
+    } else if (sortMode === 'webarchive') {
       if (a.st.hasWebUpdate !== b.st.hasWebUpdate) return a.st.hasWebUpdate ? -1 : 1;
     } else if (sortMode === 'update') {
       if (a.st.hasArchiveUpdate !== b.st.hasArchiveUpdate) return a.st.hasArchiveUpdate ? -1 : 1;
@@ -182,7 +182,7 @@ function getFilteredAndSortedEntries() {
       return (b.item.updatedAt || 0) - (a.item.updatedAt || 0);
     }
 
-    if ((sortMode === 'webarchive' || sortMode === 'webnas') && a.st.webVersion && b.st.webVersion) {
+    if (sortMode === 'webarchive' && a.st.webVersion && b.st.webVersion) {
       const cmp = compareVersions(b.st.webVersion, a.st.webVersion, depth);
       if (cmp !== 0) return cmp;
     }

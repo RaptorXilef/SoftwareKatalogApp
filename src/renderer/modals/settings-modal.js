@@ -2,7 +2,7 @@ import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
-import { closeModal, triggerCatalogReload } from './index.js';
+import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 export async function renderSettingsModal() {
   state.currentModalId = null;
@@ -11,6 +11,7 @@ export async function renderSettingsModal() {
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
 
   const [s, info, providersInfo, cacheStats] = await Promise.all([
     window.electronAPI.getSettings(),

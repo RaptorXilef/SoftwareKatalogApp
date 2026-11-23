@@ -43,6 +43,7 @@ export const state = {
   selectedUpdateIds: new Set(),
   isBatchActionRunning: false,
   isBundleInstallRunning: false,
+  bundlesIpcUnavailable: false,
 };
 
 export function rebuildUnifiedPackages() {
@@ -167,11 +168,26 @@ export async function toggleFavorite(id) {
 }
 
 export async function refreshBundles() {
+  if (typeof window.electronAPI?.loadBundles !== 'function') {
+    state.bundlesIpcUnavailable = true;
+    state.bundles = [];
+    console.warn('Bündel-API nicht verfügbar – bitte Electron-App bzw. Dev-Server einmal neu starten.');
+    return;
+  }
+
   try {
     const res = await window.electronAPI.loadBundles();
+    state.bundlesIpcUnavailable = false;
     state.bundles = Array.isArray(res?.bundles) ? res.bundles : [];
   } catch (err) {
-    console.error('Fehler beim Laden der Bündel:', err);
+    const msg = String(err?.message || err || '');
+    if (/No handler registered/i.test(msg)) {
+      state.bundlesIpcUnavailable = true;
+      console.warn('Bündel-IPC-Handler noch nicht geladen – bitte Electron-App / npm run dev einmal neu starten.');
+    } else {
+      state.bundlesIpcUnavailable = false;
+      console.error('Fehler beim Laden der Bündel:', err);
+    }
     state.bundles = [];
   }
 }

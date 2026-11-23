@@ -10,7 +10,7 @@ import { scoreCatalogItem } from '../../shared/search.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
-import { closeModal, triggerCatalogReload } from './index.js';
+import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeEditorToken = 0;
 
@@ -53,6 +53,7 @@ export function renderBundleEditorModal({
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
 
   const token = ++activeEditorToken;
   const isSnapshotMode = Boolean(snapshotDraft);
@@ -391,7 +392,7 @@ export function renderBundleEditorModal({
           <div class="form-field">
             <span>Icon</span>
             <div class="bundle-icon-row">
-              <input type="text" id="bundleIconInput" class="bundle-icon-input" value="${escapeHTML(draftIcon)}" maxlength="4">
+              <input type="text" id="bundleIconInput" class="bundle-icon-input" value="${escapeHTML(draftIcon)}" maxlength="8">
               <div class="bundle-icon-presets">
                 ${BUNDLE_ICON_PRESETS.map(
                   (em) =>
@@ -554,14 +555,6 @@ export function renderBundleEditorModal({
     const addBtn = e.target.closest('[data-editor-add-idx]');
     if (addBtn) {
       const idx = parseInt(addBtn.dataset.editorAddIdx, 10);
-      const src = addBtn.dataset.editorAddSource;
-      const list =
-        src === 'archive'
-          ? buildArchiveQuickMatches()
-          : remoteWingetResults.map((pkg) => ({
-              editorItem: toEditorItemFromProvider({ ...pkg, providerId: 'winget' }),
-            }));
-      // Note: data-editor-add-idx is index within combined array!
       const combined = [
         ...buildArchiveQuickMatches(),
         ...(searchSources.has('winget')
@@ -570,7 +563,6 @@ export function renderBundleEditorModal({
             }))
           : []),
       ];
-      void list;
       const chosen = combined[idx];
       if (chosen?.editorItem) {
         addEditorItem(chosen.editorItem);

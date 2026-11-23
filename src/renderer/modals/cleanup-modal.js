@@ -3,7 +3,7 @@ import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
-import { closeModal, triggerCatalogReload } from './index.js';
+import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeCleanupToken = 0;
 
@@ -42,6 +42,7 @@ export async function renderCleanupModal() {
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
 
   const token = ++activeCleanupToken;
   state.currentModalId = null;

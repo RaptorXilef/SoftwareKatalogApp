@@ -1,9 +1,10 @@
 import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-logic.js';
+import { renderBundlesView } from '../components/bundles-view.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './archive-target-modal.js';
-import { closeModal, triggerCatalogReload } from './index.js';
+import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeRunnerToken = 0;
 
@@ -24,6 +25,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     return;
   }
 
+  resetModalContent();
   const token = ++activeRunnerToken;
   state.currentModalId = null;
   state.isEditModalOpen = false;
@@ -315,6 +317,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       isStarting = true;
       state.isBundleInstallRunning = true;
       closeModal();
+      if (state.activeTab === 'bundles') renderBundlesView();
       showToast(`Starte Bündel "${bundle.name}" (${selectedEntries.length} Paket(e))...`, { type: 'info' });
 
       try {
@@ -329,6 +332,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
           }
         );
 
+        state.isBundleInstallRunning = false;
         await triggerCatalogReload({ rescanInstalled: true });
 
         if (res?.alreadyRunning) {
@@ -346,6 +350,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
         }
       } finally {
         state.isBundleInstallRunning = false;
+        if (state.activeTab === 'bundles') renderBundlesView();
       }
     }
   };

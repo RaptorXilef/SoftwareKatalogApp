@@ -1,5 +1,5 @@
 import { getInstallModeBadge } from '../../shared/installer-logic.js';
-import { buildRemotePackageItem } from '../../shared/unified-packages.js';
+import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
@@ -7,7 +7,7 @@ import { getBaseName, getItemById, getItemStatus, isItemNew, state } from '../st
 import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } from './archive-target-modal.js';
-import { closeModal, openEditModal, triggerCatalogReload } from './index.js';
+import { closeModal, openEditModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 const SOURCE_LABELS = {
   winget: 'Winget',
@@ -50,12 +50,6 @@ function getEffectivePackageManager(item) {
 
 function getEffectivePackageId(item) {
   return String(item.packageId || item.wingetId || '').trim();
-}
-
-function canDownloadOnline(item) {
-  if (item.webSourceType === 'winget' && getEffectivePackageId(item)) return true;
-  if (item.webSourceType === 'github' && item.webVersionUrl) return true;
-  return Boolean(item.downloadUrl);
 }
 
 function isCanUninstall(item, effectivePm, effectivePkgId) {
@@ -174,8 +168,9 @@ function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive 
   return `<div class="detail-hero-bar">${buttons.join('')}</div>`;
 }
 
-function buildArchiveSaveChoiceHtml(item, { effectivePkgId, isWingetPkg, matchedArchive }) {
-  if (!isWingetPkg || item.inArchive || matchedArchive) return '';
+function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive }) {
+  const hasProviderInstallBtn = item.origin === 'remote' || (item.origin === 'pc' && st.hasWebUpdate);
+  if (!hasProviderInstallBtn || !isWingetPkg || item.inArchive || matchedArchive) return '';
 
   const saveMode = state.settings.archiveSaveMode || 'ask';
   const checked = saveMode === 'ask' || saveMode === 'auto-id';
@@ -569,6 +564,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
 
   const renderToken = ++activeRenderToken;
   state.currentModalId = item.id;
@@ -701,7 +697,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         ${buildVersionGridHtml(item, st, { matchedArchive })}
         ${postDownloadBanner}
         ${buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive })}
-        ${buildArchiveSaveChoiceHtml(item, { effectivePkgId, isWingetPkg, matchedArchive })}
+        ${buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive })}
         ${pinnedNotice}
         ${packageProfileHtml}
         ${buildCustomMetaSectionHtml(item, hasPackageProfile)}

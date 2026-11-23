@@ -1,8 +1,13 @@
-import { detectAdwareSignals, normalizeInstallMode, sanitizeInnoInfFileName } from '../../shared/installer-logic.js';
+import {
+  detectAdwareSignals,
+  normalizeInstallMode,
+  sanitizeInnoInfFileName,
+  sanitizeSilentArgs,
+} from '../../shared/installer-logic.js';
 import { showToast } from '../components/toast.js';
-import { getBaseName, getCatalogItemById, state } from '../state.js';
+import { getBaseName, getCatalogItemById, getItemById, state } from '../state.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
-import { openDetailModal, triggerCatalogReload } from './index.js';
+import { openDetailModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 function getInstallModeDescription(mode) {
   if (mode === 'silent') {
@@ -32,6 +37,10 @@ export function renderEditModal(id, initialTab = 'general') {
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
+  resetModalContent();
+
+  const unifiedItem = getItemById(id);
+  const itemPublisher = unifiedItem?.publisher || item.publisher || '';
 
   // Lokaler Arbeitszustand für Pfade & Quelle (bleibt beim Tab-Wechsel erhalten)
   const draftPaths = [
@@ -49,7 +58,7 @@ export function renderEditModal(id, initialTab = 'general') {
     name: item.name,
     fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
     packageId: initialWingetId || item.packageId || '',
-    publisher: item.publisher || '',
+    publisher: itemPublisher,
   });
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
   const cleanDesc = sanitizeRichHtml(item.description || '');
@@ -457,6 +466,29 @@ export function renderEditModal(id, initialTab = 'general') {
     return window.electronAPI.selectFile([{ name: 'Installer (.exe, .msi)', extensions: ['exe', 'msi'] }], true);
   };
 
+  const refreshAdwareBanner = () => {
+    const signal = detectAdwareSignals({
+      name: modal.querySelector('#editName')?.value.trim() || item.name,
+      fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
+      packageId: modal.querySelector('#editWingetId')?.value.trim() || item.packageId || '',
+      publisher: itemPublisher,
+    });
+    const warnBox = modal.querySelector('#adwareWarningBox');
+    const warnReason = modal.querySelector('#adwareWarningReason');
+    const applyBtn = modal.querySelector('#btnApplyAdwareProtection');
+    if (signal.flagged) {
+      if (warnReason) warnReason.textContent = signal.reason;
+      if (warnBox) warnBox.hidden = false;
+      if (applyBtn) applyBtn.hidden = currentInstallMode === 'interactive-required';
+    } else if (warnBox) {
+      warnBox.hidden = true;
+    }
+  };
+
+  modal.querySelector('#editInnoInfFile')?.addEventListener('input', updateInnoInfStatus);
+  modal.querySelector('#editName')?.addEventListener('input', refreshAdwareBanner);
+  modal.querySelector('#editWingetId')?.addEventListener('input', refreshAdwareBanner);
+
   renderPathList();
   renderMediaSection();
   updateInnoInfStatus();
@@ -574,6 +606,7 @@ export function renderEditModal(id, initialTab = 'general') {
         modal.querySelector('#editWebVersion').value = wgPick.dataset.wingetVer;
       }
       modal.querySelector('#wingetResults').hidden = true;
+      refreshAdwareBanner();
       showToast(`Winget-ID "${wgPick.dataset.wingetPick}" übernommen.`, { type: 'success' });
       return;
     }
@@ -866,7 +899,7 @@ export function renderEditModal(id, initialTab = 'general') {
         filePath: targetFile,
         name: modal.querySelector('#editName').value.trim() || item.name,
         packageId: modal.querySelector('#editWingetId')?.value.trim() || item.packageId || '',
-        publisher: item.publisher || '',
+        publisher: itemPublisher,
       });
 
       actionBtn.disabled = false;
@@ -951,6 +984,7 @@ export function renderEditModal(id, initialTab = 'general') {
       } else if (res?.canceled) {
         showToast('Testlauf wurde abgebrochen.', { type: 'info' });
       } else if (res?.success) {
+        await triggerCatalogReload({ rescanInstalled: true });
         const msg = res.adwareProtected
           ? 'Testlauf im Adware-Schutz (Immer Interaktiv) abgeschlossen – Silent-Parameter wurden ignoriert.'
           : res.effectiveSilent
@@ -1227,7 +1261,7 @@ export function renderEditModal(id, initialTab = 'general') {
         autoPaths: draftPaths.filter((p) => p.origin === 'auto').map((p) => p.path),
         installPaths: draftPaths.filter((p) => p.origin === 'manual').map((p) => p.path),
         installMode: currentInstallMode,
-        silentArgs: modal.querySelector('#editSilentArgs')?.value.trim() || '',
+        silentArgs: sanitizeSilentArgs(modal.querySelector('#editSilentArgs')?.value || ''),
         innoInfFile: sanitizeInnoInfFileName(modal.querySelector('#editInnoInfFile')?.value.trim() || ''),
         webSourceType: currentSourceType,
         packageManager: nextPackageManager,
