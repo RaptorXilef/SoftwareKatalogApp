@@ -445,10 +445,10 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
   const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${path.basename(sourcePath)}`);
 
   try {
-    job.update(15, 'Kopiere Setup-Datei vom NAS in lokalen Temp-Ordner...');
+    job.update(15, 'Kopiere Setup-Datei aus dem Archiv in lokalen Temp-Ordner...');
     await fs.promises.copyFile(sourcePath, tempPath);
 
-    job.update(null, 'Installer läuft – bitte Setup-Assistent abschließen...');
+    job.update(null, 'Installer läuft - bitte Setup-Assistent abschließen...');
     const safeTemp = tempPath.replace(/'/g, "''");
 
     const launchScript =
@@ -513,7 +513,7 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
 
     if (exitCode === 0 || exitCode === 3010) {
       const rebootHint = exitCode === 3010 ? ' (Neustart empfohlen)' : '';
-      job.finish('done', `Setup beendet${rebootHint} – neue Version noch nicht erkannt (läuft ggf. im Hintergrund).`, {
+      job.finish('done', `Setup beendet${rebootHint} - neue Version noch nicht erkannt (läuft ggf. im Hintergrund).`, {
         autoRemoveMs: 0, // Bleibt sichtbar mit Aktion!
         action: { label: 'Status erneut prüfen', type: 'recheck-local', itemId },
       });
@@ -879,11 +879,11 @@ export async function uninstallSoftware({
 
       if (!res.success && !res.canceled && regCommand) {
         method = 'registry-fallback';
-        job.update(null, 'Winget fehlgeschlagen – starte Registry-Deinstaller...');
+        job.update(null, 'Winget fehlgeschlagen - starte Registry-Deinstaller...');
         res = await runRegistryUninstall(regCommand, silent);
       }
     } else {
-      job.update(null, 'Deinstallationsprogramm läuft – bitte abschließen...');
+      job.update(null, 'Deinstallationsprogramm läuft - bitte abschließen...');
       res = await runRegistryUninstall(regCommand, silent);
     }
 

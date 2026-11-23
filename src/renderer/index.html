@@ -14,7 +14,7 @@
   <div id="dropOverlay" class="drop-overlay" hidden>
     <div class="drop-overlay-box">
       <h2>Ordner hier ablegen zum Hinzufügen</h2>
-      <p>Legt automatisch einen neuen Katalog-Eintrag im Software-Verzeichnis an</p>
+      <p>Legt automatisch einen neuen Archiv-Eintrag im Software-Verzeichnis an</p>
     </div>
   </div>
 
@@ -34,11 +34,34 @@
   <div id="legendPopover" class="popover legend-popover" hidden>
     <h4>Farben & Status (Priorität von oben nach unten)</h4>
     <div class="legend-list">
-      <div class="legend-row"><span class="status-swatch is-webupdate"></span><div><strong>Web-Update</strong> – Neuere Version online verfügbar (höchste Priorität)</div></div>
-      <div class="legend-row"><span class="status-swatch is-update"></span><div><strong>Archiv-Update</strong> – Neuere Version auf dem NAS als auf diesem PC</div></div>
-      <div class="legend-row"><span class="status-swatch is-installed"></span><div><strong>Aktuell / Installiert</strong> – Auf diesem PC installiert</div></div>
-      <div class="legend-row"><span class="status-swatch is-newer"></span><div><strong>PC neuer</strong> – Lokale Version ist neuer als im Archiv</div></div>
+      <div class="legend-row"><span class="status-swatch is-webupdate"></span><div><strong>Web-Update</strong> - Neuere Version online verfügbar (höchste Priorität)</div></div>
+      <div class="legend-row"><span class="status-swatch is-update"></span><div><strong>Archiv-Update</strong> - Neuere Version im Archiv als auf diesem PC</div></div>
+      <div class="legend-row"><span class="status-swatch is-newer"></span><div><strong>PC neuer</strong> - Lokale Version ist neuer als im Archiv</div></div>
+      <div class="legend-row"><span class="status-swatch is-installed"></span><div><strong>Aktuell / Installiert</strong> - Auf diesem PC installiert</div></div>
     </div>
+  </div>
+
+  <!-- Hauptnavigation mit 5 Tabs & Live-Zählern -->
+  <div class="main-nav" id="mainNav" role="tablist" aria-label="Hauptnavigation">
+    <button type="button" class="nav-tab" role="tab" data-main-tab="updates" aria-selected="false">
+      <span class="nav-tab-label">⬆️ Updates</span>
+      <span class="nav-count" id="navCountUpdates">0</span>
+    </button>
+    <button type="button" class="nav-tab" role="tab" data-main-tab="installed" aria-selected="false">
+      <span class="nav-tab-label">💻 Installiert</span>
+      <span class="nav-count" id="navCountInstalled">0</span>
+    </button>
+    <button type="button" class="nav-tab active" role="tab" data-main-tab="archive" aria-selected="true">
+      <span class="nav-tab-label">🗄️ Archiv</span>
+      <span class="nav-count" id="navCountArchive">0</span>
+    </button>
+    <button type="button" class="nav-tab" role="tab" data-main-tab="bundles" aria-selected="false">
+      <span class="nav-tab-label">📦 Bündel</span>
+      <span class="nav-count" id="navCountBundles">0</span>
+    </button>
+    <button type="button" class="nav-tab" role="tab" data-main-tab="discover" aria-selected="false">
+      <span class="nav-tab-label">🛍️ Neu installieren</span>
+    </button>
   </div>
 
   <section class="toolbar" id="mainToolbar">
@@ -49,20 +72,20 @@
       </div>
 
       <select id="sortSelect" class="toolbar-select" title="Sortierung">
-        <option value="az">Sortieren: A – Z</option>
+        <option value="az">Sortieren: A - Z</option>
         <option value="updates">Sortieren: Updates zuerst</option>
-        <option value="webnas">Sortieren: Web neuer als NAS</option>
-        <option value="update">Sortieren: NAS neuer als PC</option>
-        <option value="installed">Sortieren: Auf PC installiert</option>
-        <option value="newest">Sortieren: Zuletzt hinzugefügt</option>
-        <option value="updated">Sortieren: Zuletzt aktualisiert</option>
+        <option value="webarchive">Sortieren: Web neuer als Archiv</option>
+        <option value="update">Sortieren: Archiv neuer als PC</option>
+        <option value="installed" data-archive-only="true">Sortieren: Auf PC installiert</option>
+        <option value="newest" data-archive-only="true">Sortieren: Zuletzt hinzugefügt</option>
+        <option value="updated" data-archive-only="true">Sortieren: Zuletzt aktualisiert</option>
       </select>
 
       <select id="filterSelect" class="toolbar-select" title="Status & Wartungsfilter">
         <option value="all">Filter: Alle Programme</option>
         <option value="any-update">Nur mit Updates (Online & Archiv)</option>
         <option value="webupdate">Nur Online-Updates</option>
-        <option value="nasupdate">Nur Archiv-Updates</option>
+        <option value="archiveupdate">Nur Archiv-Updates</option>
         <option value="installed">Nur installierte Programme</option>
         <optgroup label="Wartung & Einrichtung">
           <option value="missing-path">Ohne PC-Pfad</option>
@@ -72,14 +95,14 @@
 
       <!-- Die 3 klaren Hauptaktionen (können parallel laufen!) -->
       <div class="toolbar-checks">
-        <button type="button" id="btnCheckArchive" class="btn btn-archive" title="Prüft das NAS/Archiv auf neue Ordner und geänderte Setup-Dateien">
+        <button type="button" id="btnCheckArchive" class="btn btn-archive" title="Prüft das Archiv auf neue Ordner und geänderte Setup-Dateien">
           🔄 Archiv prüfen
         </button>
         <button type="button" id="btnCheckOnline" class="btn btn-online" title="Prüft im Internet (GitHub, Winget, Web) nach neueren Versionen">
           🌐 Online-Updates
         </button>
-        <button type="button" id="btnCheckLocal" class="btn btn-local" title="Liest die aktuell installierten Versionen auf diesem PC aus">
-          💻 Installierte prüfen
+        <button type="button" id="btnCheckLocal" class="btn btn-local" title="Scant installierte PC-Programme (Winget & Registry) und lokale Versionen">
+          💻 PC prüfen
         </button>
 
         <!-- Kompaktes Admin-Menü für seltene Aktionen -->
@@ -101,17 +124,42 @@
       </div>
     </div>
 
-    <!-- Parallele Fortschrittsbalken (erscheinen untereinander, sobald 1+ Jobs laufen) -->
-    <div id="jobsContainer" class="jobs-container" hidden></div>
+    <!-- Herkunfts-Filter für Updates & Installiert -->
+    <div id="originFilterBar" class="origin-filter-bar" hidden></div>
 
-    <!-- Einklappbare Kategorien -->
+    <!-- Einklappbare Kategorien (nur im Archiv-Tab) -->
     <details id="tagsDetails" class="tags-drawer">
       <summary>Kategorien & Tags</summary>
       <div class="tags-list" id="tagContainer"></div>
     </details>
   </section>
 
+  <!-- Parallele Fortschrittsbalken (erscheinen tab-übergreifend, sobald 1+ Jobs laufen) -->
+  <div id="jobsContainer" class="jobs-container" hidden></div>
+
   <main class="catalog-grid" id="grid"></main>
+
+  <!-- Platzhalter für Schritt F (Bündel) -->
+  <section class="bundles-view" id="bundlesView" hidden></section>
+
+  <!-- Neu installieren (Provider-Suche) -->
+  <section class="discover-view" id="discoverView" hidden>
+    <div class="discover-search-panel">
+      <div class="discover-search-row">
+        <div class="discover-search-box">
+          <input type="text" id="discoverSearchInput" placeholder="Neue Software in Winget & Archiv suchen (Strg+F)..." autocomplete="off">
+          <button type="button" id="clearDiscoverSearchBtn" class="clear-btn" title="Suche leeren" hidden>✕</button>
+        </div>
+        <button type="button" id="btnDiscoverSearch" class="btn btn-primary">🔎 Suchen</button>
+      </div>
+      <div class="discover-sources-row">
+        <span class="discover-sources-label">Quellen:</span>
+        <div id="discoverSourceChips" class="discover-source-chips"></div>
+      </div>
+    </div>
+    <div id="discoverNotice" class="discover-notice" hidden></div>
+    <div id="discoverResults" class="discover-results"></div>
+  </section>
 
   <!-- Modal Container -->
   <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" hidden>

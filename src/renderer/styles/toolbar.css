@@ -41,6 +41,104 @@
   cursor: pointer;
 }
 
+.main-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+
+  &:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  &.active {
+    background: var(--surface-elevated);
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  }
+}
+
+.nav-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+
+  &.has-updates {
+    background: color-mix(in srgb, var(--color-web) 22%, transparent);
+    color: var(--color-web);
+  }
+}
+
+.nav-tab.active .nav-count {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+
+  &.has-updates {
+    background: color-mix(in srgb, var(--color-web) 24%, transparent);
+    color: var(--color-web);
+  }
+}
+
+.origin-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.origin-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  &.active {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+}
+
 .toolbar {
   position: sticky;
   top: 0;
@@ -207,7 +305,7 @@
     background: var(--color-web);
   }
   &.is-update {
-    background: var(--color-nas);
+    background: var(--color-archive);
   }
   &.is-installed {
     background: var(--color-ok);

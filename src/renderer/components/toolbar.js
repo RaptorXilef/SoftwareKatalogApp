@@ -1,5 +1,105 @@
-import { state } from '../state.js';
+import {
+  getActiveOriginFilter,
+  getActiveSortMode,
+  getTabCounts,
+  setActiveOriginFilter,
+  setActiveSortMode,
+  state,
+} from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
+
+const ORIGIN_FILTERS_BY_TAB = {
+  updates: [
+    { id: 'all', label: 'Alle' },
+    { id: 'in-archive', label: 'Im Archiv' },
+    { id: 'not-in-archive', label: 'Nicht im Archiv' },
+  ],
+  installed: [
+    { id: 'all', label: 'Alle' },
+    { id: 'in-archive', label: 'Im Archiv' },
+    { id: 'not-in-archive', label: 'Nicht im Archiv' },
+    { id: 'winget', label: 'Winget-verwaltet' },
+  ],
+};
+
+export function updateNavCounts() {
+  const counts = getTabCounts();
+  const updatesEl = document.getElementById('navCountUpdates');
+  const installedEl = document.getElementById('navCountInstalled');
+  const archiveEl = document.getElementById('navCountArchive');
+  const bundlesEl = document.getElementById('navCountBundles');
+
+  if (updatesEl) {
+    updatesEl.textContent = String(counts.updates);
+    updatesEl.classList.toggle('has-updates', counts.updates > 0);
+  }
+  if (installedEl) installedEl.textContent = String(counts.installed);
+  if (archiveEl) archiveEl.textContent = String(counts.archive);
+  if (bundlesEl) bundlesEl.textContent = String(counts.bundles);
+}
+
+export function renderOriginFilterBar() {
+  const bar = document.getElementById('originFilterBar');
+  if (!bar) return;
+
+  const options = ORIGIN_FILTERS_BY_TAB[state.activeTab];
+  if (!options) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+
+  const active = getActiveOriginFilter();
+  bar.hidden = false;
+  bar.innerHTML = options
+    .map(
+      (opt) =>
+        `<button type="button" class="origin-chip ${active === opt.id ? 'active' : ''}" data-origin-filter="${escapeHTML(opt.id)}">${escapeHTML(opt.label)}</button>`
+    )
+    .join('');
+}
+
+export function syncToolbarForTab() {
+  const tab = state.activeTab;
+  const isCatalogView = tab === 'updates' || tab === 'installed' || tab === 'archive';
+
+  document.querySelectorAll('#mainNav .nav-tab').forEach((btn) => {
+    const isActive = btn.dataset.mainTab === tab;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  const mainToolbar = document.getElementById('mainToolbar');
+  if (mainToolbar) mainToolbar.hidden = !isCatalogView;
+
+  const filterSelect = document.getElementById('filterSelect');
+  if (filterSelect) filterSelect.hidden = tab !== 'archive';
+
+  const tagsDetails = document.getElementById('tagsDetails');
+  if (tagsDetails) tagsDetails.hidden = tab !== 'archive';
+
+  const sortSelect = document.getElementById('sortSelect');
+  if (sortSelect) {
+    sortSelect.querySelectorAll('option[data-archive-only="true"]').forEach((opt) => {
+      opt.hidden = tab !== 'archive';
+    });
+    const mode = getActiveSortMode();
+    sortSelect.value = mode;
+    if (sortSelect.selectedOptions[0]?.hidden) {
+      setActiveSortMode('az');
+      sortSelect.value = 'az';
+    }
+  }
+
+  renderOriginFilterBar();
+
+  const grid = document.getElementById('grid');
+  const bundlesView = document.getElementById('bundlesView');
+  const discoverView = document.getElementById('discoverView');
+  if (grid) grid.hidden = !isCatalogView;
+  if (bundlesView) bundlesView.hidden = tab !== 'bundles';
+  if (discoverView) discoverView.hidden = tab !== 'discover';
+}
 
 export function renderTagChips() {
   const container = document.getElementById('tagContainer');
@@ -28,10 +128,12 @@ export function renderTagChips() {
 }
 
 export function initToolbar(handlers) {
+  const mainNav = document.getElementById('mainNav');
   const searchInput = document.getElementById('searchInput');
   const clearSearchBtn = document.getElementById('clearSearchBtn');
   const sortSelect = document.getElementById('sortSelect');
   const filterSelect = document.getElementById('filterSelect');
+  const originFilterBar = document.getElementById('originFilterBar');
   const tagContainer = document.getElementById('tagContainer');
   const moreBtn = document.getElementById('btnMoreActions');
   const moreMenu = document.getElementById('moreActionsMenu');
@@ -42,6 +144,15 @@ export function initToolbar(handlers) {
     if (moreMenu) moreMenu.hidden = true;
     if (legendPopover) legendPopover.hidden = true;
   };
+
+  mainNav?.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('[data-main-tab]');
+    if (!tabBtn) return;
+    const nextTab = tabBtn.dataset.mainTab;
+    if (!nextTab || nextTab === state.activeTab) return;
+    closePopovers();
+    handlers.onTabChange?.(nextTab);
+  });
 
   searchInput?.addEventListener('input', () => {
     state.searchQuery = searchInput.value;
@@ -59,12 +170,20 @@ export function initToolbar(handlers) {
   });
 
   sortSelect?.addEventListener('change', () => {
-    state.sortMode = sortSelect.value;
+    setActiveSortMode(sortSelect.value);
     handlers.onFilterChange();
   });
 
   filterSelect?.addEventListener('change', () => {
     state.filterMode = filterSelect.value;
+    handlers.onFilterChange();
+  });
+
+  originFilterBar?.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-origin-filter]');
+    if (!chip) return;
+    setActiveOriginFilter(chip.dataset.originFilter);
+    renderOriginFilterBar();
     handlers.onFilterChange();
   });
 
@@ -129,4 +248,6 @@ export function initToolbar(handlers) {
     const tb = document.getElementById('mainToolbar');
     tb?.classList.toggle('shrink', window.scrollY > 40);
   });
+
+  syncToolbarForTab();
 }

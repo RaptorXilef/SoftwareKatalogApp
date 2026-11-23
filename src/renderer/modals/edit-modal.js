@@ -1,5 +1,5 @@
 import { showToast } from '../components/toast.js';
-import { getBaseName, getItemById, state } from '../state.js';
+import { getBaseName, getCatalogItemById, state } from '../state.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { openDetailModal, triggerCatalogReload } from './index.js';
 
@@ -12,7 +12,7 @@ function detectInitialSourceType(item) {
 }
 
 export function renderEditModal(id, initialTab = 'general') {
-  const item = getItemById(id);
+  const item = getCatalogItemById(id);
   if (!item) return;
 
   state.currentModalId = id;
@@ -303,7 +303,7 @@ export function renderEditModal(id, initialTab = 'general') {
   };
 
   const renderMediaSection = () => {
-    const freshItem = getItemById(id) || item;
+    const freshItem = getCatalogItemById(id) || item;
     const iconBox = modal.querySelector('#editIconPreview');
     const galleryEl = modal.querySelector('#editMediaGallery');
     const bust = Date.now();

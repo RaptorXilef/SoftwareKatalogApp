@@ -4,7 +4,7 @@ import { showToast } from '../components/toast.js';
 import { getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
 import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
-import { closeModal, openEditModal, triggerCatalogReload } from './index.js';
+import { closeModal, openArchiveLinkModal, openEditModal, triggerCatalogReload } from './index.js';
 
 const SOURCE_LABELS = {
   winget: 'Winget',
@@ -34,16 +34,16 @@ function buildHeroAction(item, st) {
       action: 'web-download',
       label: `⬇️ Update v${st.webVersion} ins Archiv laden`,
       cls: 'btn-online',
-      hint: 'Lädt die neuste Version aus dem Internet direkt in dein NAS-Archiv.',
+      hint: 'Lädt die neuste Version aus dem Internet direkt in dein Archiv.',
     };
   }
 
-  if (st.hasNasUpdate && firstFile) {
+  if (st.hasArchiveUpdate && firstFile) {
     return {
       action: 'install-file',
       file: firstFile,
-      version: st.nasVersion,
-      label: `⬆️ Jetzt aktualisieren (v${st.nasVersion})`,
+      version: st.archiveVersion,
+      label: `⬆️ Jetzt aktualisieren (v${st.archiveVersion})`,
       cls: 'btn-archive',
       hint: 'Kopiert das Setup lokal, startet es und prüft danach die neue Version.',
     };
@@ -53,8 +53,8 @@ function buildHeroAction(item, st) {
     return {
       action: 'install-file',
       file: firstFile,
-      version: st.nasVersion,
-      label: st.nasVersion ? `▶️ Installieren (v${st.nasVersion})` : '▶️ Setup starten',
+      version: st.archiveVersion,
+      label: st.archiveVersion ? `▶️ Installieren (v${st.archiveVersion})` : '▶️ Setup starten',
       cls: 'btn-primary',
       hint: 'Startet die aktuelle Setup-Datei aus dem Archiv.',
     };
@@ -72,12 +72,235 @@ function buildHeroAction(item, st) {
   return null;
 }
 
+function renderPcDetailModal(item) {
+  const overlay = document.getElementById('modalOverlay');
+  const modal = document.getElementById('modalContent');
+  if (!overlay || !modal) return;
+
+  const st = getItemStatus(item);
+  const statusBadge = STATUS_BADGES[st.status];
+  const isWinget = item.packageManager === 'winget' && Boolean(item.packageId);
+
+  const iconHtml = item.icon
+    ? `<img class="detail-icon" src="${escapeHTML(toMediaUrl(item.icon))}" alt="">`
+    : '<div class="detail-icon-fallback">💻</div>';
+
+  const heroBtns = [];
+  if (isWinget && st.hasWebUpdate) {
+    heroBtns.push(
+      `<button type="button" class="btn btn-lg btn-online" data-pc-action="winget-update">⬆️ Über Winget aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+    );
+  }
+  if (isWinget) {
+    heroBtns.push(
+      '<button type="button" class="btn btn-archive" data-pc-action="link-archive">🗄️ Ins Archiv laden</button>'
+    );
+  }
+  if (item.canUninstall) {
+    heroBtns.push('<button type="button" class="btn btn-danger" data-pc-action="uninstall">🗑️ Deinstallieren</button>');
+  }
+
+  const techRows = [];
+  if (item.packageId) {
+    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(item.packageId)}</code></div>`);
+  }
+  techRows.push(
+    `<div class="tech-row"><span>Quelle</span><code>${escapeHTML(isWinget ? 'Winget' : 'Windows-Registry')}</code></div>`
+  );
+  if (item.publisher) {
+    techRows.push(`<div class="tech-row"><span>Herausgeber</span><code>${escapeHTML(item.publisher)}</code></div>`);
+  }
+  if (item.installLocation) {
+    techRows.push(
+      `<div class="tech-row"><span>Installationsordner</span><code>${escapeHTML(item.installLocation)}</code></div>`
+    );
+  }
+  if (item.registryKey) {
+    techRows.push(`<div class="tech-row"><span>Registry-Key</span><code>${escapeHTML(item.registryKey)}</code></div>`);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-header detail-header">
+      <div class="detail-head-main">
+        ${iconHtml}
+        <div class="detail-head-text">
+          <div class="detail-title-row">
+            <h2>${escapeHTML(item.name)}</h2>
+            ${statusBadge ? `<span class="status-pill ${statusBadge.cls}">${escapeHTML(statusBadge.label)}</span>` : ''}
+            <span class="card-chip chip-origin-pc">Nur auf diesem PC</span>
+            ${isWinget ? '<span class="provider-badge">Winget</span>' : ''}
+          </div>
+          <div class="detail-meta-inline">
+            ${item.publisher ? `<span><strong>Herausgeber:</strong> ${escapeHTML(item.publisher)}</span>` : ''}
+            ${item.packageId ? `<span><strong>Paket-ID:</strong> <code>${escapeHTML(item.packageId)}</code></span>` : ''}
+          </div>
+        </div>
+      </div>
+      <button type="button" class="icon-btn" data-pc-action="close" title="Schließen" aria-label="Schließen">✕</button>
+    </div>
+
+    <div class="modal-body detail-body">
+      <div class="detail-version-grid">
+        <div class="detail-ver-box ${st.hasWebUpdate ? '' : 'is-ok'}">
+          <span class="ver-box-lbl">Installiert (PC)</span>
+          <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : 'Unbekannt'}</strong>
+        </div>
+        <div class="detail-ver-box">
+          <span class="ver-box-lbl">Archiv</span>
+          <strong class="ver-box-val">Nicht im Archiv</strong>
+        </div>
+        <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
+          <span class="ver-box-lbl">Online${isWinget ? ' · Winget' : ''}</span>
+          <strong class="ver-box-val">${st.webVersion ? `v${escapeHTML(st.webVersion)}` : isWinget ? 'Aktuell' : 'Nicht verwaltet'}</strong>
+        </div>
+      </div>
+
+      ${heroBtns.length > 0 ? `<div class="detail-hero-bar">${heroBtns.join('')}</div>` : ''}
+
+      <div class="detail-section" id="pcPkgDescSection" ${isWinget ? '' : 'hidden'}>
+        <h4>Paket-Informationen</h4>
+        <div id="pcPkgDescBody" class="detail-description">
+          <span class="muted">⏳ Lade Details von Winget...</span>
+        </div>
+      </div>
+
+      <details class="detail-tech-drawer">
+        <summary>Technische Details & Pfade</summary>
+        <div class="detail-tech-list">${techRows.join('')}</div>
+      </details>
+    </div>
+
+    <div class="modal-footer">
+      <div class="footer-group">
+        ${item.installLocation ? '<button type="button" class="btn btn-ghost" data-pc-action="open-install-dir">📂 Installationsordner</button>' : ''}
+      </div>
+      <div class="footer-group">
+        <button type="button" class="btn btn-primary" data-pc-action="close">Schließen</button>
+      </div>
+    </div>
+  `;
+
+  overlay.hidden = false;
+
+  let loadedWingetPkg = null;
+
+  if (isWinget) {
+    window.electronAPI.showPackage('winget', item.packageId).then((res) => {
+      if (state.currentModalId !== item.id || overlay.hidden) return;
+      const bodyEl = modal.querySelector('#pcPkgDescBody');
+      if (!bodyEl) return;
+      if (res?.success && res.package) {
+        loadedWingetPkg = res.package;
+        const desc = res.package.description || res.package.shortDescription || '';
+        const hp = res.package.homepage
+          ? `<div class="detail-links" style="margin-top: 10px;"><button type="button" class="link-chip" data-open-url="${escapeHTML(res.package.homepage)}">🔗 Homepage</button></div>`
+          : '';
+        bodyEl.innerHTML = `${desc ? escapeHTML(desc) : '<span class="muted">Keine Beschreibung hinterlegt.</span>'}${hp}`;
+      } else {
+        bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Keine Details verfügbar.')}</span>`;
+      }
+    });
+  }
+
+  modal.onclick = async (e) => {
+    const urlBtn = e.target.closest('[data-open-url]');
+    if (urlBtn) {
+      window.electronAPI.openUrl(urlBtn.dataset.openUrl);
+      return;
+    }
+
+    const btn = e.target.closest('[data-pc-action]');
+    if (!btn) return;
+    const act = btn.dataset.pcAction;
+
+    if (act === 'close') {
+      closeModal();
+    } else if (act === 'open-install-dir' && item.installLocation) {
+      window.electronAPI.openPath(item.installLocation);
+    } else if (act === 'link-archive' && isWinget) {
+      openArchiveLinkModal({
+        packageManager: 'winget',
+        packageId: item.packageId,
+        name: item.name,
+        version: st.webVersion || st.localVersion || '',
+        description: loadedWingetPkg?.description || loadedWingetPkg?.shortDescription || '',
+        tags: loadedWingetPkg?.tags || [],
+        homepage: loadedWingetPkg?.homepage || '',
+        releaseNotesUrl: loadedWingetPkg?.releaseNotesUrl || '',
+      });
+    } else if (act === 'winget-update' && isWinget) {
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = '⏳ Aktualisiere...';
+      showToast(`Starte Winget-Update für ${item.name}...`, { type: 'info' });
+      const res = await window.electronAPI.installPackage('winget', item.packageId, {
+        silent: false,
+        itemName: item.name,
+      });
+      btn.disabled = false;
+      btn.textContent = orig;
+      if (res?.alreadyRunning) {
+        showToast('Für dieses Paket läuft bereits eine Installation.', { type: 'warn' });
+      } else if (res?.canceled) {
+        showToast('Update wurde abgebrochen.', { type: 'info' });
+      } else if (res?.success) {
+        showToast(`${item.name} erfolgreich aktualisiert!`, { type: 'success' });
+        await triggerCatalogReload({ rescanInstalled: true });
+      } else {
+        showToast(`Update fehlgeschlagen: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+      }
+    } else if (act === 'uninstall') {
+      if (btn.dataset.armed !== 'true') {
+        btn.dataset.armed = 'true';
+        btn.dataset.origText = btn.textContent;
+        btn.textContent = '⚠️ Wirklich deinstallieren?';
+        setTimeout(() => {
+          if (btn.dataset.armed === 'true') {
+            btn.dataset.armed = 'false';
+            btn.textContent = btn.dataset.origText;
+          }
+        }, 4000);
+        return;
+      }
+      btn.dataset.armed = 'false';
+      btn.disabled = true;
+      btn.textContent = '⏳ Deinstalliere...';
+      const res = await window.electronAPI.uninstallSoftware({
+        packageManager: item.packageManager,
+        packageId: item.packageId,
+        uninstallString: item.uninstallString,
+        quietUninstallString: item.quietUninstallString,
+        name: item.name,
+        silent: false,
+      });
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origText || '🗑️ Deinstallieren';
+      if (res?.alreadyRunning) {
+        showToast('Deinstallation läuft bereits.', { type: 'warn' });
+      } else if (res?.canceled) {
+        showToast('Deinstallation abgebrochen.', { type: 'info' });
+      } else if (res?.success) {
+        showToast(`${item.name} wurde deinstalliert.`, { type: 'success' });
+        closeModal();
+        await triggerCatalogReload({ rescanInstalled: true });
+      } else {
+        showToast(`Deinstallationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+      }
+    }
+  };
+}
+
 export function renderDetailModal(id, { freshDownload = null } = {}) {
   const item = getItemById(id);
   if (!item) return;
 
   state.currentModalId = id;
   state.isEditModalOpen = false;
+
+  if (item.origin === 'pc') {
+    renderPcDetailModal(item);
+    return;
+  }
 
   const overlay = document.getElementById('modalOverlay');
   const modal = document.getElementById('modalContent');
@@ -224,8 +447,10 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       : '';
 
   // Eingeklappte Technik-Details
-  const techRows = [`<div class="tech-row"><span>NAS-Ordner</span><code>${escapeHTML(item.path)}</code></div>`];
-  if (item.wingetId) {
+  const techRows = [`<div class="tech-row"><span>Archiv-Ordner</span><code>${escapeHTML(item.path)}</code></div>`];
+  if (item.packageId) {
+    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(item.packageId)}</code></div>`);
+  } else if (item.wingetId) {
     techRows.push(`<div class="tech-row"><span>Winget-ID</span><code>${escapeHTML(item.wingetId)}</code></div>`);
   }
   if (item.webVersionUrl) {
@@ -292,13 +517,13 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
     <div class="modal-body detail-body">
       <!-- 3-Spalten Versionsübersicht -->
       <div class="detail-version-grid">
-        <div class="detail-ver-box ${st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasNasUpdate ? 'is-ok' : ''}">
+        <div class="detail-ver-box ${st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasArchiveUpdate ? 'is-ok' : ''}">
           <span class="ver-box-lbl">Installiert (PC)</span>
           <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : 'Nicht erkannt'}</strong>
         </div>
-        <div class="detail-ver-box ${st.hasNasUpdate ? 'is-nas-update' : ''}">
-          <span class="ver-box-lbl">Archiv (NAS)${item.hasPinnedLast ? ' · _last gepinnt' : ''}</span>
-          <strong class="ver-box-val">${st.nasVersion ? `v${escapeHTML(st.nasVersion)}` : 'Keine Version'}</strong>
+        <div class="detail-ver-box ${st.hasArchiveUpdate ? 'is-archive-update' : ''}">
+          <span class="ver-box-lbl">Archiv${item.hasPinnedLast ? ' · _last gepinnt' : ''}</span>
+          <strong class="ver-box-val">${st.archiveVersion ? `v${escapeHTML(st.archiveVersion)}` : 'Keine Version'}</strong>
         </div>
         <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
           <span class="ver-box-lbl">Online${sourceLabel ? ` · ${escapeHTML(sourceLabel)}` : ''}</span>
@@ -433,7 +658,7 @@ export function renderDetailModal(id, { freshDownload = null } = {}) {
       return;
     }
 
-    await triggerCatalogReload();
+    await triggerCatalogReload({ rescanInstalled: Boolean(res.success) });
     if (state.currentModalId === item.id) {
       renderDetailModal(item.id);
     }

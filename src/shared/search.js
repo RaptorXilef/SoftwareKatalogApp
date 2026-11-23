@@ -73,7 +73,10 @@ export function scoreCatalogItem(item, rawQuery) {
   const nameRaw = String(item.name || '').toLowerCase();
   const nameWords = splitWords(nameRaw);
 
-  const searchNamesRaw = (item.searchNames || []).join(' ').toLowerCase();
+  const searchNamesRaw = [...(item.searchNames || []), item.packageId, item.wingetId, item.publisher]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
   const searchNameWords = splitWords(searchNamesRaw);
 
   const tagsList = [

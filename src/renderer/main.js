@@ -1,18 +1,91 @@
 import { renderCatalogGrid } from './components/cards.js';
+import { initDiscoverView, renderDiscoverView } from './components/discover.js';
 import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
-import { initToolbar, renderTagChips } from './components/toolbar.js';
-import { closeModal, initModals, openDetailModal, openSettingsModal } from './modals/index.js';
-import { refreshCatalogData, state, toggleFavorite } from './state.js';
+import { initToolbar, renderTagChips, syncToolbarForTab, updateNavCounts } from './components/toolbar.js';
+import {
+  closeModal,
+  initModals,
+  openArchiveLinkModal,
+  openDetailModal,
+  openProviderPackageModal,
+  openSettingsModal,
+} from './modals/index.js';
+import { refreshCatalogData, refreshProviders, setInstalledApps, state, toggleFavorite } from './state.js';
 import { escapeHTML } from './utils/sanitize.js';
 
-async function reloadUI({ preserveScroll = true } = {}) {
+function renderBundlesPlaceholder() {
+  const container = document.getElementById('bundlesView');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="bundles-placeholder">
+      <span class="bundles-badge">Vorbereitet für Schritt F</span>
+      <h2>📦 Software-Bündel</h2>
+      <p>
+        Hier kannst du künftig kuratierte Programmpakete für neue PCs zusammenstellen
+        (z. B. "Basis-Setup", "Entwicklung", "Multimedia") und mit einem Klick installieren.
+      </p>
+    </div>
+  `;
+}
+
+function renderActiveView() {
+  syncToolbarForTab();
+  updateNavCounts();
+
+  if (state.activeTab === 'discover') {
+    renderDiscoverView();
+  } else if (state.activeTab === 'bundles') {
+    renderBundlesPlaceholder();
+  } else {
+    renderCatalogGrid();
+  }
+}
+
+async function runInstalledScan({ silent = false } = {}) {
+  state.isScanningInstalled = true;
+  if (state.activeTab === 'updates' || state.activeTab === 'installed') {
+    renderCatalogGrid();
+  }
+
+  try {
+    const res = await window.electronAPI.scanInstalledSoftware({ silent });
+    if (res?.success && Array.isArray(res.programs)) {
+      setInstalledApps(res.programs);
+      await refreshCatalogData();
+      renderTagChips();
+      renderActiveView();
+      return res;
+    }
+
+    state.isScanningInstalled = false;
+    if (!silent && res?.error && !res.canceled) {
+      showToast(`PC-Scan fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+    }
+    renderActiveView();
+    return res;
+  } catch (err) {
+    state.isScanningInstalled = false;
+    if (!silent) {
+      showToast(`PC-Scan fehlgeschlagen: ${err.message}`, { type: 'error', duration: 6000 });
+    }
+    renderActiveView();
+    return { success: false, error: err.message };
+  }
+}
+
+async function reloadUI({ preserveScroll = true, rescanInstalled = false } = {}) {
   const y = window.scrollY;
-  await refreshCatalogData();
+  await Promise.all([refreshCatalogData(), refreshProviders()]);
   renderTagChips();
-  renderCatalogGrid();
+  renderActiveView();
   if (preserveScroll) window.scrollTo(0, y);
+
+  if (rescanInstalled) {
+    await runInstalledScan({ silent: true });
+  }
 }
 
 async function checkAppUpdateInBackground() {
@@ -59,6 +132,7 @@ function setupGlobalDragAndDrop() {
 
   document.body.addEventListener('dragenter', (e) => {
     e.preventDefault();
+    if (state.activeTab !== 'archive') return;
     if (!document.getElementById('modalOverlay').hidden) return;
     if (e.target.closest('.media-dropzone')) return;
     dragDepth++;
@@ -80,6 +154,7 @@ function setupGlobalDragAndDrop() {
     dragDepth = 0;
     if (overlay) overlay.hidden = true;
 
+    if (state.activeTab !== 'archive') return;
     // Drops innerhalb offener Modals werden vom jeweiligen Modal verarbeitet
     if (!document.getElementById('modalOverlay').hidden) return;
 
@@ -92,7 +167,7 @@ function setupGlobalDragAndDrop() {
     const res = await window.electronAPI.addSoftwareFromPath(droppedPath);
     if (res.success) {
       await reloadUI();
-      showToast('Software-Ordner wurde zum Katalog hinzugefügt.', { type: 'success' });
+      showToast('Software-Ordner wurde zum Archiv hinzugefügt.', { type: 'success' });
     } else if (res.error) {
       showToast(res.error, { type: 'error', duration: 6000 });
     }
@@ -102,6 +177,8 @@ function setupGlobalDragAndDrop() {
 function setupKeyboardShortcuts() {
   const searchInput = document.getElementById('searchInput');
   const clearBtn = document.getElementById('clearSearchBtn');
+  const discoverInput = document.getElementById('discoverSearchInput');
+  const clearDiscoverBtn = document.getElementById('clearDiscoverSearchBtn');
   const modalOverlay = document.getElementById('modalOverlay');
 
   document.addEventListener('keydown', (e) => {
@@ -122,13 +199,22 @@ function setupKeyboardShortcuts() {
 
     if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isTyping)) {
       e.preventDefault();
-      searchInput?.focus();
+      if (state.activeTab === 'discover') {
+        discoverInput?.focus();
+      } else if (state.activeTab !== 'bundles') {
+        searchInput?.focus();
+      }
     } else if (e.key === 'Escape' && active === searchInput) {
       searchInput.value = '';
       state.searchQuery = '';
       if (clearBtn) clearBtn.hidden = true;
       searchInput.blur();
       renderCatalogGrid();
+    } else if (e.key === 'Escape' && active === discoverInput) {
+      discoverInput.value = '';
+      state.discoverQuery = '';
+      if (clearDiscoverBtn) clearDiscoverBtn.hidden = true;
+      discoverInput.blur();
     }
   });
 
@@ -162,7 +248,7 @@ async function bootstrap() {
       if (action.type === 'recheck-local' && action.itemId) {
         const res = await window.electronAPI.scanLocalVersions({ itemIds: [action.itemId], silent: true });
         await window.electronAPI.dismissJob(action.jobId);
-        await reloadUI();
+        await reloadUI({ rescanInstalled: true });
         if (res.success && res.versions?.[action.itemId]) {
           showToast(`Erkannte Version: v${res.versions[action.itemId]}`, { type: 'success' });
         } else {
@@ -172,7 +258,18 @@ async function bootstrap() {
     },
   });
 
+  initDiscoverView({
+    onReload: reloadUI,
+    onOpenArchiveDetail: (id) => openDetailModal(id),
+    onOpenPackageDetail: (providerId, packageId, summary) => openProviderPackageModal(providerId, packageId, summary),
+    onLinkToArchive: (pkg) => openArchiveLinkModal(pkg),
+  });
+
   initToolbar({
+    onTabChange: (tab) => {
+      state.activeTab = tab;
+      renderActiveView();
+    },
     onFilterChange: () => renderCatalogGrid(),
     onOpenSettings: () => openSettingsModal(),
     onScanArchive: async (mode) => {
@@ -206,16 +303,23 @@ async function bootstrap() {
       }
     },
     onCheckLocal: async () => {
-      const res = await window.electronAPI.scanLocalVersions();
-      if (res.alreadyRunning) {
-        showToast('Lokale Versionsprüfung läuft bereits.', { type: 'info' });
+      const [pcRes, localRes] = await Promise.all([
+        runInstalledScan({ silent: false }),
+        window.electronAPI.scanLocalVersions({ silent: true }),
+      ]);
+
+      if (pcRes?.alreadyRunning) {
+        showToast('PC-Prüfung läuft bereits.', { type: 'info' });
         return;
       }
-      if (res.success) {
+      if (pcRes?.success) {
         await reloadUI();
-        showToast(`${res.count} lokale Programme geprüft.`, { type: 'success' });
-      } else if (res.error && !res.canceled) {
-        showToast(`Fehler bei lokaler Prüfung: ${res.error}`, { type: 'error' });
+        const total = pcRes.stats?.total ?? pcRes.programs?.length ?? 0;
+        const upd = pcRes.stats?.updatesAvailable ?? 0;
+        showToast(`${total} PC-Programme geprüft (${upd} Winget-Updates).`, { type: 'success' });
+      } else if (localRes?.success) {
+        await reloadUI();
+        showToast(`${localRes.count} lokale Programme geprüft.`, { type: 'success' });
       }
     },
     onAddSoftware: async () => {
@@ -250,8 +354,10 @@ async function bootstrap() {
     const verEl = document.getElementById('appVersion');
     if (verEl) verEl.textContent = `(v${info.version})`;
 
+    renderBundlesPlaceholder();
     await reloadUI({ preserveScroll: false });
     checkAppUpdateInBackground();
+    runInstalledScan({ silent: true });
   } catch (err) {
     console.error('Fehler beim Starten:', err);
     showToast(`Katalog konnte nicht geladen werden: ${err.message}`, { type: 'error', duration: 0 });

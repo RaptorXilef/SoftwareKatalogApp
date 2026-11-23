@@ -45,11 +45,11 @@
   }
 
   &.status-update {
-    background: color-mix(in srgb, var(--color-nas) 10%, var(--surface));
-    border-color: color-mix(in srgb, var(--color-nas) 50%, var(--border));
+    background: color-mix(in srgb, var(--color-archive) 10%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-archive) 50%, var(--border));
 
     &:hover {
-      border-color: var(--color-nas);
+      border-color: var(--color-archive);
     }
   }
 
@@ -99,7 +99,7 @@
     background: var(--color-web);
   }
   &.is-update {
-    background: var(--color-nas);
+    background: var(--color-archive);
   }
   &.is-installed {
     background: var(--color-ok);
@@ -120,6 +120,16 @@
   &.chip-new {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
     color: var(--accent);
+  }
+
+  &.chip-origin-archive {
+    background: color-mix(in srgb, var(--color-archive) 18%, transparent);
+    color: var(--color-archive);
+  }
+
+  &.chip-origin-pc {
+    background: color-mix(in srgb, var(--color-newer) 16%, transparent);
+    color: var(--color-newer);
   }
 }
 
@@ -230,10 +240,10 @@
     color: var(--color-newer);
   }
 
-  &.is-highlight-nas {
-    background: color-mix(in srgb, var(--color-nas) 18%, transparent);
+  &.is-highlight-archive {
+    background: color-mix(in srgb, var(--color-archive) 18%, transparent);
     & .ver-val {
-      color: var(--color-nas);
+      color: var(--color-archive);
       font-weight: 700;
     }
   }
@@ -266,4 +276,18 @@
     height: 1px;
     background: var(--border);
   }
+}
+
+.pc-scan-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  font-size: 13px;
+  color: var(--text);
 }

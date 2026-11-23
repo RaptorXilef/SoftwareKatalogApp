@@ -1,6 +1,7 @@
 import { state } from '../state.js';
 import { renderDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
+import { renderArchiveLinkModal, renderProviderPackageModal } from './package-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 
 let reloadHandler = async () => {};
@@ -34,4 +35,12 @@ export function openEditModal(id, initialTab = 'general') {
 
 export function openSettingsModal() {
   renderSettingsModal();
+}
+
+export function openProviderPackageModal(providerId, packageId, summary = {}) {
+  renderProviderPackageModal(providerId, packageId, summary);
+}
+
+export function openArchiveLinkModal(pkg, options = {}) {
+  renderArchiveLinkModal(pkg, options);
 }

@@ -36,7 +36,7 @@ export async function renderSettingsModal() {
         <h3>⬇️ Downloads & Dateibenennung</h3>
         <label class="check-row">
           <input type="checkbox" id="cfgAutoSave" ${s.autoSaveDownloads !== false && !s.askSaveDialog ? 'checked' : ''}>
-          <span>Updates automatisch im Software-Ordner speichern (ohne „Speichern unter“-Dialog)</span>
+          <span>Updates automatisch im Software-Ordner speichern (ohne "Speichern unter"-Dialog)</span>
         </label>
         <label class="check-row">
           <input type="checkbox" id="cfgKeepOriginal" ${s.keepOriginalNameIfVersioned !== false ? 'checked' : ''}>
@@ -48,7 +48,7 @@ export async function renderSettingsModal() {
             <input type="text" id="cfgFilenamePattern" value="${escapeHTML(s.filenamePattern || '{Name}_v{Version}{Arch}{Ext}')}">
           </label>
           <div class="form-field">
-            <span>Live-Vorschau (für „setup-x64.exe“)</span>
+            <span>Live-Vorschau (für "setup-x64.exe")</span>
             <div id="filenamePreview" class="filename-preview"></div>
           </div>
         </div>
@@ -59,7 +59,7 @@ export async function renderSettingsModal() {
       <section class="settings-section">
         <h3>📂 Archiv & Scanner</h3>
         <div class="form-field">
-          <span>Software-Verzeichnis (NAS / Lokal)</span>
+          <span>Software-Verzeichnis (Archiv / Lokal)</span>
           <div class="input-action-row">
             <input type="text" id="cfgTarget" value="${escapeHTML(s.targetPath || '../software')}" readonly>
             <button type="button" class="btn btn-ghost" data-settings-action="browse-target">Ordner wählen</button>
@@ -88,7 +88,7 @@ export async function renderSettingsModal() {
         <h3>🎨 Darstellung & Versionsvergleich</h3>
         <div class="form-grid-2">
           <label class="form-field">
-            <span>„NEU“-Hinweis anzeigen für (Tage, 0 = aus)</span>
+            <span>"NEU"-Hinweis anzeigen für (Tage, 0 = aus)</span>
             <input type="number" id="cfgNewBadgeDays" value="${s.newBadgeDays ?? 14}" min="0" max="365">
           </label>
           <label class="form-field">
@@ -306,7 +306,7 @@ export async function renderSettingsModal() {
       if (res.success) {
         closeModal();
         if (needsRescan) {
-          showToast('Einstellungen gespeichert – aktualisiere Archiv...', { type: 'info' });
+          showToast('Einstellungen gespeichert - aktualisiere Archiv...', { type: 'info' });
           await window.electronAPI.runScan('smart');
         } else {
           showToast('Einstellungen gespeichert.', { type: 'success' });

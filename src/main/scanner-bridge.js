@@ -22,7 +22,7 @@ function cleanupScanLock(dataDir) {
 export async function runArchiveScan(mode = 'smart') {
   const { absScriptPath, appFolder, dataDir } = getConfig();
   const titles = {
-    smart: 'Archiv prüfen (NAS)',
+    smart: 'Archiv prüfen',
     update: 'Metadaten aktualisieren',
     full: 'Vollständiger Archiv-Rescan',
   };

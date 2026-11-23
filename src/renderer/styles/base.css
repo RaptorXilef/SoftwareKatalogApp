@@ -8,7 +8,7 @@
 
   --accent: #89b4fa;
   --color-web: #cba6f7;
-  --color-nas: #fab387;
+  --color-archive: #fab387;
   --color-ok: #a6e3a1;
   --color-newer: #89dceb;
   --color-danger: #f38ba8;
@@ -110,7 +110,7 @@ select {
 }
 
 .btn-archive {
-  background: var(--color-nas);
+  background: var(--color-archive);
   color: var(--bg);
 }
 

@@ -43,7 +43,7 @@ function toArchivePackage(item) {
 export const archiveProvider = {
   id: 'archive',
   name: 'Archiv',
-  description: 'Lokales Software-Archiv (NAS / Ordner)',
+  description: 'Lokales Software-Archiv',
   capabilities: {
     search: true,
     listInstalled: true,

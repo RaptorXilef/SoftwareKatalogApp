@@ -1,4 +1,4 @@
-import { getItemById } from '../state.js';
+import { getCatalogItemById } from '../state.js';
 import { toMediaUrl } from '../utils/sanitize.js';
 
 let mediaList = [];
@@ -32,7 +32,7 @@ function updateView() {
 }
 
 export function openLightbox(itemId, index = 0) {
-  const item = getItemById(itemId);
+  const item = getCatalogItemById(itemId);
   if (!item?.screenshots?.length) return;
   mediaList = item.screenshots;
   currentIdx = Math.max(0, Math.min(index, mediaList.length - 1));

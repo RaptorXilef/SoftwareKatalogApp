@@ -49,4 +49,19 @@ describe('scoreCatalogItem', () => {
     assert.equal(withoutDot.matched, true);
     assert.equal(withDot.isCoreMatch, true);
   });
+
+  it('findet Programme auch über packageId, wingetId und publisher', () => {
+    const pkg = {
+      name: 'Git',
+      packageId: 'Git.Git',
+      publisher: 'The Git Development Community',
+      tags: ['The Git Development Community'],
+    };
+    const byId = scoreCatalogItem(pkg, 'Git.Git');
+    const byPub = scoreCatalogItem(pkg, 'Development');
+    assert.equal(byId.matched, true);
+    assert.equal(byId.isCoreMatch, true);
+    assert.equal(byPub.matched, true);
+    assert.equal(byPub.isCoreMatch, true);
+  });
 });

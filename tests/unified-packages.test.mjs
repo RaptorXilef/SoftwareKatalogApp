@@ -1,0 +1,216 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { buildUnifiedPackages, computeTabCounts, getPackageStatus } from '../src/shared/unified-packages.js';
+
+describe('buildUnifiedPackages', () => {
+  it('verknüpft Archiv- und PC-Einträge über archiveItemId, packageId/wingetId, Installationspfad und searchNames', () => {
+    const catalogItems = [
+      {
+        id: 'arch-vlc',
+        name: 'VLC Media Player',
+        wingetId: 'VideoLAN.VLC',
+        lastFiles: ['C:\\Archiv\\VLC\\vlc-3.0.21-win64.exe'],
+        webVersion: '3.0.21',
+      },
+      {
+        id: 'arch-custom',
+        name: 'Mein Spezialtool',
+        autoPaths: ['C:\\Program Files\\SpezialTool\\tool.exe'],
+        lastFiles: ['C:\\Archiv\\Spezial\\tool_v2.0.0.exe'],
+      },
+      {
+        id: 'arch-alias',
+        name: 'Notepad++',
+        searchNames: ['Notepad++ (64-bit x64)'],
+        lastFiles: ['C:\\Archiv\\Npp\\npp.8.7.0.exe'],
+      },
+      {
+        id: 'arch-only',
+        name: 'Nur Im Archiv Tool',
+        lastFiles: ['C:\\Archiv\\Only\\only_v1.0.0.exe'],
+      },
+    ];
+
+    const installedApps = [
+      {
+        id: 'winget:videolan.vlc',
+        name: 'VLC media player',
+        publisher: 'VideoLAN',
+        installedVersion: '3.0.20',
+        availableVersion: '3.0.22',
+        hasUpdate: true,
+        packageManager: 'winget',
+        packageId: 'VideoLAN.VLC',
+        canUninstall: true,
+      },
+      {
+        id: 'registry:spezial',
+        name: 'Ganz Anderer Registry Name',
+        publisher: 'ACME',
+        installedVersion: '1.5.0',
+        installLocation: 'C:\\Program Files\\SpezialTool',
+        displayIcon: 'C:\\Program Files\\SpezialTool\\tool.exe,0',
+        source: 'registry',
+        canUninstall: true,
+      },
+      {
+        id: 'registry:npp',
+        name: 'Notepad++ (64-bit x64)',
+        installedVersion: '8.7.5',
+        source: 'registry',
+        canUninstall: true,
+      },
+      {
+        id: 'winget:git.git',
+        name: 'Git',
+        publisher: 'The Git Development Community',
+        installedVersion: '2.47.0',
+        availableVersion: '2.48.1',
+        hasUpdate: true,
+        packageManager: 'winget',
+        packageId: 'Git.Git',
+        canUninstall: true,
+      },
+    ];
+
+    const pcIconCache = new Map([['winget:git.git', 'C:\\cache\\git.png']]);
+    const unified = buildUnifiedPackages({ catalogItems, installedApps, pcIconCache });
+
+    assert.equal(unified.length, 5);
+
+    const vlc = unified.find((p) => p.id === 'arch-vlc');
+    assert.equal(vlc.origin, 'both');
+    assert.equal(vlc.installedVersion, '3.0.20');
+    assert.equal(vlc.webVersion, '3.0.22');
+    assert.equal(vlc.canUninstall, true);
+
+    const custom = unified.find((p) => p.id === 'arch-custom');
+    assert.equal(custom.origin, 'both');
+    assert.equal(custom.installedVersion, '1.5.0');
+
+    const npp = unified.find((p) => p.id === 'arch-alias');
+    assert.equal(npp.origin, 'both');
+    assert.equal(npp.installedVersion, '8.7.5');
+
+    const archOnly = unified.find((p) => p.id === 'arch-only');
+    assert.equal(archOnly.origin, 'archive');
+    assert.equal(archOnly.isInstalled, false);
+
+    const git = unified.find((p) => p.id === 'winget:git.git');
+    assert.equal(git.origin, 'pc');
+    assert.equal(git.inArchive, false);
+    assert.equal(git.icon, 'C:\\cache\\git.png');
+    assert.equal(git.webVersion, '2.48.1');
+  });
+
+  it('verhindert False-Positive-Pfadmatches über generische Windows-Systemordner', () => {
+    const catalogItems = [
+      {
+        id: 'arch-a',
+        name: 'Alpha App',
+        autoPaths: ['C:\\Program Files\\Alpha\\alpha.exe'],
+      },
+    ];
+    const installedApps = [
+      {
+        id: 'registry:beta',
+        name: 'Beta App',
+        installLocation: 'C:\\Program Files',
+        installedVersion: '1.0.0',
+      },
+    ];
+
+    const unified = buildUnifiedPackages({ catalogItems, installedApps });
+    assert.equal(unified.length, 2);
+    assert.equal(unified[0].origin, 'archive');
+    assert.equal(unified[1].origin, 'pc');
+  });
+});
+
+describe('getPackageStatus & computeTabCounts', () => {
+  it('hält die Status-Farbpriorität ein: webupdate > update > newer > installed > none', () => {
+    // Web-Update schlägt Archiv-Update
+    const webAndArchive = getPackageStatus({
+      origin: 'both',
+      isInstalled: true,
+      installedVersion: '1.0.0',
+      lastFiles: ['app_v2.0.0.exe'],
+      webVersion: '3.0.0',
+    });
+    assert.equal(webAndArchive.status, 'webupdate');
+    assert.equal(webAndArchive.hasWebUpdate, true);
+    assert.equal(webAndArchive.hasArchiveUpdate, true);
+
+    // Archiv-Update
+    const archiveUpd = getPackageStatus({
+      origin: 'both',
+      isInstalled: true,
+      installedVersion: '1.0.0',
+      lastFiles: ['app_v2.0.0.exe'],
+      webVersion: '2.0.0',
+    });
+    assert.equal(archiveUpd.status, 'update');
+
+    // PC neuer als Archiv
+    const pcNewer = getPackageStatus({
+      origin: 'both',
+      isInstalled: true,
+      installedVersion: '2.5.0',
+      lastFiles: ['app_v2.0.0.exe'],
+      webVersion: '2.0.0',
+    });
+    assert.equal(pcNewer.status, 'newer');
+
+    // Aktuell installiert
+    const current = getPackageStatus({
+      origin: 'both',
+      isInstalled: true,
+      installedVersion: '2.0.0',
+      lastFiles: ['app_v2.0.0.exe'],
+      webVersion: '2.0.0',
+    });
+    assert.equal(current.status, 'installed');
+
+    // Reines PC-Programm mit Winget-Update
+    const pcUpdate = getPackageStatus({
+      origin: 'pc',
+      isInstalled: true,
+      installedVersion: '2.47.0',
+      webVersion: '2.48.1',
+      hasWingetUpgrade: true,
+    });
+    assert.equal(pcUpdate.status, 'webupdate');
+    assert.equal(pcUpdate.hasWebUpdate, true);
+  });
+
+  it('berechnet Live-Zähler unter Berücksichtigung versteckter Kategorien', () => {
+    const packages = [
+      { id: '1', inArchive: true, isInstalled: true, origin: 'both', installedVersion: '1.0', webVersion: '2.0' },
+      { id: '2', inArchive: true, isInstalled: false, origin: 'archive', lastFiles: ['x_v1.0.exe'] },
+      {
+        id: '3',
+        inArchive: false,
+        isInstalled: true,
+        origin: 'pc',
+        installedVersion: '1.0',
+        webVersion: '1.2',
+        hasWingetUpgrade: true,
+      },
+      {
+        id: '4',
+        inArchive: true,
+        isInstalled: true,
+        origin: 'both',
+        hiddenCategory: 'Secret',
+        installedVersion: '1.0',
+        webVersion: '2.0',
+      },
+    ];
+
+    const countsDefault = computeTabCounts(packages, { visibleHiddenCats: [], bundlesCount: 2 });
+    assert.deepEqual(countsDefault, { updates: 2, installed: 2, archive: 2, bundles: 2 });
+
+    const countsWithHidden = computeTabCounts(packages, { visibleHiddenCats: ['Secret'], bundlesCount: 0 });
+    assert.deepEqual(countsWithHidden, { updates: 3, installed: 3, archive: 3, bundles: 0 });
+  });
+});

@@ -1,66 +1,98 @@
-import { compareVersions, extractVersion } from '../shared/version.js';
+import { buildUnifiedPackages, computeTabCounts, getBaseName, getPackageStatus } from '../shared/unified-packages.js';
+
+export { getBaseName };
+
+let providersInitialized = false;
 
 export const state = {
   catalog: [],
+  installedApps: [],
+  packages: [],
+  bundles: [],
+  providers: [],
   settings: {},
   favorites: [],
   availableHiddenCats: [],
+  activeTab: 'archive',
+  originFilters: {
+    updates: 'all',
+    installed: 'all',
+  },
+  sortModes: {
+    updates: 'updates',
+    installed: 'az',
+    archive: 'az',
+  },
+  filterMode: 'all',
   activeTag: null,
   searchQuery: '',
-  sortMode: 'az',
-  filterMode: 'all',
+  discoverQuery: '',
+  discoverSelectedProviders: [],
+  discoverResults: [],
+  discoverByProvider: {},
+  discoverHasSearched: false,
+  discoverLoading: false,
+  isScanningInstalled: false,
+  hasScannedInstalled: false,
+  pcIconCache: new Map(),
+  pcIconTried: new Set(),
   currentModalId: null,
   isEditModalOpen: false,
   hasCheckedAppUpdate: false,
 };
 
-export function getBaseName(filePath) {
-  if (!filePath) return '';
-  return filePath.split('\\').pop().split('/').pop();
+export function rebuildUnifiedPackages() {
+  state.packages = buildUnifiedPackages({
+    catalogItems: state.catalog,
+    installedApps: state.installedApps,
+    pcIconCache: state.pcIconCache,
+  });
 }
 
 export function getItemById(id) {
+  return state.packages.find((i) => i.id === id) || state.catalog.find((i) => i.id === id) || null;
+}
+
+export function getCatalogItemById(id) {
   return state.catalog.find((i) => i.id === id) || null;
 }
 
 /**
  * Ermittelt Status & Versionen für Karte und Detailansicht.
- * Priorität für Kartenfarbe: webupdate (Lila) > update (Orange) > newer (Blau) > installed (Grün) > none
+ * Priorität: webupdate (Lila) > update / Archiv-Update (Orange) > newer / PC neuer (Blau) > installed (Grün) > none
  */
 export function getItemStatus(item) {
-  const nasVersion = item.lastFiles?.length > 0 ? extractVersion(getBaseName(item.lastFiles[0])) : null;
-  const localVersion = item.installedVersion || null;
-  const webVersion = item.webVersion || null;
-  const depth = state.settings.versionCompareDepth ?? 3;
+  return getPackageStatus(item, {
+    versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+  });
+}
 
-  const hasWebUpdate = Boolean(webVersion && (!nasVersion || compareVersions(webVersion, nasVersion, depth) > 0));
-  const hasNasUpdate = Boolean(
-    item.isInstalled && nasVersion && localVersion && compareVersions(nasVersion, localVersion, depth) > 0
-  );
-  const isPcNewer = Boolean(
-    item.isInstalled && nasVersion && localVersion && compareVersions(nasVersion, localVersion, depth) < 0
-  );
+export function getTabCounts() {
+  return computeTabCounts(state.packages, {
+    visibleHiddenCats: state.settings.visibleHiddenCats || [],
+    versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+    bundlesCount: state.bundles.length,
+  });
+}
 
-  let status = 'none';
-  if (hasWebUpdate) {
-    status = 'webupdate';
-  } else if (hasNasUpdate) {
-    status = 'update';
-  } else if (isPcNewer) {
-    status = 'newer';
-  } else if (item.isInstalled) {
-    status = 'installed';
+export function getActiveSortMode() {
+  return state.sortModes[state.activeTab] || 'az';
+}
+
+export function setActiveSortMode(mode) {
+  if (state.activeTab in state.sortModes) {
+    state.sortModes[state.activeTab] = mode;
   }
+}
 
-  return {
-    status,
-    nasVersion,
-    localVersion,
-    webVersion,
-    hasWebUpdate,
-    hasNasUpdate,
-    isPcNewer,
-  };
+export function getActiveOriginFilter() {
+  return state.originFilters[state.activeTab] || 'all';
+}
+
+export function setActiveOriginFilter(filter) {
+  if (state.activeTab in state.originFilters) {
+    state.originFilters[state.activeTab] = filter;
+  }
 }
 
 export function isItemNew(item) {
@@ -95,6 +127,28 @@ export async function refreshCatalogData() {
   });
 
   state.availableHiddenCats = [...new Set(state.catalog.map((i) => i.hiddenCategory).filter(Boolean))];
+  rebuildUnifiedPackages();
+}
+
+export async function refreshProviders() {
+  const res = await window.electronAPI.listProviders();
+  state.providers = Array.isArray(res?.providers) ? res.providers : [];
+  const searchableEnabled = state.providers.filter((p) => p.capabilities?.search && p.enabled).map((p) => p.id);
+
+  if (!providersInitialized) {
+    providersInitialized = true;
+    state.discoverSelectedProviders = searchableEnabled;
+  } else {
+    const validIds = new Set(state.providers.filter((p) => p.capabilities?.search).map((p) => p.id));
+    state.discoverSelectedProviders = state.discoverSelectedProviders.filter((id) => validIds.has(id));
+  }
+}
+
+export function setInstalledApps(programs) {
+  state.installedApps = Array.isArray(programs) ? programs : [];
+  state.hasScannedInstalled = true;
+  state.isScanningInstalled = false;
+  rebuildUnifiedPackages();
 }
 
 export async function toggleFavorite(id) {

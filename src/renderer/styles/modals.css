@@ -286,11 +286,11 @@
     }
   }
 
-  &.is-nas-update {
-    background: color-mix(in srgb, var(--color-nas) 12%, var(--bg));
-    border-color: color-mix(in srgb, var(--color-nas) 55%, var(--border));
+  &.is-archive-update {
+    background: color-mix(in srgb, var(--color-archive) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--color-archive) 55%, var(--border));
     & .ver-box-val {
-      color: var(--color-nas);
+      color: var(--color-archive);
     }
   }
 

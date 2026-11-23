@@ -1,37 +1,146 @@
 import { scoreCatalogItem } from '../../shared/search.js';
+import { isPackageVisible } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
-import { getItemStatus, hasAnyLocalPath, hasOnlineSource, isItemNew, state } from '../state.js';
+import {
+  getActiveOriginFilter,
+  getActiveSortMode,
+  getItemStatus,
+  hasAnyLocalPath,
+  hasOnlineSource,
+  isItemNew,
+  state,
+} from '../state.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
+import { updateNavCounts } from './toolbar.js';
 
 const STATUS_META = {
   webupdate: { label: 'Web-Update', title: 'Neuere Version im Internet verfügbar' },
-  update: { label: 'NAS-Update', title: 'Neuere Version im Archiv verfügbar' },
+  update: { label: 'Archiv-Update', title: 'Neuere Version im Archiv verfügbar' },
   installed: { label: 'Installiert', title: 'Auf diesem PC installiert' },
   newer: { label: 'PC neuer', title: 'Installierte Version ist neuer als im Archiv' },
 };
+
+const iconQueue = [];
+let activeIconJobs = 0;
+const MAX_ICON_JOBS = 4;
+
+function updateCardIconInDom(itemId, iconPath) {
+  const grid = document.getElementById('grid');
+  if (!grid) return;
+  for (const card of grid.querySelectorAll('.card')) {
+    if (card.dataset.id !== itemId) continue;
+    const fallback = card.querySelector('.card-icon-fallback');
+    if (!fallback) continue;
+    const img = document.createElement('img');
+    img.className = 'card-icon';
+    img.src = toMediaUrl(iconPath);
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    fallback.replaceWith(img);
+  }
+}
+
+function pumpIconQueue() {
+  while (activeIconJobs < MAX_ICON_JOBS && iconQueue.length > 0) {
+    const item = iconQueue.shift();
+    if (!item || state.pcIconCache.has(item.id)) continue;
+    activeIconJobs++;
+    window.electronAPI
+      .extractCachedAppIcon({
+        id: item.id,
+        displayIcon: item.displayIcon || '',
+        installLocation: item.installLocation || '',
+      })
+      .then((res) => {
+        if (res?.success && res.iconPath) {
+          state.pcIconCache.set(item.id, res.iconPath);
+          item.icon = res.iconPath;
+          updateCardIconInDom(item.id, res.iconPath);
+        }
+      })
+      .catch(() => {
+        // Fallback-Icon bleibt stehen
+      })
+      .finally(() => {
+        activeIconJobs--;
+        pumpIconQueue();
+      });
+  }
+}
+
+function queuePcIconExtraction(entries) {
+  for (const { item } of entries) {
+    if (item.origin !== 'pc' || item.icon || state.pcIconTried.has(item.id)) continue;
+    if (!item.displayIcon && !item.installLocation) continue;
+    state.pcIconTried.add(item.id);
+    iconQueue.push(item);
+  }
+  pumpIconQueue();
+}
+
+function matchesTabAndFilter(item, st) {
+  const tab = state.activeTab;
+
+  if (tab === 'updates') {
+    if (!st.hasWebUpdate && !st.hasArchiveUpdate) return false;
+    const originFilter = getActiveOriginFilter();
+    if (originFilter === 'in-archive' && !item.inArchive) return false;
+    if (originFilter === 'not-in-archive' && item.origin !== 'pc') return false;
+    return true;
+  }
+
+  if (tab === 'installed') {
+    if (!item.isInstalled) return false;
+    const originFilter = getActiveOriginFilter();
+    if (originFilter === 'in-archive' && item.origin !== 'both') return false;
+    if (originFilter === 'not-in-archive' && item.origin !== 'pc') return false;
+    if (originFilter === 'winget' && item.packageManager !== 'winget') return false;
+    return true;
+  }
+
+  // Archiv-Tab
+  if (!item.inArchive) return false;
+  if (state.activeTag && !item.tags.includes(state.activeTag)) return false;
+
+  if (state.filterMode === 'any-update' && !st.hasWebUpdate && !st.hasArchiveUpdate) return false;
+  if (state.filterMode === 'webupdate' && !st.hasWebUpdate) return false;
+  if ((state.filterMode === 'archiveupdate' || state.filterMode === 'nasupdate') && !st.hasArchiveUpdate) return false;
+  if (state.filterMode === 'installed' && !item.isInstalled) return false;
+  if (state.filterMode === 'missing-path') {
+    const isStandard = !item.softwareType || item.softwareType === 'default';
+    if (!isStandard || hasAnyLocalPath(item)) return false;
+  }
+  if (state.filterMode === 'missing-web' && hasOnlineSource(item)) return false;
+
+  return true;
+}
+
+function getTabBaseCount(visibleHidden) {
+  let count = 0;
+  for (const item of state.packages) {
+    if (!isPackageVisible(item, visibleHidden)) continue;
+    const st = getItemStatus(item);
+    if (state.activeTab === 'updates' && (st.hasWebUpdate || st.hasArchiveUpdate)) count++;
+    else if (state.activeTab === 'installed' && item.isInstalled) count++;
+    else if (state.activeTab === 'archive' && item.inArchive) count++;
+  }
+  return count;
+}
 
 function getFilteredAndSortedEntries() {
   const hasSearch = state.searchQuery.trim().length > 0;
   const visibleHidden = state.settings.visibleHiddenCats || [];
   const depth = state.settings.versionCompareDepth ?? 3;
+  const sortMode = getActiveSortMode();
 
   const entries = [];
 
-  for (const item of state.catalog) {
-    const isHidden = Boolean(item.hiddenCategory?.trim());
-    if (isHidden && !visibleHidden.includes(item.hiddenCategory)) continue;
-    if (state.activeTag && !item.tags.includes(state.activeTag)) continue;
+  for (const item of state.packages) {
+    if (!isPackageVisible(item, visibleHidden)) continue;
 
     const st = getItemStatus(item);
-    if (state.filterMode === 'any-update' && !st.hasWebUpdate && !st.hasNasUpdate) continue;
-    if (state.filterMode === 'webupdate' && !st.hasWebUpdate) continue;
-    if (state.filterMode === 'nasupdate' && !st.hasNasUpdate) continue;
-    if (state.filterMode === 'installed' && !item.isInstalled) continue;
-    if (state.filterMode === 'missing-path') {
-      const isStandard = !item.softwareType || item.softwareType === 'default';
-      if (!isStandard || hasAnyLocalPath(item)) continue;
-    }
-    if (state.filterMode === 'missing-web' && hasOnlineSource(item)) continue;
+    if (!matchesTabAndFilter(item, st)) continue;
 
     const search = scoreCatalogItem(item, state.searchQuery);
     if (!search.matched) continue;
@@ -50,27 +159,29 @@ function getFilteredAndSortedEntries() {
       }
     }
 
-    const aFav = state.favorites.includes(a.item.id);
-    const bFav = state.favorites.includes(b.item.id);
-    if (aFav !== bFav) return aFav ? -1 : 1;
+    if (state.activeTab === 'archive') {
+      const aFav = state.favorites.includes(a.item.id);
+      const bFav = state.favorites.includes(b.item.id);
+      if (aFav !== bFav) return aFav ? -1 : 1;
+    }
 
-    if (state.sortMode === 'updates') {
-      const rank = (s) => (s.hasWebUpdate ? 2 : s.hasNasUpdate ? 1 : 0);
+    if (sortMode === 'updates') {
+      const rank = (s) => (s.hasWebUpdate ? 2 : s.hasArchiveUpdate ? 1 : 0);
       const diff = rank(b.st) - rank(a.st);
       if (diff !== 0) return diff;
-    } else if (state.sortMode === 'webnas') {
+    } else if (sortMode === 'webarchive' || sortMode === 'webnas') {
       if (a.st.hasWebUpdate !== b.st.hasWebUpdate) return a.st.hasWebUpdate ? -1 : 1;
-    } else if (state.sortMode === 'update') {
-      if (a.st.hasNasUpdate !== b.st.hasNasUpdate) return a.st.hasNasUpdate ? -1 : 1;
-    } else if (state.sortMode === 'installed') {
+    } else if (sortMode === 'update') {
+      if (a.st.hasArchiveUpdate !== b.st.hasArchiveUpdate) return a.st.hasArchiveUpdate ? -1 : 1;
+    } else if (sortMode === 'installed') {
       if (a.item.isInstalled !== b.item.isInstalled) return a.item.isInstalled ? -1 : 1;
-    } else if (state.sortMode === 'newest') {
+    } else if (sortMode === 'newest') {
       return (b.item.addedAt || 0) - (a.item.addedAt || 0);
-    } else if (state.sortMode === 'updated') {
+    } else if (sortMode === 'updated') {
       return (b.item.updatedAt || 0) - (a.item.updatedAt || 0);
     }
 
-    if (state.sortMode === 'webnas' && a.st.webVersion && b.st.webVersion) {
+    if ((sortMode === 'webarchive' || sortMode === 'webnas') && a.st.webVersion && b.st.webVersion) {
       const cmp = compareVersions(b.st.webVersion, a.st.webVersion, depth);
       if (cmp !== 0) return cmp;
     }
@@ -80,11 +191,15 @@ function getFilteredAndSortedEntries() {
   return { entries, hasSearch };
 }
 
-function renderVersionStrip(st) {
-  if (!st.localVersion && !st.nasVersion && !st.webVersion) return '';
+function renderVersionStrip(item, st) {
+  if (!st.localVersion && !st.archiveVersion && !st.webVersion) return '';
 
-  const pcClass = st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasNasUpdate ? 'is-ok' : '';
-  const nasClass = st.hasNasUpdate ? 'is-highlight-nas' : '';
+  const pcClass = st.isPcNewer
+    ? 'is-newer'
+    : st.localVersion && !st.hasArchiveUpdate && !(item.origin === 'pc' && st.hasWebUpdate)
+      ? 'is-ok'
+      : '';
+  const archiveClass = st.hasArchiveUpdate ? 'is-highlight-archive' : '';
   const webClass = st.hasWebUpdate ? 'is-highlight-web' : '';
 
   return `
@@ -93,9 +208,9 @@ function renderVersionStrip(st) {
         <span class="ver-lbl">PC</span>
         <span class="ver-val">${st.localVersion ? escapeHTML(st.localVersion) : '-'}</span>
       </div>
-      <div class="ver-slot ${nasClass}" title="Version im NAS-Archiv">
-        <span class="ver-lbl">NAS</span>
-        <span class="ver-val">${st.nasVersion ? escapeHTML(st.nasVersion) : '-'}</span>
+      <div class="ver-slot ${archiveClass}" title="Version im Archiv">
+        <span class="ver-lbl">Archiv</span>
+        <span class="ver-val">${st.archiveVersion ? escapeHTML(st.archiveVersion) : '-'}</span>
       </div>
       <div class="ver-slot ${webClass}" title="Aktuellste Version im Web">
         <span class="ver-lbl">Web</span>
@@ -106,75 +221,137 @@ function renderVersionStrip(st) {
 }
 
 function renderCardHtml(item, st) {
-  const isFav = state.favorites.includes(item.id);
+  const isFav = item.inArchive && state.favorites.includes(item.id);
   const statusCfg = STATUS_META[st.status];
 
   let secondaryTag = '';
-  if (isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
+  if (item.inArchive && isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
   else if (item.softwareType === 'portable') secondaryTag = '<span class="card-chip">Portabel</span>';
   else if (item.softwareType === 'driver') secondaryTag = '<span class="card-chip">Treiber</span>';
 
+  let originTag = '';
+  if (state.activeTab !== 'archive') {
+    originTag = item.inArchive
+      ? '<span class="card-chip chip-origin-archive" title="Im Archiv hinterlegt">Archiv</span>'
+      : '<span class="card-chip chip-origin-pc" title="Nur lokal auf diesem PC installiert">Nur PC</span>';
+  }
+
   const iconHtml = item.icon
     ? `<img class="card-icon" src="${escapeHTML(toMediaUrl(item.icon))}" loading="lazy" decoding="async" alt="">`
-    : '<div class="card-icon-fallback">📦</div>';
+    : `<div class="card-icon-fallback">${item.origin === 'pc' ? '💻' : '📦'}</div>`;
+
+  const favBtnHtml = item.inArchive
+    ? `<button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="Favorit umschalten" aria-label="Favorit">★</button>`
+    : '';
+
+  const subtitle = item.inArchive
+    ? item.tags.slice(0, 3).join(' · ')
+    : [item.publisher, item.packageId].filter(Boolean).join(' · ') || 'Windows-Installation';
 
   return `
     <article class="card status-${st.status}" data-id="${escapeHTML(item.id)}">
       <div class="card-top">
         <div class="card-badges">
           ${statusCfg ? `<span class="status-pill is-${st.status}" title="${escapeHTML(statusCfg.title)}">${escapeHTML(statusCfg.label)}</span>` : ''}
+          ${originTag}
           ${secondaryTag}
         </div>
-        <button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="Favorit umschalten" aria-label="Favorit">★</button>
+        ${favBtnHtml}
       </div>
 
       <div class="card-body">
         ${iconHtml}
         <h3 class="card-title">${escapeHTML(item.name)}</h3>
-        <p class="card-tags">${escapeHTML(item.tags.slice(0, 3).join(' · '))}</p>
+        <p class="card-tags">${escapeHTML(subtitle)}</p>
       </div>
 
-      ${renderVersionStrip(st)}
+      ${renderVersionStrip(item, st)}
     </article>
   `;
 }
 
+function renderEmptyState() {
+  if (state.activeTab === 'updates') {
+    if (state.isScanningInstalled && !state.hasScannedInstalled) {
+      return `
+        <div class="empty-state">
+          <h3>Suche nach PC- & Archiv-Updates...</h3>
+          <p>Installierte Programme und Winget-Upgrades werden gerade ermittelt.</p>
+        </div>
+      `;
+    }
+    return `
+      <div class="empty-state">
+        <h3>Keine offenen Updates gefunden</h3>
+        <p>Alle erkannten Programme sind aktuell - oder starte oben <strong>🌐 Online-Updates</strong> bzw. <strong>💻 PC prüfen</strong>.</p>
+      </div>
+    `;
+  }
+
+  if (state.activeTab === 'installed') {
+    if (state.isScanningInstalled && !state.hasScannedInstalled) {
+      return `
+        <div class="empty-state">
+          <h3>Scanne installierte PC-Programme...</h3>
+          <p>Winget-Pakete und Windows-Registry werden eingelesen.</p>
+        </div>
+      `;
+    }
+    return `
+      <div class="empty-state">
+        <h3>Keine installierten Programme angezeigt</h3>
+        <p>Klicke auf <strong>💻 PC prüfen</strong> oder passe Suche und Herkunfts-Filter an.</p>
+      </div>
+    `;
+  }
+
+  if (state.catalog.length === 0) {
+    return `
+      <div class="empty-state">
+        <h3>Noch keine Programme im Archiv</h3>
+        <p>Klicke oben auf <strong>🔄 Archiv prüfen</strong>, um deinen Software-Ordner einzulesen.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="empty-state">
+      <h3>Keine Treffer</h3>
+      <p>Passe Suche, Kategorie oder Filter an.</p>
+    </div>
+  `;
+}
+
 export function renderCatalogGrid() {
+  updateNavCounts();
+
   const grid = document.getElementById('grid');
   const countEl = document.getElementById('catalogCountDisplay');
   const countSub = document.getElementById('catalogCountSub');
   if (!grid) return;
 
-  if (state.catalog.length === 0) {
-    if (countEl) countEl.textContent = '0';
-    if (countSub) countSub.textContent = 'Programme';
-    grid.innerHTML = `
-      <div class="empty-state">
-        <h3>Noch keine Programme im Katalog</h3>
-        <p>Klicke oben auf <strong>🔄 Archiv prüfen</strong>, um deinen Software-Ordner einzulesen.</p>
-      </div>
-    `;
-    return;
-  }
-
+  const visibleHidden = state.settings.visibleHiddenCats || [];
+  const baseCount = getTabBaseCount(visibleHidden);
   const { entries, hasSearch } = getFilteredAndSortedEntries();
+
   if (countEl) countEl.textContent = String(entries.length);
   if (countSub) {
-    countSub.textContent = entries.length === state.catalog.length ? 'Programme' : `von ${state.catalog.length}`;
+    countSub.textContent = entries.length === baseCount ? 'Programme' : `von ${baseCount}`;
   }
 
   if (entries.length === 0) {
-    grid.innerHTML = `
-      <div class="empty-state">
-        <h3>Keine Treffer</h3>
-        <p>Passe Suche, Kategorie oder Filter an.</p>
-      </div>
-    `;
+    grid.innerHTML = renderEmptyState();
     return;
   }
 
+  const bannerHtml =
+    state.isScanningInstalled && (state.activeTab === 'updates' || state.activeTab === 'installed')
+      ? '<div class="pc-scan-banner"><span>⏳ Installierte PC-Programme und Winget-Updates werden im Hintergrund aktualisiert...</span></div>'
+      : '';
+
   if (!hasSearch) {
-    grid.innerHTML = entries.map((e) => renderCardHtml(e.item, e.st)).join('');
+    grid.innerHTML = bannerHtml + entries.map((e) => renderCardHtml(e.item, e.st)).join('');
+    queuePcIconExtraction(entries);
     return;
   }
 
@@ -182,6 +359,7 @@ export function renderCatalogGrid() {
   const descMatches = entries.filter((e) => !e.search.isCoreMatch);
 
   const htmlParts = [];
+  if (bannerHtml) htmlParts.push(bannerHtml);
   if (coreMatches.length > 0) {
     htmlParts.push(coreMatches.map((e) => renderCardHtml(e.item, e.st)).join(''));
   }
@@ -195,4 +373,5 @@ export function renderCatalogGrid() {
   }
 
   grid.innerHTML = htmlParts.join('');
+  queuePcIconExtraction(entries);
 }
