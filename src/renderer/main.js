@@ -273,7 +273,7 @@ function setupUpdatesBatchBar() {
       showToast(`Aktualisiere ${tasks.length} ausgewählte Paket(e)...`, { type: 'info' });
 
       try {
-        const res = await window.electronAPI.batchUpdatePackages(tasks);
+        const res = await window.electronAPI.batchUpdatePackages(tasks, { allowSilent: true });
         if (Array.isArray(res?.results)) {
           for (const r of res.results) {
             if (r.status === 'done') state.selectedUpdateIds.delete(r.id);

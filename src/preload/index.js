@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   autoDetectPath: (names) => ipcRenderer.invoke('auto-detect-path', names),
   autoDetectAll: () => ipcRenderer.invoke('auto-detect-all'),
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
+  detectInstaller: (payload) => ipcRenderer.invoke('detect-installer', payload),
+  recordInnoInf: (payload) => ipcRenderer.invoke('record-inno-inf', payload),
   executeInstaller: (payload) => ipcRenderer.invoke('execute-installer', payload),
   copyFilesToPc: (files) => ipcRenderer.invoke('copy-files-to-pc', files),
 
@@ -63,7 +65,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanWingetMatches: (opts) => ipcRenderer.invoke('winget-matcher-scan', opts),
   applyWingetMatches: (assignments) => ipcRenderer.invoke('winget-matcher-apply', assignments),
   batchDownloadArchiveUpdates: (itemIds) => ipcRenderer.invoke('batch-download-archive-updates', itemIds),
-  batchUpdatePackages: (tasks) => ipcRenderer.invoke('batch-update-packages', tasks),
+  batchUpdatePackages: (tasks, opts) => ipcRenderer.invoke('batch-update-packages', tasks, opts),
   previewArchiveCleanup: (opts) => ipcRenderer.invoke('archive-cleanup-preview', opts),
   setKeepAllVersions: (itemPath, keepAllVersions) =>
     ipcRenderer.invoke('archive-cleanup-set-keep', itemPath, keepAllVersions),

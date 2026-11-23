@@ -259,6 +259,10 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       displayIcon: matchedPc?.displayIcon || '',
       pcSource: matchedPc?.source || null,
       hasWingetUpgrade: Boolean(matchedPc?.hasUpdate),
+      installMode: item.installMode || 'interactive',
+      silentArgs: item.silentArgs || '',
+      innoInfFile: item.innoInfFile || '',
+      innoInfExists: Boolean(item.innoInfExists),
     });
   }
 
@@ -310,6 +314,10 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       registryKey: pcApp.registryKey || '',
       pcSource: pcApp.source || 'registry',
       hasWingetUpgrade: Boolean(pcApp.hasUpdate),
+      installMode: 'interactive',
+      silentArgs: '',
+      innoInfFile: '',
+      innoInfExists: false,
     });
   }
 
@@ -405,6 +413,10 @@ export function buildRemotePackageItem({
     registryKey: matchedPcItem?.registryKey || '',
     pcSource: matchedPcItem?.pcSource || null,
     hasWingetUpgrade: Boolean(matchedPcItem?.hasWingetUpgrade),
+    installMode: matchedArchiveItem?.installMode || 'interactive',
+    silentArgs: matchedArchiveItem?.silentArgs || '',
+    innoInfFile: matchedArchiveItem?.innoInfFile || '',
+    innoInfExists: Boolean(matchedArchiveItem?.innoInfExists),
   };
 }
 

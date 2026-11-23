@@ -37,6 +37,9 @@ function toArchivePackage(item) {
     archivePath: item.path,
     icon: item.icon || null,
     keepAllVersions: Boolean(item.keepAllVersions),
+    installMode: item.installMode || 'interactive',
+    silentArgs: item.silentArgs || '',
+    innoInfFile: item.innoInfFile || '',
   };
 }
 
@@ -136,7 +139,7 @@ export const archiveProvider = {
     };
   },
 
-  async install(packageId, { filePath = '' } = {}) {
+  async install(packageId, { filePath = '', allowSilent = false } = {}) {
     const items = loadCatalogWithLiveStatus();
     const item = items.find((i) => i.id === packageId);
     if (!item) {
@@ -154,6 +157,7 @@ export const archiveProvider = {
       itemName: item.name,
       sourcePath,
       targetVersion,
+      allowSilent: Boolean(allowSilent),
     });
   },
 };

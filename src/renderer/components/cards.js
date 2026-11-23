@@ -1,3 +1,4 @@
+import { getInstallModeBadge } from '../../shared/installer-logic.js';
 import { scoreCatalogItem } from '../../shared/search.js';
 import { canDownloadOnline, isPackageVisible } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
@@ -238,6 +239,15 @@ function renderCardHtml(item, st) {
       : '<span class="card-chip chip-origin-pc" title="Nur lokal auf diesem PC installiert">Nur PC</span>';
   }
 
+  let installModeTag = '';
+  if (isUpdatesTab && item.inArchive) {
+    const badge = getInstallModeBadge(item);
+    if (badge) {
+      const cls = badge.type === 'protected' ? 'chip-install-protected' : 'chip-install-silent';
+      installModeTag = `<span class="card-chip ${cls}" title="${escapeHTML(badge.title)}">${escapeHTML(badge.label)}</span>`;
+    }
+  }
+
   const iconHtml = item.icon
     ? `<img class="card-icon" src="${escapeHTML(toMediaUrl(item.icon))}" loading="lazy" decoding="async" alt="">`
     : `<div class="card-icon-fallback">${item.origin === 'pc' ? '💻' : '📦'}</div>`;
@@ -261,6 +271,7 @@ function renderCardHtml(item, st) {
           ${selectHtml}
           ${statusCfg ? `<span class="status-pill is-${st.status}" title="${escapeHTML(statusCfg.title)}">${escapeHTML(statusCfg.label)}</span>` : ''}
           ${originTag}
+          ${installModeTag}
           ${secondaryTag}
         </div>
         ${favBtnHtml}
@@ -371,6 +382,29 @@ export function renderUpdatesBatchBar(entries = null) {
   const pendingArchiveDownloads = getPendingArchiveWebUpdateItems().length;
   const disabledAttr = state.isBatchActionRunning ? 'disabled' : '';
 
+  const modeSourceEntries =
+    selectedCount > 0 ? activeEntries.filter((e) => state.selectedUpdateIds.has(e.item.id)) : activeEntries;
+  let silentCount = 0;
+  let protectedCount = 0;
+  for (const { item } of modeSourceEntries) {
+    if (!item.inArchive) continue;
+    const badge = getInstallModeBadge(item);
+    if (badge?.type === 'silent') silentCount++;
+    else if (badge?.type === 'protected') protectedCount++;
+  }
+  const modePills = [];
+  if (silentCount > 0) {
+    modePills.push(
+      `<span class="batch-mode-pill is-silent" title="Wird bei Massenaktualisierung still installiert">⚡ ${silentCount} Silent</span>`
+    );
+  }
+  if (protectedCount > 0) {
+    modePills.push(
+      `<span class="batch-mode-pill is-protected" title="Silent-Parameter werden wegen Adware-Schutz immer ignoriert">🛡️ ${protectedCount} Interaktiv-Schutz</span>`
+    );
+  }
+  const modePillsHtml = modePills.length > 0 ? `<div class="batch-mode-pills">${modePills.join('')}</div>` : '';
+
   bar.hidden = false;
   bar.innerHTML = `
     <div class="batch-bar-left">
@@ -379,6 +413,7 @@ export function renderUpdatesBatchBar(entries = null) {
         <span>Alle auswählen</span>
       </label>
       <span class="batch-selected-count">${selectedCount} von ${totalCount} ausgewählt</span>
+      ${modePillsHtml}
     </div>
     <div class="batch-bar-right">
       <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>

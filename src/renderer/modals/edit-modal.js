@@ -1,7 +1,18 @@
+import { detectAdwareSignals, normalizeInstallMode, sanitizeInnoInfFileName } from '../../shared/installer-logic.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getCatalogItemById, state } from '../state.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { openDetailModal, triggerCatalogReload } from './index.js';
+
+function getInstallModeDescription(mode) {
+  if (mode === 'silent') {
+    return 'Opt-in: Wird bei Einzelinstallationen & Massen-Updates still mit den gesetzten Parametern ausgeführt.';
+  }
+  if (mode === 'interactive-required') {
+    return '🛡️ Adware-Schutz: Silent-Parameter werden IMMER ignoriert (auch bei Massen-Updates & Bündeln), damit du Zusatzangebote abwählen kannst.';
+  }
+  return 'Standard: Das Setup-Fenster öffnet sich normal. Du klickst dich selbst durch den Assistenten.';
+}
 
 function detectInitialSourceType(item) {
   if (item.webSourceType && item.webSourceType !== 'none') return item.webSourceType;
@@ -29,6 +40,17 @@ export function renderEditModal(id, initialTab = 'general') {
   ];
   let currentSourceType = detectInitialSourceType(item);
   const initialWingetId = item.wingetId || (item.packageManager === 'winget' ? item.packageId : '') || '';
+  let currentInstallMode = normalizeInstallMode(item.installMode);
+  let detectedInstallerType = '';
+  let infExists = Boolean(item.innoInfExists);
+  let recordedInfName = item.innoInfFile || '';
+  const primarySetupFile = item.lastFiles?.[0] || '';
+  const currentAdwareWarning = detectAdwareSignals({
+    name: item.name,
+    fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
+    packageId: initialWingetId || item.packageId || '',
+    publisher: item.publisher || '',
+  });
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
   const cleanDesc = sanitizeRichHtml(item.description || '');
 
@@ -244,6 +266,56 @@ export function renderEditModal(id, initialTab = 'general') {
           </div>
           <div id="unifiedPathList" class="path-list"></div>
         </div>
+
+        <div class="install-mode-section">
+          <div class="field-header-row">
+            <span>⚙️ Installationsmodus & Adware-Schutz</span>
+          </div>
+
+          <div id="adwareWarningBox" class="adware-warning-banner" ${currentAdwareWarning.flagged ? '' : 'hidden'}>
+            <div class="adware-warning-text">
+              <strong class="adware-warning-title">⚠️ Adware-/Bundle-Hinweis</strong>
+              <span id="adwareWarningReason">${escapeHTML(currentAdwareWarning.reason || '')}</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-xs" data-edit-action="apply-adware-protection" id="btnApplyAdwareProtection" ${currentInstallMode === 'interactive-required' ? 'hidden' : ''}>🛡️ Adware-Schutz aktivieren</button>
+          </div>
+
+          <div class="install-mode-switcher" id="installModeSwitcher">
+            <button type="button" class="install-mode-opt ${currentInstallMode === 'interactive' ? 'active' : ''}" data-install-mode="interactive">🖱️ Interaktiv</button>
+            <button type="button" class="install-mode-opt ${currentInstallMode === 'silent' ? 'active' : ''}" data-install-mode="silent">⚡ Stille Installation</button>
+            <button type="button" class="install-mode-opt is-protected ${currentInstallMode === 'interactive-required' ? 'active' : ''}" data-install-mode="interactive-required">🛡️ Immer Interaktiv (Adware-Schutz)</button>
+          </div>
+          <p class="panel-hint" id="installModeDesc">${escapeHTML(getInstallModeDescription(currentInstallMode))}</p>
+
+          <div id="silentConfigBox" class="silent-config-box ${currentInstallMode === 'interactive-required' ? 'is-ignored' : ''}">
+            <div class="silent-setup-meta">
+              <span class="muted">${primarySetupFile ? `Setup-Datei: <code>${escapeHTML(getBaseName(primarySetupFile))}</code>` : 'Noch keine Setup-Datei im Archiv – beim Erkennen/Testen kann eine lokale Datei gewählt werden.'}</span>
+              <span id="silentIgnoredHint" class="silent-ignored-hint" ${currentInstallMode === 'interactive-required' ? '' : 'hidden'}>🛡️ Im Adware-Schutz-Modus werden Silent-Parameter bei der Ausführung ignoriert.</span>
+            </div>
+
+            <div class="form-field">
+              <span>Silent-Parameter (z. B. <code>/VERYSILENT /NORESTART /SP-</code>)</span>
+              <div class="input-action-row">
+                <input type="text" id="editSilentArgs" value="${escapeHTML(item.silentArgs || '')}" placeholder="z. B. /VERYSILENT /NORESTART /SP- oder /qn /norestart">
+                <button type="button" class="btn btn-ghost" data-edit-action="detect-installer">🔍 Setup-Typ erkennen</button>
+                <button type="button" class="btn btn-ghost" data-edit-action="test-installer">▶️ Testen</button>
+              </div>
+            </div>
+
+            <div id="installerDetectFeedback" class="installer-detect-feedback" hidden></div>
+
+            <div id="innoInfBox" class="inno-inf-box" ${item.innoInfFile || currentInstallMode === 'silent' ? '' : 'hidden'}>
+              <div class="form-field">
+                <span>Inno-Setup Antwortdatei (<code>.inf</code> im <code>_metadata/</code>-Ordner)</span>
+                <div class="input-action-row">
+                  <input type="text" id="editInnoInfFile" value="${escapeHTML(item.innoInfFile || '')}" placeholder="silent.inf">
+                  <button type="button" class="btn btn-ghost" data-edit-action="record-inno-inf">📝 Antwortdatei (.inf) aufzeichnen</button>
+                </div>
+              </div>
+              <span id="innoInfStatus" class="muted"></span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- TAB 4: MEDIEN -->
@@ -340,8 +412,54 @@ export function renderEditModal(id, initialTab = 'general') {
     }
   };
 
+  const updateInnoInfStatus = () => {
+    const statusEl = modal.querySelector('#innoInfStatus');
+    const infInput = modal.querySelector('#editInnoInfFile');
+    if (!statusEl || !infInput) return;
+    const val = sanitizeInnoInfFileName(infInput.value.trim());
+    if (!val) {
+      statusEl.textContent = 'Optional: Zeichnet deine Setup-Häkchen einmalig über /SAVEINF auf.';
+      return;
+    }
+    if (infExists && val.toLowerCase() === recordedInfName.toLowerCase()) {
+      statusEl.textContent = `✓ Antwortdatei "${val}" im _metadata/-Ordner vorhanden (wird als /LOADINF mitgegeben).`;
+    } else {
+      statusEl.textContent = `⚠️ Datei "${val}" noch nicht im _metadata/-Ordner aufgezeichnet.`;
+    }
+  };
+
+  const switchInstallMode = (mode) => {
+    currentInstallMode = normalizeInstallMode(mode);
+    modal.querySelectorAll('.install-mode-opt').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.installMode === currentInstallMode);
+    });
+    const descEl = modal.querySelector('#installModeDesc');
+    if (descEl) descEl.textContent = getInstallModeDescription(currentInstallMode);
+
+    const configBox = modal.querySelector('#silentConfigBox');
+    if (configBox) configBox.classList.toggle('is-ignored', currentInstallMode === 'interactive-required');
+
+    const ignoredHint = modal.querySelector('#silentIgnoredHint');
+    if (ignoredHint) ignoredHint.hidden = currentInstallMode !== 'interactive-required';
+
+    const applyAdwareBtn = modal.querySelector('#btnApplyAdwareProtection');
+    if (applyAdwareBtn) applyAdwareBtn.hidden = currentInstallMode === 'interactive-required';
+
+    const innoBox = modal.querySelector('#innoInfBox');
+    const infVal = modal.querySelector('#editInnoInfFile')?.value.trim();
+    if (innoBox) {
+      innoBox.hidden = !(detectedInstallerType === 'inno' || Boolean(infVal) || currentInstallMode === 'silent');
+    }
+  };
+
+  const resolveTargetSetupFile = async () => {
+    if (primarySetupFile) return primarySetupFile;
+    return window.electronAPI.selectFile([{ name: 'Installer (.exe, .msi)', extensions: ['exe', 'msi'] }], true);
+  };
+
   renderPathList();
   renderMediaSection();
+  updateInnoInfStatus();
 
   // Tab-Wechsel
   const switchTab = (tabName) => {
@@ -438,6 +556,13 @@ export function renderEditModal(id, initialTab = 'general') {
     const srcBtn = e.target.closest('.source-opt');
     if (srcBtn) {
       switchSource(srcBtn.dataset.source);
+      return;
+    }
+
+    // Installationsmodus Klick
+    const modeBtn = e.target.closest('[data-install-mode]');
+    if (modeBtn) {
+      switchInstallMode(modeBtn.dataset.installMode);
       return;
     }
 
@@ -722,6 +847,166 @@ export function renderEditModal(id, initialTab = 'general') {
       return;
     }
 
+    if (act === 'apply-adware-protection') {
+      switchInstallMode('interactive-required');
+      showToast('Adware-Schutz („Immer Interaktiv“) aktiviert.', { type: 'success' });
+      return;
+    }
+
+    // Setup-Typ automatisch erkennen
+    if (act === 'detect-installer') {
+      const targetFile = await resolveTargetSetupFile();
+      if (!targetFile) return;
+
+      actionBtn.disabled = true;
+      const orig = actionBtn.textContent;
+      actionBtn.textContent = '⏳ Analysiere...';
+
+      const res = await window.electronAPI.detectInstaller({
+        filePath: targetFile,
+        name: modal.querySelector('#editName').value.trim() || item.name,
+        packageId: modal.querySelector('#editWingetId')?.value.trim() || item.packageId || '',
+        publisher: item.publisher || '',
+      });
+
+      actionBtn.disabled = false;
+      actionBtn.textContent = orig;
+
+      if (!res?.success) {
+        showToast(res?.error || 'Setup-Typ konnte nicht erkannt werden.', { type: 'error' });
+        return;
+      }
+
+      detectedInstallerType = res.type || 'unknown';
+      const argsInput = modal.querySelector('#editSilentArgs');
+      if (argsInput && res.suggestedArgs) {
+        argsInput.value = res.suggestedArgs;
+      }
+
+      const fb = modal.querySelector('#installerDetectFeedback');
+      if (fb) {
+        fb.hidden = false;
+        fb.innerHTML = `
+          <strong>Erkannter Setup-Typ: ${escapeHTML(res.label)}</strong>
+          ${res.matchedSignature ? `<code>${escapeHTML(res.matchedSignature)}</code>` : ''}
+          <p class="muted">${escapeHTML(res.hint || '')}</p>
+        `;
+      }
+
+      if (res.type === 'inno') {
+        const innoBox = modal.querySelector('#innoInfBox');
+        if (innoBox) innoBox.hidden = false;
+      }
+
+      if (res.adwareWarning?.flagged) {
+        const warnBox = modal.querySelector('#adwareWarningBox');
+        const warnReason = modal.querySelector('#adwareWarningReason');
+        const applyBtn = modal.querySelector('#btnApplyAdwareProtection');
+        if (warnReason) warnReason.textContent = res.adwareWarning.reason;
+        if (warnBox) warnBox.hidden = false;
+        if (applyBtn) applyBtn.hidden = currentInstallMode === 'interactive-required';
+      }
+
+      if (res.suggestedArgs) {
+        showToast(`Typ „${res.label}“ erkannt – Parameter übernommen.`, { type: 'success' });
+      } else {
+        showToast(`Typ „${res.label}“ erkannt – bitte Parameter manuell prüfen.`, { type: 'info' });
+      }
+      return;
+    }
+
+    // Installer mit aktuellem Modus testen
+    if (act === 'test-installer') {
+      const argsVal = modal.querySelector('#editSilentArgs')?.value.trim() || '';
+      if (currentInstallMode === 'silent' && !argsVal) {
+        return showToast('Bitte zuerst Silent-Parameter eingeben oder per „Setup-Typ erkennen“ ermitteln.', {
+          type: 'warn',
+        });
+      }
+
+      const targetFile = await resolveTargetSetupFile();
+      if (!targetFile) return;
+
+      const infVal = sanitizeInnoInfFileName(modal.querySelector('#editInnoInfFile')?.value.trim() || '');
+      actionBtn.disabled = true;
+      const orig = actionBtn.textContent;
+      actionBtn.textContent = '⏳ Läuft...';
+
+      const res = await window.electronAPI.executeInstaller({
+        itemId: item.id,
+        itemName: modal.querySelector('#editName').value.trim() || item.name,
+        sourcePath: targetFile,
+        itemPath: item.path,
+        allowSilent: currentInstallMode === 'silent',
+        installMode: currentInstallMode,
+        silentArgs: argsVal,
+        innoInfFile: infVal,
+      });
+
+      actionBtn.disabled = false;
+      actionBtn.textContent = orig;
+
+      if (res?.alreadyRunning) {
+        showToast('Für dieses Programm läuft bereits eine Installation.', { type: 'warn' });
+      } else if (res?.canceled) {
+        showToast('Testlauf wurde abgebrochen.', { type: 'info' });
+      } else if (res?.success) {
+        const msg = res.adwareProtected
+          ? 'Testlauf im Adware-Schutz (Immer Interaktiv) abgeschlossen – Silent-Parameter wurden ignoriert.'
+          : res.effectiveSilent
+            ? 'Stiller Testlauf erfolgreich abgeschlossen.'
+            : 'Interaktiver Testlauf abgeschlossen.';
+        showToast(msg, { type: 'success' });
+      } else if (res?.error) {
+        showToast(`Testlauf fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+      }
+      return;
+    }
+
+    // Inno Setup Antwortdatei (.inf) aufzeichnen
+    if (act === 'record-inno-inf') {
+      const targetFile = await resolveTargetSetupFile();
+      if (!targetFile) return;
+
+      if (!targetFile.toLowerCase().endsWith('.exe')) {
+        return showToast('Antwortdateien (.inf) werden nur für Inno-Setup-.exe-Dateien unterstützt.', { type: 'warn' });
+      }
+
+      const infInput = modal.querySelector('#editInnoInfFile');
+      const desiredName = sanitizeInnoInfFileName(infInput?.value.trim() || '') || 'silent.inf';
+
+      actionBtn.disabled = true;
+      const orig = actionBtn.textContent;
+      actionBtn.textContent = '⏳ Aufzeichnung...';
+
+      const res = await window.electronAPI.recordInnoInf({
+        itemId: item.id,
+        itemName: modal.querySelector('#editName').value.trim() || item.name,
+        itemPath: item.path,
+        sourcePath: targetFile,
+        infFileName: desiredName,
+      });
+
+      actionBtn.disabled = false;
+      actionBtn.textContent = orig;
+
+      if (res?.alreadyRunning) {
+        showToast('Für dieses Programm läuft bereits eine Installation.', { type: 'warn' });
+      } else if (res?.success) {
+        if (infInput) infInput.value = res.infFile;
+        infExists = true;
+        recordedInfName = res.infFile;
+        updateInnoInfStatus();
+        await triggerCatalogReload();
+        showToast(`Antwortdatei „${res.infFile}“ im _metadata/-Ordner gespeichert!`, { type: 'success' });
+      } else if (res?.canceled) {
+        showToast('Aufzeichnung abgebrochen.', { type: 'info' });
+      } else {
+        showToast(res?.error || 'Antwortdatei konnte nicht aufgezeichnet werden.', { type: 'error', duration: 6000 });
+      }
+      return;
+    }
+
     // Icon aus .exe extrahieren
     if (act === 'extract-icon') {
       const exeEntry = draftPaths.find((p) => p.path.toLowerCase().endsWith('.exe'));
@@ -941,6 +1226,9 @@ export function renderEditModal(id, initialTab = 'general') {
           .filter(Boolean),
         autoPaths: draftPaths.filter((p) => p.origin === 'auto').map((p) => p.path),
         installPaths: draftPaths.filter((p) => p.origin === 'manual').map((p) => p.path),
+        installMode: currentInstallMode,
+        silentArgs: modal.querySelector('#editSilentArgs')?.value.trim() || '',
+        innoInfFile: sanitizeInnoInfFileName(modal.querySelector('#editInnoInfFile')?.value.trim() || ''),
         webSourceType: currentSourceType,
         packageManager: nextPackageManager,
         packageId: nextPackageId,

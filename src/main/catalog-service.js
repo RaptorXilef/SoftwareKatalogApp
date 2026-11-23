@@ -123,6 +123,9 @@ export async function createSoftwareEntry(targetDir) {
         description: '',
         installPaths: [],
         autoPaths: [],
+        installMode: 'interactive',
+        silentArgs: '',
+        innoInfFile: '',
         webSourceType: 'none',
         links: {},
       };

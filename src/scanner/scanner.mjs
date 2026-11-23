@@ -93,6 +93,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   let installPaths = [];
   let autoPaths = [];
   let softwareType = 'default';
+  let installMode = 'interactive';
+  let silentArgs = '';
+  let innoInfFile = '';
+  let innoInfExists = false;
   let webSourceType = '';
   let packageManager = '';
   let packageId = '';
@@ -198,6 +202,22 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
         if (data.packageId) packageId = String(data.packageId).trim();
         if (data.wingetId) wingetId = String(data.wingetId).trim();
         if (typeof data.keepAllVersions === 'boolean') keepAllVersions = data.keepAllVersions;
+        if (data.installMode === 'silent' || data.installMode === 'interactive-required') {
+          installMode = data.installMode;
+        }
+        if (typeof data.silentArgs === 'string') {
+          silentArgs = data.silentArgs
+            .replace(/[\r\n]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+        if (typeof data.innoInfFile === 'string') {
+          const rawInf = data.innoInfFile.trim();
+          const baseInf = rawInf.split('\\').pop().split('/').pop().trim();
+          if (baseInf && !rawInf.includes('..') && /\.inf$/i.test(baseInf)) {
+            innoInfFile = baseInf;
+          }
+        }
 
         if (!packageId && wingetId) {
           packageId = wingetId;
@@ -278,6 +298,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     }
   }
 
+  innoInfExists = Boolean(innoInfFile && existsSync(path.join(metaDir, innoInfFile)));
   const scanMtime = await getFolderSignature(softwareDir);
   const toRel = (p) => (p ? path.relative(APP_DIR, p) : null);
 
@@ -297,6 +318,10 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
     installPaths,
     autoPaths,
     softwareType,
+    installMode,
+    silentArgs,
+    innoInfFile,
+    innoInfExists,
     webSourceType: webSourceType || 'none',
     packageManager,
     packageId,

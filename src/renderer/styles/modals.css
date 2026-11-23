@@ -1859,3 +1859,134 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Schritt E: Silent-Install & Adware-Schutz */
+.install-mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.adware-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 55%, var(--border));
+  background: color-mix(in srgb, var(--color-warn) 12%, var(--bg));
+}
+
+.adware-warning-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 260px;
+  font-size: 12.5px;
+}
+
+.adware-warning-title {
+  color: var(--color-warn);
+}
+
+.install-mode-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.install-mode-opt {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    border-color: var(--accent);
+  }
+
+  &.active {
+    background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  &.is-protected.active {
+    background: color-mix(in srgb, var(--color-warn) 18%, var(--bg));
+    border-color: var(--color-warn);
+    color: var(--color-warn);
+  }
+}
+
+.silent-config-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg) 60%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+
+  &.is-ignored {
+    border-color: color-mix(in srgb, var(--color-warn) 45%, var(--border));
+    opacity: 0.85;
+  }
+}
+
+.silent-setup-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.silent-ignored-hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-warn);
+}
+
+.installer-detect-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  font-size: 12.5px;
+
+  & code {
+    align-self: flex-start;
+    font-size: 11.5px;
+    color: var(--accent);
+  }
+
+  & p {
+    margin: 0;
+  }
+}
+
+.inno-inf-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}

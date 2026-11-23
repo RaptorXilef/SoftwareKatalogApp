@@ -1,3 +1,4 @@
+import { getInstallModeBadge } from '../../shared/installer-logic.js';
 import { buildRemotePackageItem } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
@@ -447,6 +448,26 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
     );
   }
   if (item.inArchive) {
+    const modeLabel =
+      item.installMode === 'interactive-required'
+        ? '🛡️ Immer Interaktiv (Adware-Schutz)'
+        : item.installMode === 'silent'
+          ? '⚡ Stille Installation (Opt-in)'
+          : '🖱️ Interaktiv (Standard)';
+    techRows.push(
+      `<div class="tech-row"><span>Installationsmodus</span><strong>${escapeHTML(modeLabel)}</strong></div>`
+    );
+    if (item.silentArgs) {
+      techRows.push(
+        `<div class="tech-row"><span>Silent-Parameter</span><code>${escapeHTML(item.silentArgs)}</code></div>`
+      );
+    }
+    if (item.innoInfFile) {
+      const infHint = item.innoInfExists ? 'vorhanden' : 'fehlt im _metadata/-Ordner';
+      techRows.push(
+        `<div class="tech-row"><span>Inno Antwortdatei</span><code>${escapeHTML(item.innoInfFile)}</code> <span class="muted">(${infHint})</span></div>`
+      );
+    }
     techRows.push(
       `<div class="tech-row"><span>Aufräum-Schutz</span><code>${item.keepAllVersions ? 'Aktiv (Alle Versionen behalten)' : 'Standard'}</code></div>`
     );
@@ -581,6 +602,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         ? '<span class="card-chip">Treiber</span>'
         : '';
   const keepChip = item.keepAllVersions ? '<span class="card-chip">🔒 Alle Versionen</span>' : '';
+  const installBadge = item.inArchive ? getInstallModeBadge(item) : null;
+  const installModeChip = installBadge
+    ? `<span class="card-chip ${installBadge.type === 'protected' ? 'chip-install-protected' : 'chip-install-silent'}" title="${escapeHTML(installBadge.title)}">${escapeHTML(installBadge.label)}</span>`
+    : '';
   const inArchiveRemoteChip =
     item.origin === 'remote' && matchedArchive ? '<span class="discover-status-badge">Im Archiv</span>' : '';
 
@@ -655,6 +680,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
             ${newChip}
             ${typeChip}
             ${keepChip}
+            ${installModeChip}
           </div>
           ${headerMeta.length > 0 ? `<div class="detail-meta-inline">${headerMeta.join('')}</div>` : ''}
         </div>
@@ -884,6 +910,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       itemName: item.name,
       sourcePath: filePath,
       targetVersion: targetVersion || null,
+      allowSilent: item.installMode === 'silent',
     });
 
     if (res.alreadyRunning) {

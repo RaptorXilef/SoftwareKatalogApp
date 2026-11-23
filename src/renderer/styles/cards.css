@@ -131,6 +131,16 @@
     background: color-mix(in srgb, var(--color-newer) 16%, transparent);
     color: var(--color-newer);
   }
+
+  &.chip-install-silent {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+  }
+
+  &.chip-install-protected {
+    background: color-mix(in srgb, var(--color-warn) 18%, transparent);
+    color: var(--color-warn);
+  }
 }
 
 .fav-btn {

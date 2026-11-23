@@ -4,9 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, shell } from 'electron';
 import { mergeInstalledSoftware } from '../shared/installed-merger.js';
+import {
+  normalizeInstallMode,
+  resolveInstallExecutionPlan,
+  sanitizeInnoInfFileName,
+  sanitizeSilentArgs,
+} from '../shared/installer-logic.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
-import { getConfig, getIconCacheDir, saveConfig } from './config.js';
+import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { createJob } from './jobs.js';
 import { wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
@@ -416,9 +422,21 @@ export async function extractExeIcon(exePath, targetSoftwareDir) {
   }
 }
 
+async function cleanupTempFiles(paths) {
+  for (const p of paths) {
+    if (!p) continue;
+    try {
+      if (fs.existsSync(p)) await fs.promises.unlink(p);
+    } catch {
+      // Manchmal hält ein Kindprozess die Datei kurz fest
+    }
+  }
+}
+
 /**
  * Kopiert das Setup lokal ins Temp-Verzeichnis, wartet auf den Abschluss,
  * wertet den Windows-ExitCode aus und verifiziert anschließend die installierte Version.
+ * Respektiert `installMode` (`interactive` | `silent` | `interactive-required`) und optionale Inno-`.inf`-Dateien.
  */
 export async function executeAndVerifyInstaller({
   itemId,
@@ -427,6 +445,11 @@ export async function executeAndVerifyInstaller({
   targetVersion = null,
   useJob = true,
   onProgress = null,
+  allowSilent = false,
+  installMode = null,
+  silentArgs = null,
+  innoInfFile = null,
+  itemPath = null,
 }) {
   const cfg = getConfig();
   const depth = cfg.versionCompareDepth ?? 3;
@@ -440,11 +463,55 @@ export async function executeAndVerifyInstaller({
     return err ? { success: false, error: err } : { success: true, status: 'opened' };
   }
 
+  let catItem = null;
+  if (
+    itemId &&
+    (installMode === null ||
+      installMode === undefined ||
+      silentArgs === null ||
+      silentArgs === undefined ||
+      innoInfFile === null ||
+      innoInfFile === undefined ||
+      !itemPath)
+  ) {
+    catItem = loadCatalogWithLiveStatus().find((c) => c.id === itemId) || null;
+  }
+
+  const effectiveMode = normalizeInstallMode(installMode ?? catItem?.installMode);
+  const effectiveSilentArgs = sanitizeSilentArgs(silentArgs ?? catItem?.silentArgs ?? '');
+  const effectiveInfName = sanitizeInnoInfFileName(innoInfFile ?? catItem?.innoInfFile ?? '');
+  const effectiveItemPath = itemPath || catItem?.path || '';
+
+  const tempDir = app.getPath('temp');
+  const stamp = Date.now();
+  const tempPath = path.join(tempDir, `sk_install_${stamp}_${path.basename(sourcePath)}`);
+
+  const sourceInfPath =
+    effectiveMode === 'silent' && allowSilent && effectiveInfName && effectiveItemPath
+      ? path.join(effectiveItemPath, '_metadata', effectiveInfName)
+      : '';
+  const hasValidSourceInf = Boolean(sourceInfPath && fs.existsSync(sourceInfPath));
+  const tempInfPath = hasValidSourceInf ? path.join(tempDir, `sk_inf_${stamp}_${effectiveInfName}`) : '';
+
+  const plan = resolveInstallExecutionPlan({
+    installMode: effectiveMode,
+    silentArgs: effectiveSilentArgs,
+    innoInfPath: tempInfPath,
+    ext,
+    allowSilent,
+  });
+
+  const displayName = itemName || catItem?.name || path.basename(sourcePath);
   let job = null;
   if (useJob) {
+    const jobTitle = plan.adwareProtected
+      ? `Installation: ${displayName} · 🛡️ Interaktiv (Adware-Schutz)`
+      : plan.effectiveSilent
+        ? `Stille Installation: ${displayName} ⚡`
+        : `Installation: ${displayName}`;
     job = createJob({
       type: 'install',
-      title: `Installation: ${itemName || path.basename(sourcePath)}`,
+      title: jobTitle,
       dedupeKey: `install:${itemId}`,
       cancelable: false,
     });
@@ -456,21 +523,24 @@ export async function executeAndVerifyInstaller({
     onProgress?.(pct, detail);
   };
 
-  const tempDir = app.getPath('temp');
-  const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${path.basename(sourcePath)}`);
-
   try {
     reportProgress(15, 'Kopiere Setup-Datei aus dem Archiv in lokalen Temp-Ordner...');
     await fs.promises.copyFile(sourcePath, tempPath);
+    if (tempInfPath && sourceInfPath) {
+      await fs.promises.copyFile(sourceInfPath, tempInfPath);
+    }
 
-    reportProgress(null, 'Installer läuft - bitte Setup-Assistent abschließen...');
+    reportProgress(null, plan.bannerHint);
     const safeTemp = tempPath.replace(/'/g, "''");
+    const safeExtraArgs = plan.extraArgs.replace(/'/g, "''");
+    const msiArgList = safeExtraArgs ? `/i "${safeTemp}" ${safeExtraArgs}` : `/i "${safeTemp}"`;
+    const exeArgClause = safeExtraArgs ? `-ArgumentList '${safeExtraArgs}'` : '';
 
     const launchScript =
       ext === '.msi'
         ? `
           try {
-            $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', '${safeTemp}') -Wait -PassThru
+            $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList '${msiArgList}' -Wait -PassThru
             Write-Output "EXIT:$($p.ExitCode)"
           } catch {
             Write-Output "ERR:$($_.Exception.Message)"
@@ -478,7 +548,7 @@ export async function executeAndVerifyInstaller({
         `
         : `
           try {
-            $p = Start-Process -FilePath '${safeTemp}' -Wait -PassThru
+            $p = Start-Process -FilePath '${safeTemp}' ${exeArgClause} -Wait -PassThru
             Write-Output "EXIT:$($p.ExitCode)"
           } catch {
             Write-Output "ERR:$($_.Exception.Message)"
@@ -487,12 +557,8 @@ export async function executeAndVerifyInstaller({
 
     const { stdout } = await runPowerShell(launchScript);
 
-    // Temp-Datei aufräumen
-    try {
-      if (fs.existsSync(tempPath)) await fs.promises.unlink(tempPath);
-    } catch {
-      // Manchmal hält ein Kindprozess die Datei kurz fest
-    }
+    // Temp-Dateien aufräumen
+    await cleanupTempFiles([tempPath, tempInfPath]);
 
     if (stdout.startsWith('ERR:')) {
       const msg = stdout.replace('ERR:', '').trim();
@@ -500,7 +566,14 @@ export async function executeAndVerifyInstaller({
       job?.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Installation durch Benutzer abgebrochen.' : msg, {
         autoRemoveMs: 4000,
       });
-      return { success: false, canceled: wasCanceled, error: msg };
+      return {
+        success: false,
+        canceled: wasCanceled,
+        error: msg,
+        effectiveSilent: plan.effectiveSilent,
+        adwareProtected: plan.adwareProtected,
+        usedInf: plan.usedInf,
+      };
     }
 
     const exitMatch = stdout.match(/EXIT:(-?\d+)/);
@@ -508,7 +581,14 @@ export async function executeAndVerifyInstaller({
 
     if (exitCode === 1602 || exitCode === 1223) {
       job?.finish('canceled', 'Installation wurde abgebrochen.', { autoRemoveMs: 3500 });
-      return { success: false, canceled: true, exitCode };
+      return {
+        success: false,
+        canceled: true,
+        exitCode,
+        effectiveSilent: plan.effectiveSilent,
+        adwareProtected: plan.adwareProtected,
+        usedInf: plan.usedInf,
+      };
     }
 
     // Kurz warten (Windows-Registry braucht manchmal ~1 Sekunde zum Flushen)
@@ -523,7 +603,15 @@ export async function executeAndVerifyInstaller({
 
     if (reachedTarget || bumpedVersion) {
       job?.finish('done', `Erfolgreich installiert (v${newVersion})`, { autoRemoveMs: 4000 });
-      return { success: true, verified: true, newVersion, exitCode };
+      return {
+        success: true,
+        verified: true,
+        newVersion,
+        exitCode,
+        effectiveSilent: plan.effectiveSilent,
+        adwareProtected: plan.adwareProtected,
+        usedInf: plan.usedInf,
+      };
     }
 
     if (exitCode === 0 || exitCode === 3010) {
@@ -532,19 +620,130 @@ export async function executeAndVerifyInstaller({
         autoRemoveMs: 0, // Bleibt sichtbar mit Aktion!
         action: { label: 'Status erneut prüfen', type: 'recheck-local', itemId },
       });
-      return { success: true, verified: false, newVersion, exitCode };
+      return {
+        success: true,
+        verified: false,
+        newVersion,
+        exitCode,
+        effectiveSilent: plan.effectiveSilent,
+        adwareProtected: plan.adwareProtected,
+        usedInf: plan.usedInf,
+      };
     }
 
     job?.finish('error', `Installer meldete Fehlercode ${exitCode}.`, { autoRemoveMs: 6000 });
-    return { success: false, exitCode, error: `ExitCode ${exitCode}` };
+    return {
+      success: false,
+      exitCode,
+      error: `ExitCode ${exitCode}`,
+      effectiveSilent: plan.effectiveSilent,
+      adwareProtected: plan.adwareProtected,
+      usedInf: plan.usedInf,
+    };
   } catch (err) {
-    try {
-      if (fs.existsSync(tempPath)) await fs.promises.unlink(tempPath);
-    } catch {
-      // Ignorieren
-    }
+    await cleanupTempFiles([tempPath, tempInfPath]);
     job?.finish('error', err.message, { autoRemoveMs: 5000 });
+    return {
+      success: false,
+      error: err.message,
+      effectiveSilent: plan.effectiveSilent,
+      adwareProtected: plan.adwareProtected,
+      usedInf: plan.usedInf,
+    };
+  }
+}
+
+/**
+ * Startet einen Inno-Setup-Installer einmalig interaktiv mit `/SAVEINF`,
+ * damit der Benutzer seine gewünschten Optionen wählt, und speichert die erzeugte `.inf` in `_metadata/`.
+ */
+export async function recordInnoInfFile({
+  itemId = '',
+  itemName = '',
+  itemPath = '',
+  sourcePath = '',
+  infFileName = 'silent.inf',
+}) {
+  if (!itemPath || !isInsideTargetDir(itemPath)) {
+    return { success: false, error: 'Sicherheitsverletzung: Zielordner liegt außerhalb des Archivs.' };
+  }
+  if (!sourcePath || !fs.existsSync(sourcePath) || path.extname(sourcePath).toLowerCase() !== '.exe') {
+    return { success: false, error: 'Für die Antwortdatei-Aufzeichnung wird eine gültige .exe-Setup-Datei benötigt.' };
+  }
+
+  const cleanInfName = sanitizeInnoInfFileName(infFileName) || 'silent.inf';
+  const job = createJob({
+    type: 'inno-record',
+    title: `Antwortdatei (.inf) aufzeichnen: ${itemName || path.basename(sourcePath)}`,
+    dedupeKey: `install:${itemId || itemPath}`,
+    cancelable: false,
+  });
+  if (!job) {
+    return { success: false, alreadyRunning: true, error: 'Für dieses Programm läuft bereits eine Installation.' };
+  }
+
+  const tempDir = app.getPath('temp');
+  const stamp = Date.now();
+  const tempExePath = path.join(tempDir, `sk_record_${stamp}_${path.basename(sourcePath)}`);
+  const tempInfPath = path.join(tempDir, `sk_saveinf_${stamp}.inf`);
+
+  try {
+    job.update(15, 'Kopiere Setup in lokalen Temp-Ordner...');
+    await fs.promises.copyFile(sourcePath, tempExePath);
+
+    const plan = resolveInstallExecutionPlan({ recordInfPath: tempInfPath, ext: '.exe' });
+    job.update(null, plan.bannerHint);
+
+    const safeExe = tempExePath.replace(/'/g, "''");
+    const safeArgs = plan.extraArgs.replace(/'/g, "''");
+    const launchScript = `
+      try {
+        $p = Start-Process -FilePath '${safeExe}' -ArgumentList '${safeArgs}' -Wait -PassThru
+        Write-Output "EXIT:$($p.ExitCode)"
+      } catch {
+        Write-Output "ERR:$($_.Exception.Message)"
+      }
+    `;
+
+    const { stdout } = await runPowerShell(launchScript);
+
+    if (stdout.startsWith('ERR:')) {
+      const msg = stdout.replace('ERR:', '').trim();
+      const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
+      job.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Aufzeichnung abgebrochen.' : msg, {
+        autoRemoveMs: 4000,
+      });
+      return { success: false, canceled: wasCanceled, error: msg };
+    }
+
+    const exitMatch = stdout.match(/EXIT:(-?\d+)/);
+    const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
+
+    if (exitCode === 1602 || exitCode === 1223) {
+      job.finish('canceled', 'Aufzeichnung wurde abgebrochen.', { autoRemoveMs: 3500 });
+      return { success: false, canceled: true, exitCode };
+    }
+
+    const infExists = fs.existsSync(tempInfPath) && (await fs.promises.stat(tempInfPath)).size > 0;
+    if (!infExists) {
+      const msg = 'Setup hat keine .inf-Antwortdatei erstellt (kein Inno Setup oder vorzeitig beendet).';
+      job.finish('error', msg, { autoRemoveMs: 6000 });
+      return { success: false, exitCode, error: msg };
+    }
+
+    const metaDir = path.join(itemPath, '_metadata');
+    if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
+    const targetInfPath = path.join(metaDir, cleanInfName);
+    await fs.promises.copyFile(tempInfPath, targetInfPath);
+    await scanSingleFolder(itemPath);
+
+    job.finish('done', `Antwortdatei ${cleanInfName} gespeichert.`, { autoRemoveMs: 4500 });
+    return { success: true, infFile: cleanInfName, infPath: targetInfPath, exitCode };
+  } catch (err) {
+    job.finish('error', err.message, { autoRemoveMs: 5000 });
     return { success: false, error: err.message };
+  } finally {
+    await cleanupTempFiles([tempExePath, tempInfPath]);
   }
 }
 

@@ -18,6 +18,7 @@ import {
   saveMetaJson,
 } from './catalog-service.js';
 import { getAppFolder, getConfig, saveConfig } from './config.js';
+import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
 import {
@@ -51,6 +52,7 @@ import {
   extractCachedAppIcon,
   extractExeIcon,
   getInstalledApps,
+  recordInnoInfFile,
   scanInstalledSoftware,
   scanLocalVersions,
   uninstallSoftware,
@@ -158,6 +160,8 @@ function registerIpcHandlers() {
   ipcMain.handle('auto-detect-path', (_e, names) => autoDetectPath(names));
   ipcMain.handle('auto-detect-all', () => autoDetectAllMissingPaths(loadCatalogWithLiveStatus()));
   ipcMain.handle('get-installed-apps', () => getInstalledApps());
+  ipcMain.handle('detect-installer', (_e, payload) => detectInstallerFile(payload?.filePath, payload || {}));
+  ipcMain.handle('record-inno-inf', (_e, payload) => recordInnoInfFile(payload || {}));
   ipcMain.handle('execute-installer', (_e, payload) => executeAndVerifyInstaller(payload));
 
   // Paket-Provider (Registry, Suche, Details, Updates, Install/Uninstall)
@@ -187,7 +191,7 @@ function registerIpcHandlers() {
   ipcMain.handle('winget-matcher-scan', (_e, opts) => runWingetMatcherScan(opts || {}));
   ipcMain.handle('winget-matcher-apply', (_e, assignments) => applyWingetMatches(assignments || []));
   ipcMain.handle('batch-download-archive-updates', (_e, itemIds) => batchDownloadArchiveUpdates(itemIds));
-  ipcMain.handle('batch-update-packages', (_e, tasks) => batchUpdatePackages(tasks || []));
+  ipcMain.handle('batch-update-packages', (_e, tasks, opts) => batchUpdatePackages(tasks || [], opts || {}));
   ipcMain.handle('archive-cleanup-preview', (_e, opts) => previewArchiveCleanup(opts || {}));
   ipcMain.handle('archive-cleanup-set-keep', (_e, itemPath, keepAllVersions) =>
     setKeepAllVersions(itemPath, keepAllVersions)

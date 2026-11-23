@@ -160,7 +160,7 @@ async function saveUpdatedWingetPackageToArchive(task, saveSpec, signal) {
  * Aktualisiert ausgewählte Pakete aus dem Updates-Tab der Reihe nach über eine abbrechbare Job-Queue.
  * Respektiert für Nicht-Archiv-Programme den konfigurierten / gewählten Archiv-Speichermodus.
  */
-export async function batchUpdatePackages(tasks = []) {
+export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {}) {
   const validTasks = Array.isArray(tasks) ? tasks.filter((t) => t?.id) : [];
   if (validTasks.length === 0) {
     return { success: true, completed: 0, failed: 0, skipped: 0, canceled: false, results: [] };
@@ -247,6 +247,7 @@ export async function batchUpdatePackages(tasks = []) {
             sourcePath: setupFile,
             targetVersion: targetVersion || catItem.webVersion || null,
             useJob: false,
+            allowSilent: Boolean(allowSilent),
             onProgress: (_pct, detail) => job.update(basePct + 50 / validTasks.length, `${prefix}: ${detail}`),
           });
 
