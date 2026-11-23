@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
+import { executeArchiveCleanup, previewArchiveCleanup, setKeepAllVersions } from './archive-cleaner.js';
 import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArchive } from './archive-linker.js';
+import { applyWingetMatches, runWingetMatcherScan } from './archive-matcher.js';
+import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-updater.js';
 import {
   addIconFile,
   addMediaFiles,
@@ -179,6 +182,17 @@ function registerIpcHandlers() {
     findExistingArchiveLink(packageManager, packageId)
   );
   ipcMain.handle('archive-link-package', (_e, payload) => linkPackageToArchive(payload || {}));
+
+  // Schritt D Power-Werkzeuge (Winget-Matcher, Massenaktionen, Manueller Archiv-Aufräumer)
+  ipcMain.handle('winget-matcher-scan', (_e, opts) => runWingetMatcherScan(opts || {}));
+  ipcMain.handle('winget-matcher-apply', (_e, assignments) => applyWingetMatches(assignments || []));
+  ipcMain.handle('batch-download-archive-updates', (_e, itemIds) => batchDownloadArchiveUpdates(itemIds));
+  ipcMain.handle('batch-update-packages', (_e, tasks) => batchUpdatePackages(tasks || []));
+  ipcMain.handle('archive-cleanup-preview', (_e, opts) => previewArchiveCleanup(opts || {}));
+  ipcMain.handle('archive-cleanup-set-keep', (_e, itemPath, keepAllVersions) =>
+    setKeepAllVersions(itemPath, keepAllVersions)
+  );
+  ipcMain.handle('archive-cleanup-execute', (_e, opts) => executeArchiveCleanup(opts || {}));
 
   ipcMain.handle('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({

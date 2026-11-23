@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   buildRemotePackageItem,
   buildUnifiedPackages,
+  canDownloadOnline,
   computeTabCounts,
   getPackageStatus,
 } from '../src/shared/unified-packages.js';
@@ -283,5 +284,16 @@ describe('buildRemotePackageItem & remote status', () => {
     assert.equal(st.status, 'webupdate');
     assert.equal(st.hasWebUpdate, true);
     assert.equal(st.archiveVersion, '3.0.20');
+  });
+
+  it('erkennt direkte Online-Downloadquellen zuverlässig über canDownloadOnline', () => {
+    assert.equal(canDownloadOnline({ inArchive: true, webSourceType: 'winget', packageId: 'VideoLAN.VLC' }), true);
+    assert.equal(canDownloadOnline({ inArchive: true, packageManager: 'winget', packageId: 'Git.Git' }), true);
+    assert.equal(
+      canDownloadOnline({ inArchive: true, webSourceType: 'github', webVersionUrl: 'https://github.com/a/b' }),
+      true
+    );
+    assert.equal(canDownloadOnline({ inArchive: true, downloadUrl: 'https://example.com/setup.exe' }), true);
+    assert.equal(canDownloadOnline({ inArchive: true, webSourceType: 'none' }), false);
   });
 });

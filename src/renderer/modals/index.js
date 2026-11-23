@@ -1,8 +1,10 @@
 import { state } from '../state.js';
 import { savePackageToArchive } from './archive-target-modal.js';
+import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
+import { renderWingetMatcherModal } from './winget-matcher-modal.js';
 
 let reloadHandler = async () => {};
 
@@ -48,4 +50,12 @@ export function openArchiveLinkModal(pkg, options = {}) {
     downloadSetup: options.downloadSetup ?? true,
     onLinked: options.onLinked || null,
   });
+}
+
+export function openWingetMatcherModal() {
+  return renderWingetMatcherModal();
+}
+
+export function openCleanupModal() {
+  return renderCleanupModal();
 }

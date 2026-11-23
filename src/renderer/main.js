@@ -1,18 +1,33 @@
-import { renderCatalogGrid } from './components/cards.js';
+import {
+  getPendingArchiveWebUpdateItems,
+  getVisibleUpdateEntries,
+  renderCatalogGrid,
+  renderUpdatesBatchBar,
+} from './components/cards.js';
 import { initDiscoverView, renderDiscoverView } from './components/discover.js';
 import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
 import { initToolbar, renderTagChips, syncToolbarForTab, updateNavCounts } from './components/toolbar.js';
+import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
 import {
   closeModal,
   initModals,
   openArchiveLinkModal,
+  openCleanupModal,
   openDetailModal,
   openProviderPackageModal,
   openSettingsModal,
+  openWingetMatcherModal,
 } from './modals/index.js';
-import { refreshCatalogData, refreshProviders, setInstalledApps, state, toggleFavorite } from './state.js';
+import {
+  getItemStatus,
+  refreshCatalogData,
+  refreshProviders,
+  setInstalledApps,
+  state,
+  toggleFavorite,
+} from './state.js';
 import { escapeHTML } from './utils/sanitize.js';
 
 function renderBundlesPlaceholder() {
@@ -110,7 +125,23 @@ async function checkAppUpdateInBackground() {
 
 function setupGridEvents() {
   const grid = document.getElementById('grid');
+  grid?.addEventListener('change', (e) => {
+    const chk = e.target.closest('.card-select-checkbox');
+    if (!chk) return;
+    const pkgId = chk.dataset.selectUpdateId;
+    if (!pkgId) return;
+    if (chk.checked) state.selectedUpdateIds.add(pkgId);
+    else state.selectedUpdateIds.delete(pkgId);
+    chk.closest('.card')?.classList.toggle('is-selected', chk.checked);
+    renderUpdatesBatchBar();
+  });
+
   grid?.addEventListener('click', async (e) => {
+    if (e.target.closest('.card-select-wrap')) {
+      e.stopPropagation();
+      return;
+    }
+
     const favBtn = e.target.closest('.fav-btn');
     if (favBtn) {
       e.stopPropagation();
@@ -122,6 +153,149 @@ function setupGridEvents() {
     const card = e.target.closest('.card');
     if (card) {
       openDetailModal(card.dataset.id);
+    }
+  });
+}
+
+function setupUpdatesBatchBar() {
+  const bar = document.getElementById('updatesBatchBar');
+  if (!bar) return;
+
+  bar.addEventListener('change', (e) => {
+    const chk = e.target.closest('#chkSelectAllUpdates');
+    if (!chk) return;
+    const entries = getVisibleUpdateEntries();
+    if (chk.checked) {
+      for (const entry of entries) {
+        state.selectedUpdateIds.add(entry.item.id);
+      }
+    } else {
+      state.selectedUpdateIds.clear();
+    }
+    renderCatalogGrid();
+  });
+
+  bar.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || state.isBatchActionRunning) return;
+
+    if (btn.id === 'btnBatchDownloadArchive') {
+      const pendingItems = getPendingArchiveWebUpdateItems();
+      if (pendingItems.length === 0) return;
+
+      state.isBatchActionRunning = true;
+      renderUpdatesBatchBar();
+      showToast(`Lade ${pendingItems.length} Online-Update(s) ins Archiv...`, { type: 'info' });
+
+      try {
+        const res = await window.electronAPI.batchDownloadArchiveUpdates(pendingItems.map((i) => i.id));
+        await reloadUI();
+        if (res?.canceled) {
+          showToast('Massen-Download abgebrochen.', { type: 'info' });
+        } else if (res?.success) {
+          const type = res.failed > 0 ? 'warn' : 'success';
+          showToast(`${res.completed} Online-Update(s) ins Archiv geladen (${res.failed} Fehler).`, { type });
+        } else if (res?.alreadyRunning) {
+          showToast('Es läuft bereits ein Massen-Download.', { type: 'info' });
+        } else if (res?.error) {
+          showToast(`Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+        }
+      } finally {
+        state.isBatchActionRunning = false;
+        renderUpdatesBatchBar();
+      }
+      return;
+    }
+
+    if (btn.id === 'btnBatchUpdateSelected') {
+      const entries = getVisibleUpdateEntries();
+      const selectedItems = entries.map((entry) => entry.item).filter((item) => state.selectedUpdateIds.has(item.id));
+      if (selectedItems.length === 0) return;
+
+      const saveMode = state.settings.archiveSaveMode || 'ask';
+      const nonArchiveWinget = selectedItems.filter(
+        (item) => !item.inArchive && item.packageManager === 'winget' && item.packageId
+      );
+      const saveSpecsById = new Map();
+
+      if (saveMode === 'ask' && nonArchiveWinget.length > 0) {
+        for (let idx = 0; idx < nonArchiveWinget.length; idx++) {
+          const item = nonArchiveWinget[idx];
+          const choice = await askBatchArchiveSaveChoice({
+            softwareName: item.name,
+            packageId: item.packageId,
+            index: idx + 1,
+            total: nonArchiveWinget.length,
+          });
+          if (choice === 'cancel') {
+            return;
+          }
+          if (choice === 'skip-archive') {
+            saveSpecsById.set(item.id, { saveMode: 'none' });
+            continue;
+          }
+          const picked = await pickArchiveTargetFolder({
+            softwareName: item.name,
+            packageId: item.packageId,
+          });
+          if (picked.canceled) {
+            return;
+          }
+          saveSpecsById.set(item.id, {
+            saveMode: 'ask',
+            targetDir: picked.targetDir,
+            collisionMode: picked.collisionMode,
+          });
+        }
+      }
+
+      const tasks = selectedItems.map((item) => {
+        const st = getItemStatus(item);
+        const archiveSaveSpec = !item.inArchive
+          ? saveSpecsById.get(item.id) || { saveMode: saveMode === 'auto-id' ? 'auto-id' : 'none' }
+          : null;
+        return {
+          id: item.id,
+          name: item.name,
+          origin: item.origin,
+          inArchive: Boolean(item.inArchive),
+          isInstalled: Boolean(item.isInstalled),
+          packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
+          packageId: item.packageId || item.wingetId || '',
+          hasWebUpdate: Boolean(st.hasWebUpdate),
+          hasArchiveUpdate: Boolean(st.hasArchiveUpdate),
+          archiveSaveSpec,
+        };
+      });
+
+      state.isBatchActionRunning = true;
+      renderUpdatesBatchBar();
+      showToast(`Aktualisiere ${tasks.length} ausgewählte Paket(e)...`, { type: 'info' });
+
+      try {
+        const res = await window.electronAPI.batchUpdatePackages(tasks);
+        if (Array.isArray(res?.results)) {
+          for (const r of res.results) {
+            if (r.status === 'done') state.selectedUpdateIds.delete(r.id);
+          }
+        }
+        await reloadUI({ rescanInstalled: true });
+        if (res?.canceled) {
+          showToast('Massenaktualisierung abgebrochen.', { type: 'info' });
+        } else if (res?.success) {
+          const type = res.failed > 0 ? 'warn' : 'success';
+          showToast(`${res.completed} Paket(e) aktualisiert (${res.skipped} übersprungen, ${res.failed} Fehler).`, {
+            type,
+          });
+        } else if (res?.alreadyRunning) {
+          showToast('Eine Massenaktualisierung läuft bereits.', { type: 'info' });
+        } else if (res?.error) {
+          showToast(`Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+        }
+      } finally {
+        state.isBatchActionRunning = false;
+        renderUpdatesBatchBar();
+      }
     }
   });
 }
@@ -247,6 +421,7 @@ async function bootstrap() {
   initLightbox();
   initModals({ onReload: reloadUI });
   setupGridEvents();
+  setupUpdatesBatchBar();
   setupGlobalDragAndDrop();
   setupKeyboardShortcuts();
 
@@ -354,6 +529,8 @@ async function bootstrap() {
         );
       }
     },
+    onOpenWingetMatcher: () => openWingetMatcherModal(),
+    onOpenArchiveCleaner: () => openCleanupModal(),
   });
 
   try {

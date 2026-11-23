@@ -471,6 +471,25 @@ export function isPackageVisible(item, visibleHiddenCats = []) {
   return visibleHiddenCats.includes(item.hiddenCategory);
 }
 
+/**
+ * Prüft, ob für ein Paket eine direkt auflösbare Online-Downloadquelle konfiguriert ist.
+ */
+export function canDownloadOnline(item) {
+  if (!item) return false;
+  const pm = String(item.packageManager || (item.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  const pid = String(item.packageId || item.wingetId || '').trim();
+
+  if ((item.webSourceType === 'winget' || (item.inArchive && pm === 'winget')) && pid) {
+    return true;
+  }
+  if (item.webSourceType === 'github' && item.webVersionUrl) {
+    return true;
+  }
+  return Boolean(item.downloadUrl);
+}
+
 export function computeTabCounts(packages, { visibleHiddenCats = [], versionCompareDepth = 3, bundlesCount = 0 } = {}) {
   let updates = 0;
   let installed = 0;

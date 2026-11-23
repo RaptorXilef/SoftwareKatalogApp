@@ -1,5 +1,5 @@
 import { scoreCatalogItem } from '../../shared/search.js';
-import { isPackageVisible } from '../../shared/unified-packages.js';
+import { canDownloadOnline, isPackageVisible } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import {
   getActiveOriginFilter,
@@ -223,6 +223,8 @@ function renderVersionStrip(item, st) {
 function renderCardHtml(item, st) {
   const isFav = item.inArchive && state.favorites.includes(item.id);
   const statusCfg = STATUS_META[st.status];
+  const isUpdatesTab = state.activeTab === 'updates';
+  const isSelected = isUpdatesTab && state.selectedUpdateIds.has(item.id);
 
   let secondaryTag = '';
   if (item.inArchive && isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
@@ -244,14 +246,19 @@ function renderCardHtml(item, st) {
     ? `<button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="Favorit umschalten" aria-label="Favorit">★</button>`
     : '';
 
+  const selectHtml = isUpdatesTab
+    ? `<label class="card-select-wrap" title="Für Massenaktion auswählen"><input type="checkbox" class="card-select-checkbox" data-select-update-id="${escapeHTML(item.id)}" ${isSelected ? 'checked' : ''}></label>`
+    : '';
+
   const subtitle = item.inArchive
     ? item.tags.slice(0, 3).join(' · ')
     : [item.publisher, item.packageId].filter(Boolean).join(' · ') || 'Windows-Installation';
 
   return `
-    <article class="card status-${st.status}" data-id="${escapeHTML(item.id)}">
+    <article class="card status-${st.status} ${isSelected ? 'is-selected' : ''}" data-id="${escapeHTML(item.id)}">
       <div class="card-top">
         <div class="card-badges">
+          ${selectHtml}
           ${statusCfg ? `<span class="status-pill is-${st.status}" title="${escapeHTML(statusCfg.title)}">${escapeHTML(statusCfg.label)}</span>` : ''}
           ${originTag}
           ${secondaryTag}
@@ -322,6 +329,73 @@ function renderEmptyState() {
   `;
 }
 
+export function getPendingArchiveWebUpdateItems() {
+  const visibleHidden = state.settings.visibleHiddenCats || [];
+  const items = [];
+  for (const item of state.packages) {
+    if (!item.inArchive) continue;
+    if (!isPackageVisible(item, visibleHidden)) continue;
+    const st = getItemStatus(item);
+    if (st.hasWebUpdate && canDownloadOnline(item)) {
+      items.push(item);
+    }
+  }
+  return items;
+}
+
+export function getVisibleUpdateEntries() {
+  if (state.activeTab !== 'updates') return [];
+  return getFilteredAndSortedEntries().entries;
+}
+
+export function renderUpdatesBatchBar(entries = null) {
+  const bar = document.getElementById('updatesBatchBar');
+  if (!bar) return;
+
+  if (state.activeTab !== 'updates') {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+
+  const activeEntries = entries ?? getVisibleUpdateEntries();
+  const visibleIds = new Set(activeEntries.map((e) => e.item.id));
+  for (const id of [...state.selectedUpdateIds]) {
+    if (!visibleIds.has(id)) state.selectedUpdateIds.delete(id);
+  }
+
+  const selectedCount = state.selectedUpdateIds.size;
+  const totalCount = activeEntries.length;
+  const allSelected = totalCount > 0 && selectedCount === totalCount;
+  const someSelected = selectedCount > 0 && selectedCount < totalCount;
+  const pendingArchiveDownloads = getPendingArchiveWebUpdateItems().length;
+  const disabledAttr = state.isBatchActionRunning ? 'disabled' : '';
+
+  bar.hidden = false;
+  bar.innerHTML = `
+    <div class="batch-bar-left">
+      <label class="batch-select-all">
+        <input type="checkbox" id="chkSelectAllUpdates" ${allSelected ? 'checked' : ''} ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+        <span>Alle auswählen</span>
+      </label>
+      <span class="batch-selected-count">${selectedCount} von ${totalCount} ausgewählt</span>
+    </div>
+    <div class="batch-bar-right">
+      <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+        ⬇️ Alle Online-Updates ins Archiv laden <span class="btn-count-badge">${pendingArchiveDownloads}</span>
+      </button>
+      <button type="button" class="btn btn-primary" id="btnBatchUpdateSelected" ${selectedCount === 0 ? 'disabled' : disabledAttr}>
+        ⬆️ Ausgewählte aktualisieren <span class="btn-count-badge">${selectedCount}</span>
+      </button>
+    </div>
+  `;
+
+  const chkAll = bar.querySelector('#chkSelectAllUpdates');
+  if (chkAll) {
+    chkAll.indeterminate = someSelected;
+  }
+}
+
 export function renderCatalogGrid() {
   updateNavCounts();
 
@@ -337,6 +411,10 @@ export function renderCatalogGrid() {
   if (countEl) countEl.textContent = String(entries.length);
   if (countSub) {
     countSub.textContent = entries.length === baseCount ? 'Programme' : `von ${baseCount}`;
+  }
+
+  if (state.activeTab === 'updates') {
+    renderUpdatesBatchBar(entries);
   }
 
   if (entries.length === 0) {

@@ -589,42 +589,72 @@ async function computeSha256(filePath) {
   });
 }
 
-export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {}) {
+export async function downloadWebUpdate(
+  item,
+  { saveIntoLastFolder = false, useJob = true, signal = null, onProgress = null } = {}
+) {
   const cfg = getConfig();
   const baseTargetDir = saveIntoLastFolder ? path.join(item.path, '_last') : item.path;
   if (!fs.existsSync(baseTargetDir)) fs.mkdirSync(baseTargetDir, { recursive: true });
 
   let partFilePath = null;
   let activeDownloadItem = null;
+  let activeBrowserWin = null;
 
-  const job = createJob({
-    type: 'web-download',
-    title: `Download: ${item.name}`,
-    dedupeKey: `dl:${item.id}`,
-    cancelable: true,
-    onCancel: () => {
-      if (activeDownloadItem) {
-        try {
-          activeDownloadItem.cancel();
-        } catch {
-          // Ignorieren
-        }
+  const cleanupOnAbort = () => {
+    if (activeDownloadItem) {
+      try {
+        activeDownloadItem.cancel();
+      } catch {
+        // Ignorieren
       }
-      if (partFilePath && fs.existsSync(partFilePath)) {
-        try {
-          fs.unlinkSync(partFilePath);
-        } catch {
-          // Ignorieren
-        }
+    }
+    if (activeBrowserWin && !activeBrowserWin.isDestroyed()) {
+      try {
+        activeBrowserWin.close();
+      } catch {
+        // Ignorieren
       }
-    },
-  });
+    }
+    if (partFilePath && fs.existsSync(partFilePath)) {
+      try {
+        fs.unlinkSync(partFilePath);
+      } catch {
+        // Ignorieren
+      }
+    }
+  };
 
-  if (!job) return { success: false, alreadyRunning: true };
+  let job = null;
+  if (useJob) {
+    job = createJob({
+      type: 'web-download',
+      title: `Download: ${item.name}`,
+      dedupeKey: `dl:${item.id}`,
+      cancelable: true,
+      onCancel: cleanupOnAbort,
+    });
+    if (!job) return { success: false, alreadyRunning: true };
+  }
+
+  const activeSignal = job ? job.signal : signal;
+  const reportProgress = (pct, detail) => {
+    job?.update(pct, detail);
+    onProgress?.(pct, detail);
+  };
+
+  const onExternalAbort = !useJob && activeSignal ? () => cleanupOnAbort() : null;
+  if (onExternalAbort && activeSignal) {
+    if (activeSignal.aborted) {
+      cleanupOnAbort();
+      return { success: false, canceled: true };
+    }
+    activeSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
-    job.update(2, 'Ermittle Download-Link...');
-    const resolved = await resolveDownloadUrl(item, job.signal);
+    reportProgress(2, 'Ermittle Download-Link...');
+    const resolved = await resolveDownloadUrl(item, activeSignal);
     const finalUrl = resolved.url;
     const knownVersion = resolved.version || item.webVersion || '';
 
@@ -650,19 +680,19 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
           defaultPath: finalPath,
         });
         if (canceled || !filePath) {
-          job.finish('canceled', 'Speichern abgebrochen.', { autoRemoveMs: 1500 });
+          job?.finish('canceled', 'Speichern abgebrochen.', { autoRemoveMs: 1500 });
           return { success: false, canceled: true };
         }
         finalPath = filePath;
       }
 
       partFilePath = `${finalPath}.part`;
-      job.update(5, `Lade ${path.basename(finalPath)}...`);
+      reportProgress(5, `Lade ${path.basename(finalPath)}...`);
 
       const res = await fetch(finalUrl, {
         redirect: 'follow',
         headers: { 'User-Agent': USER_AGENT },
-        signal: job.signal,
+        signal: activeSignal,
       });
       if (!res.ok) throw new Error(`HTTP Fehler ${res.status}`);
 
@@ -672,11 +702,11 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
       const fileStream = fs.createWriteStream(partFilePath);
       try {
         for await (const chunk of res.body) {
-          if (job.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+          if (activeSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
           fileStream.write(chunk);
           received += chunk.length;
           const pct = total > 0 ? Math.round((received / total) * 100) : null;
-          job.update(pct, `Lade ${path.basename(finalPath)} (${(received / 1024 / 1024).toFixed(1)} MB)...`);
+          reportProgress(pct, `Lade ${path.basename(finalPath)} (${(received / 1024 / 1024).toFixed(1)} MB)...`);
         }
         await new Promise((r) => fileStream.end(r));
       } catch (streamErr) {
@@ -687,7 +717,7 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
 
       // Optional: SHA-256 Prüfung (bei Winget)
       if (resolved.sha256) {
-        job.update(96, 'Prüfe SHA-256 Prüfsumme...');
+        reportProgress(96, 'Prüfe SHA-256 Prüfsumme...');
         const actualHash = await computeSha256(partFilePath);
         if (actualHash !== resolved.sha256) {
           fs.unlinkSync(partFilePath);
@@ -715,9 +745,9 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
       fs.renameSync(partFilePath, targetFinalPath);
       partFilePath = null;
 
-      job.update(99, 'Aktualisiere Katalogeintrag...');
+      reportProgress(99, 'Aktualisiere Katalogeintrag...');
       await scanSingleFolder(item.path);
-      job.finish('done', `Gespeichert: ${path.basename(targetFinalPath)}`);
+      job?.finish('done', `Gespeichert: ${path.basename(targetFinalPath)}`);
       return { success: true, filePath: targetFinalPath, version: knownVersion };
     }
 
@@ -732,12 +762,14 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
         autoHideMenuBar: true,
         webPreferences: { nodeIntegration: false, contextIsolation: true, partition },
       });
+      activeBrowserWin = dlWin;
 
       let settled = false;
       const done = (res) => {
         if (settled) return;
         settled = true;
         dlSession.off('will-download', onWillDownload);
+        activeBrowserWin = null;
         if (!dlWin.isDestroyed()) dlWin.close();
         resolve(res);
       };
@@ -767,19 +799,19 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
             const total = dlItem.getTotalBytes();
             const rec = dlItem.getReceivedBytes();
             const pct = total > 0 ? Math.round((rec / total) * 100) : null;
-            job.update(pct, `Lade ${suggested}...`);
+            reportProgress(pct, `Lade ${suggested}...`);
           }
         });
 
         dlItem.once('done', async (_ev, state) => {
           if (state === 'completed') {
             const savedPath = dlItem.getSavePath();
-            job.update(99, 'Aktualisiere Katalogeintrag...');
+            reportProgress(99, 'Aktualisiere Katalogeintrag...');
             await scanSingleFolder(item.path);
-            job.finish('done', `Gespeichert: ${path.basename(savedPath)}`);
+            job?.finish('done', `Gespeichert: ${path.basename(savedPath)}`);
             done({ success: true, filePath: savedPath, version: knownVersion });
           } else {
-            job.finish('canceled', `Download abgebrochen (${state})`, { autoRemoveMs: 2500 });
+            job?.finish('canceled', `Download abgebrochen (${state})`, { autoRemoveMs: 2500 });
             done({ success: false, canceled: state === 'cancelled', error: `Download-Status: ${state}` });
           }
         });
@@ -789,17 +821,21 @@ export async function downloadWebUpdate(item, { saveIntoLastFolder = false } = {
       dlWin.loadURL(finalUrl);
       dlWin.on('closed', () => {
         if (!settled) {
-          job.finish('canceled', 'Browser-Fenster geschlossen.', { autoRemoveMs: 1500 });
+          job?.finish('canceled', 'Browser-Fenster geschlossen.', { autoRemoveMs: 1500 });
           done({ success: false, canceled: true });
         }
       });
     });
   } catch (e) {
-    if (e.name === 'AbortError' || job.signal.aborted) {
+    if (e.name === 'AbortError' || activeSignal?.aborted) {
       return { success: false, canceled: true };
     }
-    job.finish('error', e.message, { autoRemoveMs: 6000 });
+    job?.finish('error', e.message, { autoRemoveMs: 6000 });
     return { success: false, error: e.message };
+  } finally {
+    if (onExternalAbort && activeSignal) {
+      activeSignal.removeEventListener('abort', onExternalAbort);
+    }
   }
 }
 

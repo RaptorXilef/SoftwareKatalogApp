@@ -93,6 +93,9 @@ export function syncToolbarForTab() {
 
   renderOriginFilterBar();
 
+  const updatesBatchBar = document.getElementById('updatesBatchBar');
+  if (updatesBatchBar) updatesBatchBar.hidden = tab !== 'updates';
+
   const grid = document.getElementById('grid');
   const bundlesView = document.getElementById('bundlesView');
   const discoverView = document.getElementById('discoverView');
@@ -216,6 +219,8 @@ export function initToolbar(handlers) {
     const act = item.dataset.toolbarAction;
     if (act === 'add-software') handlers.onAddSoftware();
     else if (act === 'auto-detect-all') handlers.onAutoDetectAll();
+    else if (act === 'winget-matcher') handlers.onOpenWingetMatcher?.();
+    else if (act === 'archive-cleaner') handlers.onOpenArchiveCleaner?.();
     else if (act === 'scan-update') handlers.onScanArchive('update');
     else if (act === 'scan-full') handlers.onScanArchive('full');
   });

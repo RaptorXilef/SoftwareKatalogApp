@@ -420,7 +420,14 @@ export async function extractExeIcon(exePath, targetSoftwareDir) {
  * Kopiert das Setup lokal ins Temp-Verzeichnis, wartet auf den Abschluss,
  * wertet den Windows-ExitCode aus und verifiziert anschließend die installierte Version.
  */
-export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, targetVersion = null }) {
+export async function executeAndVerifyInstaller({
+  itemId,
+  itemName,
+  sourcePath,
+  targetVersion = null,
+  useJob = true,
+  onProgress = null,
+}) {
   const cfg = getConfig();
   const depth = cfg.versionCompareDepth ?? 3;
   const oldVersion = cfg.installedVersions?.[itemId] || null;
@@ -433,22 +440,30 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     return err ? { success: false, error: err } : { success: true, status: 'opened' };
   }
 
-  const job = createJob({
-    type: 'install',
-    title: `Installation: ${itemName || path.basename(sourcePath)}`,
-    dedupeKey: `install:${itemId}`,
-    cancelable: false,
-  });
-  if (!job) return { success: false, alreadyRunning: true };
+  let job = null;
+  if (useJob) {
+    job = createJob({
+      type: 'install',
+      title: `Installation: ${itemName || path.basename(sourcePath)}`,
+      dedupeKey: `install:${itemId}`,
+      cancelable: false,
+    });
+    if (!job) return { success: false, alreadyRunning: true };
+  }
+
+  const reportProgress = (pct, detail) => {
+    job?.update(pct, detail);
+    onProgress?.(pct, detail);
+  };
 
   const tempDir = app.getPath('temp');
   const tempPath = path.join(tempDir, `sk_install_${Date.now()}_${path.basename(sourcePath)}`);
 
   try {
-    job.update(15, 'Kopiere Setup-Datei aus dem Archiv in lokalen Temp-Ordner...');
+    reportProgress(15, 'Kopiere Setup-Datei aus dem Archiv in lokalen Temp-Ordner...');
     await fs.promises.copyFile(sourcePath, tempPath);
 
-    job.update(null, 'Installer läuft - bitte Setup-Assistent abschließen...');
+    reportProgress(null, 'Installer läuft - bitte Setup-Assistent abschließen...');
     const safeTemp = tempPath.replace(/'/g, "''");
 
     const launchScript =
@@ -482,7 +497,7 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     if (stdout.startsWith('ERR:')) {
       const msg = stdout.replace('ERR:', '').trim();
       const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
-      job.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Installation durch Benutzer abgebrochen.' : msg, {
+      job?.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Installation durch Benutzer abgebrochen.' : msg, {
         autoRemoveMs: 4000,
       });
       return { success: false, canceled: wasCanceled, error: msg };
@@ -492,12 +507,12 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
 
     if (exitCode === 1602 || exitCode === 1223) {
-      job.finish('canceled', 'Installation wurde abgebrochen.', { autoRemoveMs: 3500 });
+      job?.finish('canceled', 'Installation wurde abgebrochen.', { autoRemoveMs: 3500 });
       return { success: false, canceled: true, exitCode };
     }
 
     // Kurz warten (Windows-Registry braucht manchmal ~1 Sekunde zum Flushen)
-    job.update(85, 'Prüfe installierte Version auf diesem PC...');
+    reportProgress(85, 'Prüfe installierte Version auf diesem PC...');
     await new Promise((r) => setTimeout(r, 1500));
 
     const verifyRes = await scanLocalVersions({ itemIds: [itemId], silent: true });
@@ -507,20 +522,20 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     const bumpedVersion = newVersion && oldVersion && compareVersions(newVersion, oldVersion, depth) > 0;
 
     if (reachedTarget || bumpedVersion) {
-      job.finish('done', `Erfolgreich installiert (v${newVersion})`, { autoRemoveMs: 4000 });
+      job?.finish('done', `Erfolgreich installiert (v${newVersion})`, { autoRemoveMs: 4000 });
       return { success: true, verified: true, newVersion, exitCode };
     }
 
     if (exitCode === 0 || exitCode === 3010) {
       const rebootHint = exitCode === 3010 ? ' (Neustart empfohlen)' : '';
-      job.finish('done', `Setup beendet${rebootHint} - neue Version noch nicht erkannt (läuft ggf. im Hintergrund).`, {
+      job?.finish('done', `Setup beendet${rebootHint} - neue Version noch nicht erkannt (läuft ggf. im Hintergrund).`, {
         autoRemoveMs: 0, // Bleibt sichtbar mit Aktion!
         action: { label: 'Status erneut prüfen', type: 'recheck-local', itemId },
       });
       return { success: true, verified: false, newVersion, exitCode };
     }
 
-    job.finish('error', `Installer meldete Fehlercode ${exitCode}.`, { autoRemoveMs: 6000 });
+    job?.finish('error', `Installer meldete Fehlercode ${exitCode}.`, { autoRemoveMs: 6000 });
     return { success: false, exitCode, error: `ExitCode ${exitCode}` };
   } catch (err) {
     try {
@@ -528,7 +543,7 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
     } catch {
       // Ignorieren
     }
-    job.finish('error', err.message, { autoRemoveMs: 5000 });
+    job?.finish('error', err.message, { autoRemoveMs: 5000 });
     return { success: false, error: err.message };
   }
 }
@@ -536,7 +551,7 @@ export async function executeAndVerifyInstaller({ itemId, itemName, sourcePath, 
 // ==========================================
 // ERWEITERTER PC-SCANNER, ICON-CACHE & DEINSTALLATION
 // ==========================================
-async function readRegistryUninstallEntries(signal = null) {
+export async function readRegistryUninstallEntries(signal = null) {
   const psScript = `
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $ErrorActionPreference = 'SilentlyContinue'

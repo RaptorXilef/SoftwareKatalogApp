@@ -59,6 +59,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   findArchiveLink: (packageManager, packageId) => ipcRenderer.invoke('archive-find-link', packageManager, packageId),
   linkPackageToArchive: (payload) => ipcRenderer.invoke('archive-link-package', payload),
 
+  // Power-Werkzeuge (Winget-Zuordnung, Massenaktionen, Archiv-Aufräumer)
+  scanWingetMatches: (opts) => ipcRenderer.invoke('winget-matcher-scan', opts),
+  applyWingetMatches: (assignments) => ipcRenderer.invoke('winget-matcher-apply', assignments),
+  batchDownloadArchiveUpdates: (itemIds) => ipcRenderer.invoke('batch-download-archive-updates', itemIds),
+  batchUpdatePackages: (tasks) => ipcRenderer.invoke('batch-update-packages', tasks),
+  previewArchiveCleanup: (opts) => ipcRenderer.invoke('archive-cleanup-preview', opts),
+  setKeepAllVersions: (itemPath, keepAllVersions) =>
+    ipcRenderer.invoke('archive-cleanup-set-keep', itemPath, keepAllVersions),
+  executeArchiveCleanup: (opts) => ipcRenderer.invoke('archive-cleanup-execute', opts),
+
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
   checkSingleWeb: (payload) => ipcRenderer.invoke('check-single-web', payload),

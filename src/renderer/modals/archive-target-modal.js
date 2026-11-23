@@ -10,7 +10,7 @@ function getDialogElements() {
   return { overlay, dialog };
 }
 
-function openNestedDialog({ html, onAction, defaultAction = 'cancel' }) {
+export function openNestedDialog({ html, onAction, defaultAction = 'cancel' }) {
   const els = getDialogElements();
   if (!els) return Promise.resolve(defaultAction);
 
@@ -316,4 +316,35 @@ export async function savePackageToArchive(pkg, { mode = null, downloadSetup = t
   }
 
   return executeArchiveLink(pkg, targetSpec, { downloadSetup, onLinked });
+}
+
+/**
+ * Fragt bei einer Massenaktualisierung im Modus `archiveSaveMode === 'ask'`
+ * für ein Nicht-Archiv-Programm nach dem Umgang mit dem Archiv.
+ */
+export function askBatchArchiveSaveChoice({ softwareName = '', packageId = '', index = 1, total = 1 } = {}) {
+  const titleLabel = softwareName || packageId || 'Programm';
+  return openNestedDialog({
+    defaultAction: 'cancel',
+    html: `
+      <div class="modal-header">
+        <h2>📥 Archiv-Speicherung (${index}/${total})</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+      </div>
+
+      <div class="modal-body collision-warning-body">
+        <p>
+          <strong>${escapeHTML(titleLabel)}</strong> ist noch nicht im Archiv hinterlegt.
+          In den Einstellungen ist für neue Pakete „Jedes Mal fragen“ aktiviert.
+        </p>
+        ${packageId ? `<div class="collision-meta-card"><div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(packageId)}</code></div></div>` : ''}
+        <div class="collision-actions-grid">
+          <button type="button" class="btn btn-primary" data-dialog-action="pick">📂 Zielordner im Archiv wählen</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="skip-archive">⏭️ Nur auf PC aktualisieren</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+        </div>
+      </div>
+    `,
+    onAction: (action) => (['pick', 'skip-archive', 'cancel'].includes(action) ? action : 'cancel'),
+  });
 }

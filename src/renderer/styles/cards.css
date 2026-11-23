@@ -291,3 +291,23 @@
   font-size: 13px;
   color: var(--text);
 }
+
+.card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.card-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px 2px 0;
+  cursor: pointer;
+}
+
+.card-select-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

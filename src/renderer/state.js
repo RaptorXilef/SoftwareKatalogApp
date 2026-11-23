@@ -39,6 +39,8 @@ export const state = {
   currentModalId: null,
   isEditModalOpen: false,
   hasCheckedAppUpdate: false,
+  selectedUpdateIds: new Set(),
+  isBatchActionRunning: false,
 };
 
 export function rebuildUnifiedPackages() {

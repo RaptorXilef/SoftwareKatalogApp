@@ -112,6 +112,9 @@
             <button type="button" class="menu-item" data-toolbar-action="add-software">➕ Software-Ordner hinzufügen</button>
             <button type="button" class="menu-item" data-toolbar-action="auto-detect-all">🔎 Fehlende PC-Pfade suchen</button>
             <hr class="menu-divider">
+            <button type="button" class="menu-item" data-toolbar-action="winget-matcher">🪄 Winget-IDs zuordnen</button>
+            <button type="button" class="menu-item" data-toolbar-action="archive-cleaner">🧹 Archiv aufräumen</button>
+            <hr class="menu-divider">
             <button type="button" class="menu-item" data-toolbar-action="scan-update">📋 Alle Metadaten neu einlesen</button>
             <button type="button" class="menu-item" data-toolbar-action="scan-full">♻️ Vollständiger Archiv-Rescan</button>
           </div>
@@ -126,6 +129,9 @@
 
     <!-- Herkunfts-Filter für Updates & Installiert -->
     <div id="originFilterBar" class="origin-filter-bar" hidden></div>
+
+    <!-- Massenaktionen im Updates-Tab -->
+    <div id="updatesBatchBar" class="updates-batch-bar" hidden></div>
 
     <!-- Einklappbare Kategorien (nur im Archiv-Tab) -->
     <details id="tagsDetails" class="tags-drawer">

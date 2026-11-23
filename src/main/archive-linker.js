@@ -139,6 +139,8 @@ export async function linkPackageToArchive({
   downloadSetup = false,
   saveIntoLastFolder = false,
   keepAllVersions = false,
+  downloadUseJob = true,
+  signal = null,
 }) {
   const cleanPid = String(packageId || '').trim();
   const cleanPm = cleanPid
@@ -286,7 +288,11 @@ export async function linkPackageToArchive({
   let downloadResult = null;
 
   if (effectiveDownloadSetup && linkedItem) {
-    downloadResult = await downloadWebUpdate(linkedItem, { saveIntoLastFolder });
+    downloadResult = await downloadWebUpdate(linkedItem, {
+      saveIntoLastFolder,
+      useJob: downloadUseJob,
+      signal,
+    });
     const refreshedItems = loadCatalogWithLiveStatus();
     linkedItem = refreshedItems.find((i) => path.resolve(i.path) === resolvedTargetDir) || linkedItem;
   }
