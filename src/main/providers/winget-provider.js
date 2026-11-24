@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import { createProviderCache } from '../../shared/provider-cache.js';
+import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import {
   mergeWingetShowResults,
   parseWingetExportJson,
@@ -11,6 +11,7 @@ import {
   parseWingetUpgradeOutput,
 } from '../../shared/winget-parser.js';
 import { createJob } from '../jobs.js';
+import { findBinaryPath, runCli } from './cli-runner.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
@@ -27,60 +28,7 @@ export function getWingetCache() {
 }
 
 function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  return new Promise((resolve) => {
-    /** @type {any} */
-    const child = spawn('winget', args, { windowsHide: true });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let timedOut = false;
-
-    const finish = (payload) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolve(payload);
-    };
-
-    const onAbort = () => {
-      if (process.platform === 'win32' && child.pid) {
-        try {
-          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-        } catch {
-          // Ignorieren
-        }
-      }
-      if (!child.killed) child.kill('SIGTERM');
-    };
-
-    const timer =
-      timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            if (!child.killed) child.kill('SIGTERM');
-            finish({ code: -1, stdout, stderr: stderr || 'Zeitüberschreitung beim Winget-Aufruf.', timedOut: true });
-          }, timeoutMs)
-        : null;
-
-    if (signal) {
-      if (signal.aborted) onAbort();
-      else signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    child.stdout.on('data', (d) => {
-      stdout += d.toString('utf8');
-    });
-    child.stderr.on('data', (d) => {
-      stderr += d.toString('utf8');
-    });
-    child.on('error', (err) => {
-      finish({ code: -1, stdout: '', stderr: err.message, timedOut });
-    });
-    child.on('exit', (code) => {
-      finish({ code: code ?? -1, stdout, stderr, timedOut });
-    });
-  });
+  return runCli('winget', args, { signal, timeoutMs, windowsHide: true });
 }
 
 async function fetchShowFresh(packageId, { preferGerman = true, signal = null } = {}) {
@@ -126,7 +74,12 @@ async function fetchShowFresh(packageId, { preferGerman = true, signal = null } 
 export const wingetProvider = {
   id: 'winget',
   name: 'Winget',
-  description: 'Windows Package Manager (winget)',
+  category: 'system',
+  description: 'Offizieller Windows-Paketmanager (Microsoft App-Installer)',
+  requiresAdminForBootstrap: false,
+  canInstallManager: false,
+  canUninstallManager: false,
+  isSystemComponent: false,
   capabilities: {
     search: true,
     listInstalled: true,
@@ -137,12 +90,35 @@ export const wingetProvider = {
     supportsArchiveDownload: true,
   },
 
-  async isAvailable() {
-    const res = await runWinget(['--version'], { timeoutMs: 8000 });
-    if (res.code !== 0) {
-      return { available: false, version: null, error: res.stderr || 'Winget nicht verfügbar.' };
+  async checkAvailability({ signal = null } = {}) {
+    const binaryPath = await findBinaryPath('winget', { signal, timeoutMs: 5000 });
+    const res = await runWinget(['--version'], { signal, timeoutMs: 8000 });
+    if (res.notFound || res.code !== 0) {
+      return {
+        available: false,
+        version: null,
+        binaryPath: binaryPath || null,
+        error: res.error || res.stderr || 'Winget ist auf diesem PC nicht verfügbar.',
+      };
     }
-    return { available: true, version: res.stdout.trim() || null };
+    return {
+      available: true,
+      version: normalizeProviderVersion(res.stdout),
+      binaryPath: binaryPath || 'winget',
+      error: null,
+    };
+  },
+
+  async isAvailable(opts = {}) {
+    return this.checkAvailability(opts);
+  },
+
+  async installManager() {
+    return { success: false, error: 'Winget wird über den Microsoft Store (App-Installer) verwaltet.' };
+  },
+
+  async uninstallManager() {
+    return { success: false, error: 'Winget wird über den Microsoft Store (App-Installer) verwaltet.' };
   },
 
   async search(query, { limit = 25, signal = null } = {}) {

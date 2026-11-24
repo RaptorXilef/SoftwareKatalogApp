@@ -1,3 +1,4 @@
+import { normalizeProviderCategory, normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
 import { getWingetCache, wingetProvider } from './winget-provider.js';
@@ -29,6 +30,7 @@ export const PLANNED_PROVIDERS = [
 ];
 
 const registry = new Map();
+const availabilityCache = new Map();
 let defaultsInitialized = false;
 
 function normalizeCapabilities(raw = {}) {
@@ -39,19 +41,68 @@ function normalizeCapabilities(raw = {}) {
   return normalized;
 }
 
+function normalizeAvailabilityResult(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return { available: false, version: null, binaryPath: null, error: 'Ungültige Verfügbarkeitsantwort.' };
+  }
+  return {
+    available: Boolean(raw.available),
+    version: normalizeProviderVersion(raw.version),
+    binaryPath: typeof raw.binaryPath === 'string' && raw.binaryPath.trim() ? raw.binaryPath.trim() : null,
+    error: typeof raw.error === 'string' && raw.error.trim() ? raw.error.trim() : null,
+  };
+}
+
 export function registerProvider(provider) {
   if (!provider?.id || !provider?.name) {
     throw new Error('Provider benötigt mindestens "id" und "name".');
   }
+  const cleanId = String(provider.id).trim().toLowerCase();
+  const cleanName = String(provider.name).trim();
+  const rawCheckAvailability =
+    typeof provider.checkAvailability === 'function'
+      ? provider.checkAvailability.bind(provider)
+      : typeof provider.isAvailable === 'function'
+        ? provider.isAvailable.bind(provider)
+        : async () => ({ available: true, version: null, binaryPath: null, error: null });
+
+  const checkAvailabilityFn = async (opts = {}) => normalizeAvailabilityResult(await rawCheckAvailability(opts));
+  const installManagerFn =
+    typeof provider.installManager === 'function'
+      ? provider.installManager.bind(provider)
+      : async () => ({ success: false, error: `${cleanName} unterstützt keine automatische Installation.` });
+  const uninstallManagerFn =
+    typeof provider.uninstallManager === 'function'
+      ? provider.uninstallManager.bind(provider)
+      : async () => ({ success: false, error: `${cleanName} unterstützt keine automatische Deinstallation.` });
+
   const normalized = {
     ...provider,
-    id: String(provider.id).trim().toLowerCase(),
-    name: String(provider.name).trim(),
+    id: cleanId,
+    name: cleanName,
+    category: normalizeProviderCategory(provider.category),
     description: String(provider.description || '').trim(),
+    requiresAdminForBootstrap: Boolean(provider.requiresAdminForBootstrap),
+    canInstallManager: Boolean(provider.canInstallManager),
+    canUninstallManager: Boolean(provider.canUninstallManager),
+    isSystemComponent: Boolean(provider.isSystemComponent),
     capabilities: normalizeCapabilities(provider.capabilities),
+    checkAvailability: checkAvailabilityFn,
+    isAvailable: checkAvailabilityFn,
+    installManager: installManagerFn,
+    uninstallManager: uninstallManagerFn,
   };
-  registry.set(normalized.id, normalized);
+  registry.set(cleanId, normalized);
+  availabilityCache.delete(cleanId);
   return normalized;
+}
+
+export function unregisterProvider(id) {
+  const cleanId = String(id || '')
+    .trim()
+    .toLowerCase();
+  availabilityCache.delete(cleanId);
+  return registry.delete(cleanId);
 }
 
 export function initDefaultProviders() {
@@ -107,26 +158,71 @@ export function listProvidersInfo() {
     providers: [...registry.values()].map((p) => ({
       id: p.id,
       name: p.name,
+      category: p.category,
       description: p.description,
+      requiresAdminForBootstrap: p.requiresAdminForBootstrap,
+      canInstallManager: p.canInstallManager,
+      canUninstallManager: p.canUninstallManager,
+      isSystemComponent: p.isSystemComponent,
       enabled: enabledSet.has(p.id),
+      availability: availabilityCache.get(p.id) || null,
       capabilities: { ...p.capabilities },
     })),
     planned: PLANNED_PROVIDERS,
   };
 }
 
-export async function checkProviderAvailability(providerId) {
+export async function checkProviderAvailability(providerId, { signal = null } = {}) {
   const provider = getProvider(providerId);
-  if (!provider) return { available: false, error: `Unbekannter Provider "${providerId}".` };
-  if (typeof provider.isAvailable !== 'function') return { available: true };
-  return provider.isAvailable();
+  if (!provider) {
+    return { available: false, version: null, binaryPath: null, error: `Unbekannter Provider "${providerId}".` };
+  }
+  try {
+    const normalized = normalizeAvailabilityResult(await provider.checkAvailability({ signal }));
+    const cached = { ...normalized, checkedAt: Date.now() };
+    availabilityCache.set(provider.id, cached);
+    return cached;
+  } catch (err) {
+    const failed = {
+      available: false,
+      version: null,
+      binaryPath: null,
+      error: err?.message || `Fehler beim Prüfen von ${provider.name}.`,
+      checkedAt: Date.now(),
+    };
+    availabilityCache.set(provider.id, failed);
+    return failed;
+  }
+}
+
+export async function checkAllProvidersAvailability({ signal = null } = {}) {
+  initDefaultProviders();
+  const all = [...registry.values()];
+  const entries = await Promise.all(
+    all.map(async (provider) => {
+      const status = await checkProviderAvailability(provider.id, { signal });
+      return [provider.id, status];
+    })
+  );
+  return {
+    success: true,
+    results: Object.fromEntries(entries),
+    providers: listProvidersInfo().providers,
+  };
+}
+
+function isProviderUsableForExecution(provider) {
+  if (!provider || !isProviderEnabled(provider.id)) return false;
+  const cached = availabilityCache.get(provider.id);
+  if (cached && cached.available === false) return false;
+  return true;
 }
 
 export async function searchAcrossProviders(query, { providerIds = null, limit = 25, signal = null } = {}) {
   initDefaultProviders();
   const targets = providerIds
-    ? providerIds.map((id) => getProvider(id)).filter((p) => p?.capabilities.search)
-    : getEnabledProviders().filter((p) => p.capabilities.search);
+    ? providerIds.map((id) => getProvider(id)).filter((p) => p?.capabilities.search && isProviderUsableForExecution(p))
+    : getEnabledProviders().filter((p) => p.capabilities.search && isProviderUsableForExecution(p));
 
   const settled = await Promise.allSettled(
     targets.map(async (provider) => {
@@ -178,8 +274,10 @@ export async function showPackage(providerId, packageId, opts = {}) {
 export async function listUpgradesAcrossProviders({ providerIds = null, signal = null } = {}) {
   initDefaultProviders();
   const targets = providerIds
-    ? providerIds.map((id) => getProvider(id)).filter((p) => p?.capabilities.listUpgrades)
-    : getEnabledProviders().filter((p) => p.capabilities.listUpgrades);
+    ? providerIds
+        .map((id) => getProvider(id))
+        .filter((p) => p?.capabilities.listUpgrades && isProviderUsableForExecution(p))
+    : getEnabledProviders().filter((p) => p.capabilities.listUpgrades && isProviderUsableForExecution(p));
 
   const settled = await Promise.allSettled(
     targets.map(async (provider) => {

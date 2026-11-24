@@ -1,3 +1,4 @@
+import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
 import { state } from '../state.js';
 import { closestButton, closestEl, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
@@ -6,7 +7,7 @@ import { showToast } from './toast.js';
 let searchRequestSeq = 0;
 
 function getSearchableProviders() {
-  return state.providers.filter((p) => p.capabilities?.search);
+  return filterUsableProviders(state.providers, { capability: 'search' });
 }
 
 function getProviderCapability(providerId, capKey) {
@@ -69,21 +70,21 @@ function renderSourceChips() {
 
   const searchable = getSearchableProviders();
   if (searchable.length === 0) {
-    container.innerHTML = '<span class="muted">Keine durchsuchbaren Quellen registriert.</span>';
+    container.innerHTML =
+      '<span class="muted">Keine aktiven &amp; installierten Quellen verfügbar (in den Einstellungen aktivieren/installieren).</span>';
     return;
   }
 
   container.innerHTML = searchable
     .map((p) => {
       const active = state.discoverSelectedProviders.includes(p.id);
-      const disabledHint = p.enabled ? '' : ' (in Einstellungen deaktiviert)';
       return `
         <button
           type="button"
           class="source-chip ${active ? 'active' : ''}"
           data-discover-provider="${escapeHTML(p.id)}"
           aria-pressed="${active ? 'true' : 'false'}"
-          title="${escapeHTML(p.description || p.name)}${escapeHTML(disabledHint)}"
+          title="${escapeHTML(p.description || p.name)}"
         >
           <span>${active ? '✓' : '+'}</span>
           <span>${escapeHTML(p.name)}</span>

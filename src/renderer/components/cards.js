@@ -9,6 +9,7 @@ import {
   hasAnyLocalPath,
   hasOnlineSource,
   isItemNew,
+  isProviderUsable,
   state,
 } from '../state.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
@@ -125,10 +126,20 @@ function queuePcIconExtraction(entries) {
   pumpIconQueue();
 }
 
+function isProviderItemVisible(item) {
+  if (item.inArchive) return true;
+  if (item.origin === 'pc' && item.pcSource !== 'registry' && item.packageManager) {
+    return isProviderUsable(item.packageManager);
+  }
+  return true;
+}
+
 function matchesTabAndFilter(item, st) {
   const tab = state.activeTab;
 
   if (tab === 'updates') {
+    if (!isProviderItemVisible(item)) return false;
+    if (item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) return false;
     if (!st.hasWebUpdate && !st.hasArchiveUpdate) return false;
     const originFilter = getActiveOriginFilter();
     if (originFilter === 'in-archive' && !item.inArchive) return false;
@@ -137,11 +148,12 @@ function matchesTabAndFilter(item, st) {
   }
 
   if (tab === 'installed') {
+    if (!isProviderItemVisible(item)) return false;
     if (!item.isInstalled) return false;
     const originFilter = getActiveOriginFilter();
     if (originFilter === 'in-archive' && item.origin !== 'both') return false;
     if (originFilter === 'not-in-archive' && item.origin !== 'pc') return false;
-    if (originFilter === 'winget' && item.packageManager !== 'winget') return false;
+    if (originFilter === 'winget' && (!isProviderUsable('winget') || item.packageManager !== 'winget')) return false;
     return true;
   }
 
@@ -166,9 +178,15 @@ function getTabBaseCount(visibleHidden) {
   let count = 0;
   for (const item of state.packages) {
     if (!isPackageVisible(item, visibleHidden)) continue;
+    if (!isProviderItemVisible(item)) continue;
     const st = getItemStatus(item);
-    if (state.activeTab === 'updates' && (st.hasWebUpdate || st.hasArchiveUpdate)) count++;
-    else if (state.activeTab === 'installed' && item.isInstalled) count++;
+    if (
+      state.activeTab === 'updates' &&
+      !(item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) &&
+      (st.hasWebUpdate || st.hasArchiveUpdate)
+    ) {
+      count++;
+    } else if (state.activeTab === 'installed' && item.isInstalled) count++;
     else if (state.activeTab === 'archive' && item.inArchive) count++;
   }
   return count;

@@ -7,6 +7,12 @@ import {
   normalizeArchivePaths,
   resolvePrimaryReachableRoot,
 } from '../shared/multi-archive-logic.js';
+import {
+  DEFAULT_ENABLED_PROVIDERS,
+  DEFAULT_PROVIDER_SETTINGS,
+  normalizeEnabledProviders,
+  normalizeProviderSettings,
+} from '../shared/provider-lifecycle-logic.js';
 import { normalizeStartTab } from '../shared/unified-packages.js';
 
 const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions'];
@@ -31,7 +37,8 @@ const DEFAULT_CONFIG = {
   keepOriginalNameIfVersioned: true,
   // Paketquellen & Archiv-Verknüpfung
   archiveSaveMode: 'ask', // 'ask' | 'auto-id' | 'none'
-  enabledProviders: ['winget', 'archive'],
+  enabledProviders: [...DEFAULT_ENABLED_PROVIDERS],
+  providerSettings: { ...DEFAULT_PROVIDER_SETTINGS },
 };
 
 const DEFAULT_STATE = {
@@ -179,9 +186,8 @@ export function getConfig() {
   const validSaveModes = new Set(['ask', 'auto-id', 'none']);
   const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
   const startTab = normalizeStartTab(config.startTab);
-  const enabledProviders = Array.isArray(config.enabledProviders)
-    ? config.enabledProviders.filter((id) => typeof id === 'string' && id.trim().length > 0)
-    : [...DEFAULT_CONFIG.enabledProviders];
+  const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
+  const providerSettings = normalizeProviderSettings(config.providerSettings);
 
   return {
     appFolder,
@@ -200,6 +206,7 @@ export function getConfig() {
     archiveSaveMode,
     startTab,
     enabledProviders,
+    providerSettings,
   };
 }
 
@@ -209,6 +216,21 @@ export function saveConfig(newSettings) {
   const statePath = path.join(app.getPath('userData'), 'state.json');
   const current = getConfig();
   const merged = { ...current, ...newSettings };
+
+  if (newSettings?.enabledProviders !== undefined) {
+    merged.enabledProviders = normalizeEnabledProviders(newSettings.enabledProviders);
+  } else {
+    merged.enabledProviders = normalizeEnabledProviders(merged.enabledProviders);
+  }
+
+  if (newSettings?.providerSettings && typeof newSettings.providerSettings === 'object') {
+    merged.providerSettings = normalizeProviderSettings({
+      ...current.providerSettings,
+      ...newSettings.providerSettings,
+    });
+  } else {
+    merged.providerSettings = normalizeProviderSettings(merged.providerSettings);
+  }
 
   // Synchronisiere archivePaths und legacy Alias targetPath
   if (Array.isArray(newSettings?.archivePaths)) {

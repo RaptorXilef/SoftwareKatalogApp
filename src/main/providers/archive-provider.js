@@ -3,6 +3,7 @@ import path from 'node:path';
 import { scoreCatalogItem } from '../../shared/search.js';
 import { compareVersions, extractVersion } from '../../shared/version.js';
 import { loadCatalogWithLiveStatus } from '../catalog-service.js';
+import { getConfig } from '../config.js';
 import { executeAndVerifyInstaller } from '../windows-tools.js';
 
 function getPrimarySetupFile(item) {
@@ -46,7 +47,12 @@ function toArchivePackage(item) {
 export const archiveProvider = {
   id: 'archive',
   name: 'Archiv',
-  description: 'Lokales Software-Archiv',
+  category: 'archive',
+  description: 'Lokales Software-Archiv mit eigenen Setup-Dateien und Metadaten',
+  requiresAdminForBootstrap: false,
+  canInstallManager: false,
+  canUninstallManager: false,
+  isSystemComponent: false,
   capabilities: {
     search: true,
     listInstalled: true,
@@ -57,9 +63,30 @@ export const archiveProvider = {
     supportsArchiveDownload: false,
   },
 
-  async isAvailable() {
+  async checkAvailability() {
+    const cfg = getConfig();
     const items = loadCatalogWithLiveStatus();
-    return { available: true, count: items.length };
+    const anyOnline = Array.isArray(cfg.archiveRootsStatus) && cfg.archiveRootsStatus.some((r) => r.online);
+    const available = Boolean(anyOnline || items.length > 0);
+    return {
+      available,
+      version: null,
+      binaryPath: cfg.absTargetPath || null,
+      count: items.length,
+      error: available ? null : 'Kein konfigurierter Archiv-Ordner ist derzeit erreichbar.',
+    };
+  },
+
+  async isAvailable() {
+    return this.checkAvailability();
+  },
+
+  async installManager() {
+    return { success: false, error: 'Das lokale Archiv ist fest in die App integriert.' };
+  },
+
+  async uninstallManager() {
+    return { success: false, error: 'Das lokale Archiv ist fest in die App integriert.' };
   },
 
   async search(query, { limit = 50 } = {}) {

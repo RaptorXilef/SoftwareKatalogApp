@@ -2,6 +2,7 @@ import {
   getActiveOriginFilter,
   getActiveSortMode,
   getTabCounts,
+  isProviderUsable,
   setActiveOriginFilter,
   setActiveSortMode,
   state,
@@ -9,19 +10,27 @@ import {
 import { closestEl, qsa, qsInput, qsSelect } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
-const ORIGIN_FILTERS_BY_TAB = {
-  updates: [
-    { id: 'all', label: 'Alle' },
-    { id: 'in-archive', label: 'Im Archiv' },
-    { id: 'not-in-archive', label: 'Nicht im Archiv' },
-  ],
-  installed: [
-    { id: 'all', label: 'Alle' },
-    { id: 'in-archive', label: 'Im Archiv' },
-    { id: 'not-in-archive', label: 'Nicht im Archiv' },
-    { id: 'winget', label: 'Winget-verwaltet' },
-  ],
-};
+function getOriginFilterOptionsForTab(tab) {
+  if (tab === 'updates') {
+    return [
+      { id: 'all', label: 'Alle' },
+      { id: 'in-archive', label: 'Im Archiv' },
+      { id: 'not-in-archive', label: 'Nicht im Archiv' },
+    ];
+  }
+  if (tab === 'installed') {
+    const options = [
+      { id: 'all', label: 'Alle' },
+      { id: 'in-archive', label: 'Im Archiv' },
+      { id: 'not-in-archive', label: 'Nicht im Archiv' },
+    ];
+    if (isProviderUsable('winget')) {
+      options.push({ id: 'winget', label: 'Winget-verwaltet' });
+    }
+    return options;
+  }
+  return null;
+}
 
 export function updateNavCounts() {
   const counts = getTabCounts();
@@ -43,14 +52,19 @@ function renderOriginFilterBar() {
   const bar = document.getElementById('originFilterBar');
   if (!bar) return;
 
-  const options = ORIGIN_FILTERS_BY_TAB[state.activeTab];
+  const options = getOriginFilterOptionsForTab(state.activeTab);
   if (!options) {
     bar.hidden = true;
     bar.innerHTML = '';
     return;
   }
 
-  const active = getActiveOriginFilter();
+  let active = getActiveOriginFilter();
+  if (!options.some((opt) => opt.id === active)) {
+    active = 'all';
+    setActiveOriginFilter('all');
+  }
+
   bar.hidden = false;
   bar.innerHTML = options
     .map(

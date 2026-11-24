@@ -673,6 +673,7 @@ async function bootstrap() {
     if (verEl) verEl.textContent = `(v${info.version})`;
 
     await reloadUI({ preserveScroll: false, applyStartTab: true });
+    void refreshProviders({ checkAvailability: true }).then(() => renderActiveView());
     checkAppUpdateInBackground();
     runInstalledScan({ silent: true });
   } catch (err) {

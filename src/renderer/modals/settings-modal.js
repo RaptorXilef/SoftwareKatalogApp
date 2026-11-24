@@ -1,10 +1,13 @@
 import { getArchiveRootLabel, normalizeArchivePaths, normalizePathKey } from '../../shared/multi-archive-logic.js';
+import { formatProviderStatusBadge, groupProvidersByUiCategory } from '../../shared/provider-lifecycle-logic.js';
 import { normalizeStartTab } from '../../shared/unified-packages.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
+
+let activeSettingsToken = 0;
 
 function getInputEl(root, selector) {
   const el = root.querySelector(selector);
@@ -57,6 +60,7 @@ export async function renderSettingsModal() {
   const modal = document.getElementById('modalContent');
   if (!overlay || !modal) return;
   resetModalContent();
+  const modalToken = ++activeSettingsToken;
 
   const [s, info, providersInfo, cacheStats] = await Promise.all([
     window.electronAPI.getSettings(),
@@ -65,11 +69,18 @@ export async function renderSettingsModal() {
     window.electronAPI.getProviderCacheStats(),
   ]);
 
-  const providers = Array.isArray(providersInfo?.providers) ? providersInfo.providers : [];
+  if (modalToken !== activeSettingsToken) return;
+
+  let providers = Array.isArray(providersInfo?.providers) ? providersInfo.providers : [];
   const plannedProviders = Array.isArray(providersInfo?.planned) ? providersInfo.planned : [];
   const enabledSet = new Set(
     (Array.isArray(s.enabledProviders) ? s.enabledProviders : ['winget', 'archive']).map((p) => p.toLowerCase())
   );
+  const availabilityById = new Map();
+  for (const p of providers) {
+    if (p.availability) availabilityById.set(p.id, p.availability);
+  }
+  const busyProviderIds = new Set();
   const saveMode = s.archiveSaveMode || 'ask';
   const startTab = normalizeStartTab(s.startTab);
   const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
@@ -90,20 +101,62 @@ export async function renderSettingsModal() {
     };
   });
 
-  const providerCheckboxes = providers
-    .map((p) => {
-      const checked = enabledSet.has(p.id) ? 'checked' : '';
-      return `
-        <label class="provider-setting-row">
-          <input type="checkbox" name="enabledProviderCheck" value="${escapeHTML(p.id)}" ${checked}>
-          <div class="provider-setting-info">
-            <strong>${escapeHTML(p.name)}</strong>
-            ${p.description ? `<span class="muted">${escapeHTML(p.description)}</span>` : ''}
+  const renderProvidersHtml = () => {
+    const groups = groupProvidersByUiCategory(providers);
+    if (groups.length === 0) {
+      return '<div class="path-empty">Keine Paketmanager registriert.</div>';
+    }
+
+    return groups
+      .map((group) => {
+        const rowsHtml = group.providers
+          .map((p) => {
+            const checked = enabledSet.has(p.id) ? 'checked' : '';
+            const avail = availabilityById.get(p.id) || p.availability || null;
+            const badge = formatProviderStatusBadge(p, avail);
+            const isBusy = busyProviderIds.has(p.id);
+            const showAdminPill = Boolean(
+              avail && !avail.available && p.canInstallManager && p.requiresAdminForBootstrap
+            );
+
+            let actionHtml = '';
+            if (isBusy) {
+              actionHtml = '<button type="button" class="btn btn-ghost btn-xs" disabled>⏳ Läuft...</button>';
+            } else if (avail && !avail.available && p.canInstallManager) {
+              actionHtml = `<button type="button" class="btn btn-primary btn-xs" data-provider-install="${escapeHTML(p.id)}" title="Paketmanager direkt installieren">⬇️ Installieren</button>`;
+            } else if (avail?.available && p.canUninstallManager) {
+              actionHtml = `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="Paketmanager deinstallieren (2x klicken)">🗑️ Deinstallieren</button>`;
+            }
+
+            return `
+              <div class="provider-setting-row ${checked ? '' : 'is-disabled'}" data-provider-row="${escapeHTML(p.id)}">
+                <label class="provider-toggle-switch" title="${checked ? 'Quelle deaktivieren' : 'Quelle aktivieren'}">
+                  <input type="checkbox" name="enabledProviderCheck" data-provider-toggle="${escapeHTML(p.id)}" value="${escapeHTML(p.id)}" ${checked}>
+                  <span class="provider-toggle-slider" aria-hidden="true"></span>
+                </label>
+                <div class="provider-setting-info">
+                  <div class="provider-setting-head">
+                    <strong>${escapeHTML(p.name)}</strong>
+                    <span class="provider-status-badge is-${escapeHTML(badge.kind)}" title="${escapeHTML(badge.title)}">${escapeHTML(badge.text)}</span>
+                    ${showAdminPill ? '<span class="provider-admin-pill" title="Erfordert Administratorrechte (UAC)">🛡️ Admin</span>' : ''}
+                  </div>
+                  ${p.description ? `<span class="muted">${escapeHTML(p.description)}</span>` : ''}
+                </div>
+                ${actionHtml ? `<div class="provider-setting-actions">${actionHtml}</div>` : ''}
+              </div>
+            `;
+          })
+          .join('');
+
+        return `
+          <div class="provider-category-group">
+            <h4 class="provider-category-title">${escapeHTML(group.label)}</h4>
+            <div class="provider-settings-list">${rowsHtml}</div>
           </div>
-        </label>
-      `;
-    })
-    .join('');
+        `;
+      })
+      .join('');
+  };
 
   const plannedHintText =
     plannedProviders.length > 0
@@ -132,10 +185,12 @@ export async function renderSettingsModal() {
     <div class="modal-body settings-body">
       <!-- 1. Paketmanager & Quellen -->
       <section class="settings-section">
-        <h3>📦 Paketmanager & Quellen</h3>
+        <div class="field-header-row">
+          <h3>📦 Paketmanager & Quellen</h3>
+          <button type="button" class="btn btn-ghost btn-xs" id="btnRecheckProviders" data-settings-action="recheck-providers">🔄 Status prüfen</button>
+        </div>
         <div class="form-field">
-          <span>Aktivierte Quellen</span>
-          <div class="provider-settings-list">${providerCheckboxes}</div>
+          <div id="providerSettingsContainer" class="provider-groups-wrap">${renderProvidersHtml()}</div>
           ${plannedHintText ? `<p class="planned-providers-hint">${escapeHTML(plannedHintText)}</p>` : ''}
         </div>
 
@@ -304,6 +359,38 @@ export async function renderSettingsModal() {
 
   overlay.hidden = false;
 
+  const refreshProvidersSectionUi = () => {
+    if (modalToken !== activeSettingsToken || overlay.hidden) return;
+    const container = modal.querySelector('#providerSettingsContainer');
+    if (container) {
+      container.innerHTML = renderProvidersHtml();
+    }
+  };
+
+  const runProvidersAvailabilityCheck = async () => {
+    const recheckBtn = modal.querySelector('#btnRecheckProviders');
+    if (recheckBtn instanceof HTMLButtonElement) recheckBtn.disabled = true;
+    try {
+      const res = await window.electronAPI.checkAllProvidersAvailability();
+      if (modalToken !== activeSettingsToken || overlay.hidden) return;
+      if (Array.isArray(res?.providers)) {
+        providers = res.providers;
+      }
+      if (res?.results && typeof res.results === 'object') {
+        for (const [id, status] of Object.entries(res.results)) {
+          availabilityById.set(id, status);
+        }
+      }
+      refreshProvidersSectionUi();
+    } catch {
+      // Status-Anzeige bleibt unverändert
+    } finally {
+      if (recheckBtn instanceof HTMLButtonElement) recheckBtn.disabled = false;
+    }
+  };
+
+  void runProvidersAvailabilityCheck();
+
   const refreshArchivePathsUi = () => {
     const listEl = modal.querySelector('#archivePathsList');
     if (listEl) {
@@ -397,8 +484,112 @@ export async function renderSettingsModal() {
     }
   });
 
+  modal.onchange = async (e) => {
+    if (!(e.target instanceof Element)) return;
+    const toggle = e.target.closest('[data-provider-toggle]');
+    if (!(toggle instanceof HTMLInputElement)) return;
+
+    const providerId = toggle.dataset.providerToggle;
+    if (!providerId) return;
+
+    const nextEnabled = toggle.checked;
+    toggle.disabled = true;
+    const res = await window.electronAPI.setProviderEnabled(providerId, nextEnabled);
+    if (modalToken !== activeSettingsToken) return;
+
+    if (res?.success) {
+      enabledSet.clear();
+      for (const id of res.enabledProviders || []) {
+        enabledSet.add(String(id).toLowerCase());
+      }
+      refreshProvidersSectionUi();
+      await triggerCatalogReload();
+      const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
+      showToast(`${providerName} ${nextEnabled ? 'aktiviert' : 'deaktiviert'}.`, { type: 'info' });
+    } else {
+      toggle.checked = !nextEnabled;
+      toggle.disabled = false;
+      showToast(res?.error || 'Quelle konnte nicht umgeschaltet werden.', { type: 'error' });
+    }
+  };
+
   modal.onclick = async (e) => {
     if (!(e.target instanceof Element)) return;
+
+    const installProviderBtn = e.target.closest('[data-provider-install]');
+    if (installProviderBtn instanceof HTMLButtonElement) {
+      const providerId = installProviderBtn.dataset.providerInstall;
+      if (!providerId || busyProviderIds.has(providerId)) return;
+      const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
+
+      busyProviderIds.add(providerId);
+      refreshProvidersSectionUi();
+      showToast(`Installiere ${providerName}...`, { type: 'info' });
+
+      const res = await window.electronAPI.installProviderManager(providerId);
+      if (modalToken !== activeSettingsToken) return;
+      busyProviderIds.delete(providerId);
+      if (res?.availability) {
+        availabilityById.set(providerId, res.availability);
+      }
+      refreshProvidersSectionUi();
+      await triggerCatalogReload();
+
+      if (res?.canceled) {
+        showToast(`${providerName}-Installation abgebrochen.`, { type: 'info' });
+      } else if (res?.success) {
+        showToast(`${providerName} erfolgreich installiert.`, { type: 'success' });
+      } else {
+        showToast(res?.error || `${providerName} konnte nicht installiert werden.`, { type: 'error', duration: 6000 });
+      }
+      return;
+    }
+
+    const uninstallProviderBtn = e.target.closest('[data-provider-uninstall]');
+    if (uninstallProviderBtn instanceof HTMLButtonElement) {
+      const providerId = uninstallProviderBtn.dataset.providerUninstall;
+      if (!providerId || busyProviderIds.has(providerId)) return;
+
+      if (uninstallProviderBtn.dataset.armed !== 'true') {
+        uninstallProviderBtn.dataset.armed = 'true';
+        uninstallProviderBtn.dataset.origText = uninstallProviderBtn.textContent || '';
+        uninstallProviderBtn.textContent = '⚠️ Wirklich deinstallieren?';
+        setTimeout(() => {
+          if (uninstallProviderBtn.isConnected && uninstallProviderBtn.dataset.armed === 'true') {
+            uninstallProviderBtn.dataset.armed = 'false';
+            uninstallProviderBtn.textContent = uninstallProviderBtn.dataset.origText || '🗑️ Deinstallieren';
+          }
+        }, 4000);
+        return;
+      }
+
+      uninstallProviderBtn.dataset.armed = 'false';
+      const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
+      busyProviderIds.add(providerId);
+      refreshProvidersSectionUi();
+      showToast(`Deinstalliere ${providerName}...`, { type: 'info' });
+
+      const res = await window.electronAPI.uninstallProviderManager(providerId);
+      if (modalToken !== activeSettingsToken) return;
+      busyProviderIds.delete(providerId);
+      if (res?.availability) {
+        availabilityById.set(providerId, res.availability);
+      }
+      refreshProvidersSectionUi();
+      await triggerCatalogReload();
+
+      if (res?.canceled) {
+        showToast(`${providerName}-Deinstallation abgebrochen.`, { type: 'info' });
+      } else if (res?.success) {
+        showToast(`${providerName} erfolgreich deinstalliert.`, { type: 'success' });
+      } else {
+        showToast(res?.error || `${providerName} konnte nicht deinstalliert werden.`, {
+          type: 'error',
+          duration: 6000,
+        });
+      }
+      return;
+    }
 
     const moveBtn = e.target.closest('[data-archive-move]');
     if (moveBtn instanceof HTMLButtonElement) {
@@ -488,7 +679,11 @@ export async function renderSettingsModal() {
     const act = btn.dataset.settingsAction;
 
     if (act === 'close') closeModal();
-    else if (act === 'open-github') window.electronAPI.openUrl('https://github.com/RaptorXilef/SoftwareKatalogApp');
+    else if (act === 'recheck-providers') {
+      await runProvidersAvailabilityCheck();
+      await triggerCatalogReload();
+      showToast('Paketmanager-Status aktualisiert.', { type: 'info' });
+    } else if (act === 'open-github') window.electronAPI.openUrl('https://github.com/RaptorXilef/SoftwareKatalogApp');
     else if (act === 'open-data-dir') window.electronAPI.openPath(s.dataDir);
     else if (act === 'open-state') window.electronAPI.openPath(s.statePath);
     else if (act === 'add-archive-path') {

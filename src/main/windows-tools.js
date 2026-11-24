@@ -26,6 +26,7 @@ import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
+import { isProviderEnabled } from './providers/registry.js';
 import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
@@ -896,10 +897,11 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
   try {
     job?.update(15, 'Lese Windows-Registry, Winget-Export & verfügbare Updates...');
 
+    const wingetEnabled = isProviderEnabled('winget');
     const [registryEntries, exportRes, upgradeRes] = await Promise.all([
       readRegistryUninstallEntries(signal),
-      wingetProvider.listInstalled({ signal }),
-      wingetProvider.listUpgrades({ signal }),
+      wingetEnabled ? wingetProvider.listInstalled({ signal }) : Promise.resolve({ success: false, packages: [] }),
+      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : Promise.resolve({ success: false, upgrades: [] }),
     ]);
 
     if (signal?.aborted) {

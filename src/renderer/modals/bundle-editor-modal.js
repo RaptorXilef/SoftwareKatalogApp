@@ -9,8 +9,9 @@ import {
   moveBundleItem,
   sortBundleItems,
 } from '../../shared/bundles-logic.js';
+import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
 import { showToast } from '../components/toast.js';
-import { state } from '../state.js';
+import { isProviderUsable, state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -44,15 +45,13 @@ export function renderBundleEditorModal({
   const snapshotCheckedKeys = new Set(draftItems.map((it) => getBundleItemKey(it)));
   let snapshotFilterText = '';
 
-  const enabledRemoteProviders = (state.providers || []).filter(
-    (p) => p && p.id !== 'archive' && p.enabled && p.capabilities?.search
-  );
-  const activeRemoteProviders =
-    enabledRemoteProviders.length > 0
-      ? enabledRemoteProviders
-      : [{ id: 'winget', name: 'Winget', enabled: true, capabilities: { search: true } }];
+  const activeRemoteProviders = filterUsableProviders(state.providers, {
+    capability: 'search',
+    excludeIds: ['archive'],
+  });
+  const isArchiveUsable = state.providers.length === 0 || isProviderUsable('archive');
 
-  let activeSource = 'archive';
+  let activeSource = isArchiveUsable ? 'archive' : activeRemoteProviders[0]?.id || 'archive';
   let searchQuery = '';
   const remoteResultsByProvider = new Map();
   const remoteErrorsByProvider = new Map();
@@ -471,24 +470,30 @@ export function renderBundleEditorModal({
   };
 
   const renderSourceTabsHtml = () => {
-    const archiveTotal = getVisibleArchiveCount();
-    const tabs = [
-      `<button type="button" class="source-chip ${activeSource === 'archive' ? 'active' : ''}" data-search-source="archive">
+    const tabs = [];
+    if (isArchiveUsable) {
+      const archiveTotal = getVisibleArchiveCount();
+      tabs.push(`<button type="button" class="source-chip ${activeSource === 'archive' ? 'active' : ''}" data-search-source="archive">
         <span>🗄️</span>
         <span>Archiv (${archiveTotal})</span>
-      </button>`,
-      ...activeRemoteProviders.map((provider) => {
-        const knownCount = getKnownCountForProvider(provider.id);
-        return `<button type="button" class="source-chip ${activeSource === provider.id ? 'active' : ''}" data-search-source="${escapeHTML(provider.id)}">
-          <span>⚡</span>
-          <span>${escapeHTML(provider.name)} (${knownCount})</span>
-        </button>`;
-      }),
-      `<button type="button" class="source-chip ${activeSource === 'all' ? 'active' : ''}" data-search-source="all">
+      </button>`);
+    }
+    for (const provider of activeRemoteProviders) {
+      const knownCount = getKnownCountForProvider(provider.id);
+      tabs.push(`<button type="button" class="source-chip ${activeSource === provider.id ? 'active' : ''}" data-search-source="${escapeHTML(provider.id)}">
+        <span>⚡</span>
+        <span>${escapeHTML(provider.name)} (${knownCount})</span>
+      </button>`);
+    }
+    if ((isArchiveUsable ? 1 : 0) + activeRemoteProviders.length > 1) {
+      tabs.push(`<button type="button" class="source-chip ${activeSource === 'all' ? 'active' : ''}" data-search-source="all">
         <span>🔎</span>
         <span>Alle Quellen</span>
-      </button>`,
-    ];
+      </button>`);
+    }
+    if (tabs.length === 0) {
+      return '<span class="muted">Keine aktiven &amp; installierten Paketquellen verfügbar.</span>';
+    }
     return tabs.join('');
   };
 

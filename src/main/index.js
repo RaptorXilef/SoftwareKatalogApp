@@ -31,7 +31,9 @@ import { getAppFolder, getConfig, inspectArchiveRootPath, saveConfig } from './c
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
+import { installProviderManager, uninstallProviderManager } from './providers/manager-bootstrap.js';
 import {
+  checkAllProvidersAvailability,
   checkProviderAvailability,
   clearProviderCache,
   getProviderCacheStats,
@@ -211,6 +213,9 @@ function registerIpcHandlers() {
   handleIpc('providers-list', () => listProvidersInfo());
   handleIpc('providers-set-enabled', (_e, id, enabled) => setProviderEnabled(id, Boolean(enabled)));
   handleIpc('providers-check-availability', (_e, id) => checkProviderAvailability(id));
+  handleIpc('providers-check-all-availability', () => checkAllProvidersAvailability());
+  handleIpc('providers-install-manager', (_e, providerId) => installProviderManager(providerId));
+  handleIpc('providers-uninstall-manager', (_e, providerId) => uninstallProviderManager(providerId));
   handleIpc('providers-search', (_e, query, opts) => searchAcrossProviders(query, opts || {}));
   handleIpc('providers-show', (_e, providerId, packageId, opts) => showPackage(providerId, packageId, opts || {}));
   handleIpc('providers-list-upgrades', (_e, opts) => listUpgradesAcrossProviders(opts || {}));

@@ -1,3 +1,4 @@
+import { filterUsableProviders, isProviderUsableInUi } from '../shared/provider-lifecycle-logic.js';
 import { buildUnifiedPackages, computeTabCounts, getBaseName, getPackageStatus } from '../shared/unified-packages.js';
 
 export { getBaseName };
@@ -72,8 +73,27 @@ export function getItemStatus(item) {
   });
 }
 
+export function isProviderUsable(providerId) {
+  if (!providerId) return true;
+  if (!Array.isArray(state.providers) || state.providers.length === 0) return true;
+  const cleanId = String(providerId).trim().toLowerCase();
+  const provider = state.providers.find((p) => p.id === cleanId);
+  if (!provider) return true;
+  return isProviderUsableInUi(provider);
+}
+
+function getVisibleTabPackages() {
+  return state.packages.filter((item) => {
+    if (item.inArchive) return true;
+    if (item.origin === 'pc' && item.pcSource !== 'registry' && item.packageManager) {
+      return isProviderUsable(item.packageManager);
+    }
+    return true;
+  });
+}
+
 export function getTabCounts() {
-  return computeTabCounts(state.packages, {
+  return computeTabCounts(getVisibleTabPackages(), {
     visibleHiddenCats: state.settings.visibleHiddenCats || [],
     versionCompareDepth: state.settings.versionCompareDepth ?? 3,
     bundlesCount: state.bundles.length,
@@ -135,20 +155,42 @@ export async function refreshCatalogData() {
   rebuildUnifiedPackages();
 }
 
-export async function refreshProviders() {
-  const res = await window.electronAPI.listProviders();
+export async function refreshProviders({ checkAvailability = false } = {}) {
+  let res;
+  if (checkAvailability && typeof window.electronAPI?.checkAllProvidersAvailability === 'function') {
+    res = await window.electronAPI.checkAllProvidersAvailability();
+  } else {
+    res = await window.electronAPI.listProviders();
+  }
+
   state.providers = Array.isArray(res?.providers) ? res.providers : [];
-  const searchableEnabled = state.providers.filter((p) => p.capabilities?.search && p.enabled).map((p) => p.id);
+  const searchableUsable = filterUsableProviders(state.providers, { capability: 'search' }).map((p) => p.id);
+  const usableSet = new Set(searchableUsable);
 
   if (!providersInitialized) {
     providersInitialized = true;
-    state.discoverSelectedProviders = searchableEnabled;
+    state.discoverSelectedProviders = searchableUsable;
   } else {
-    const validIds = new Set(searchableEnabled);
-    state.discoverSelectedProviders = state.discoverSelectedProviders.filter((id) => validIds.has(id));
-    if (state.discoverSelectedProviders.length === 0 && searchableEnabled.length > 0) {
-      state.discoverSelectedProviders = searchableEnabled;
+    state.discoverSelectedProviders = state.discoverSelectedProviders.filter((id) => usableSet.has(id));
+    if (state.discoverSelectedProviders.length === 0 && searchableUsable.length > 0) {
+      state.discoverSelectedProviders = searchableUsable;
     }
+  }
+
+  if (Array.isArray(state.discoverResults) && state.discoverResults.length > 0) {
+    state.discoverResults = state.discoverResults.filter((pkg) => {
+      const pid = String(pkg.providerId || pkg.packageManager || '').toLowerCase();
+      return !pid || usableSet.has(pid);
+    });
+  }
+  if (state.discoverByProvider && typeof state.discoverByProvider === 'object') {
+    const nextByProvider = {};
+    for (const [id, entry] of Object.entries(state.discoverByProvider)) {
+      if (usableSet.has(id.toLowerCase())) {
+        nextByProvider[id] = entry;
+      }
+    }
+    state.discoverByProvider = nextByProvider;
   }
 }
 
