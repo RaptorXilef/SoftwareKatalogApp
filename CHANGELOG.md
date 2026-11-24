@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.25.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.24.1...v1.25.0) (2026-11-24)
+
+### 🚀 Features
+
+* **admin:** add session-based elevated helper mode to avoid repeated UAC prompts ([78feff6](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/78feff612830d9cd8405e4bf9de9f3fe8122e9ba))
+* **providers:** generalize archive linking and add per-provider source management ([e033725](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/e033725c8dfdc5aec76bb1d3b170fe864baa22e1))
+* **updates:** add persistent update ignore list and updates-tab context menu ([828ab93](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/828ab93e2908db19a49049db60390b7df00432db))
+
+### 🐛 Bug Fixes
+
+* **admin:** replace missing ps1 worker with node elevated worker and eliminate DEP0190 warnings ([9933a78](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9933a780bd4ab41b77b35bc1e1cfe6e4ae12abd6))
+
+### ⚙️ Refactoring
+
+* **settings:** organize settings modal into 6 tabs and defer provider toggle saving ([24b9c99](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/24b9c9988e3504e752cb9b84e4fdad73e3e246c9))
+
 ## [1.24.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.24.0...v1.24.1) (2026-11-24)
 
 ### 🐛 Bug Fixes
