@@ -24,6 +24,7 @@ import {
 import { compareVersions, extractVersion } from '../shared/version.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
+import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
 import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
@@ -457,6 +458,7 @@ export async function executeAndVerifyInstaller({
   useJob = true,
   onProgress = null,
   allowSilent = false,
+  silent = null,
   installMode = null,
   silentArgs = null,
   innoInfFile = null,
@@ -489,16 +491,33 @@ export async function executeAndVerifyInstaller({
   }
 
   const effectiveMode = normalizeInstallMode(installMode ?? catItem?.installMode);
-  const effectiveSilentArgs = sanitizeSilentArgs(silentArgs ?? catItem?.silentArgs ?? '');
+  let effectiveSilentArgs = sanitizeSilentArgs(silentArgs ?? catItem?.silentArgs ?? '');
   const effectiveInfName = sanitizeInnoInfFileName(innoInfFile ?? catItem?.innoInfFile ?? '');
   const effectiveItemPath = itemPath || catItem?.path || '';
+  const effectiveAllowSilent = silent === null ? Boolean(allowSilent) : Boolean(silent);
+  const forceSilent = silent === true;
+
+  if (forceSilent && effectiveMode !== 'interactive-required' && !effectiveSilentArgs && fs.existsSync(sourcePath)) {
+    const detected = await detectInstallerFile(sourcePath, {
+      name: itemName || catItem?.name || '',
+      packageId: catItem?.packageId || catItem?.wingetId || '',
+      publisher: catItem?.publisher || '',
+    });
+    if (detected?.success && detected.suggestedArgs) {
+      effectiveSilentArgs = sanitizeSilentArgs(detected.suggestedArgs);
+    }
+  }
 
   const tempDir = app.getPath('temp');
   const stamp = Date.now();
   const tempPath = path.join(tempDir, `sk_install_${stamp}_${path.basename(sourcePath)}`);
 
   const sourceInfPath =
-    effectiveMode === 'silent' && allowSilent && effectiveInfName && effectiveItemPath
+    (effectiveMode === 'silent' || forceSilent) &&
+    effectiveAllowSilent &&
+    effectiveMode !== 'interactive-required' &&
+    effectiveInfName &&
+    effectiveItemPath
       ? path.join(effectiveItemPath, '_metadata', effectiveInfName)
       : '';
   const hasValidSourceInf = Boolean(sourceInfPath && fs.existsSync(sourceInfPath));
@@ -509,7 +528,8 @@ export async function executeAndVerifyInstaller({
     silentArgs: effectiveSilentArgs,
     innoInfPath: tempInfPath,
     ext,
-    allowSilent,
+    allowSilent: effectiveAllowSilent,
+    forceSilent,
   });
 
   const displayName = itemName || catItem?.name || path.basename(sourcePath);

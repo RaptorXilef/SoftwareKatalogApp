@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import { normalizeStartTab } from '../shared/unified-packages.js';
 
 const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions'];
 
@@ -15,6 +16,7 @@ const DEFAULT_CONFIG = {
   autoExtensions: ['.exe', '.msi', '.zip'],
   newBadgeDays: 14,
   versionCompareDepth: 3,
+  startTab: 'updates',
   // Komfortable Download- & Benennungs-Defaults
   autoSaveDownloads: true, // Direkt im Software-Ordner speichern ohne Dialog
   askSaveDialog: false, // Optional immer "Speichern unter" öffnen
@@ -126,6 +128,7 @@ export function getConfig() {
 
   const validSaveModes = new Set(['ask', 'auto-id', 'none']);
   const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
+  const startTab = normalizeStartTab(config.startTab);
   const enabledProviders = Array.isArray(config.enabledProviders)
     ? config.enabledProviders.filter((id) => typeof id === 'string' && id.trim().length > 0)
     : [...DEFAULT_CONFIG.enabledProviders];
@@ -140,6 +143,7 @@ export function getConfig() {
     ...config,
     ...state,
     archiveSaveMode,
+    startTab,
     enabledProviders,
   };
 }

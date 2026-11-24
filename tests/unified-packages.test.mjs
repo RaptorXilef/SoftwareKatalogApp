@@ -5,7 +5,9 @@ import {
   buildUnifiedPackages,
   canDownloadOnline,
   computeTabCounts,
+  DEFAULT_START_TAB,
   getPackageStatus,
+  normalizeStartTab,
 } from '../src/shared/unified-packages.js';
 
 describe('buildUnifiedPackages', () => {
@@ -364,5 +366,19 @@ describe('buildUnifiedPackages: Icon-Priorität im Tab Archiv (Bug 3)', () => {
     const empty = unified.find((p) => p.id === 'arch-empty');
     assert.equal(empty.icon, null);
     assert.equal(empty.iconSource, 'placeholder');
+  });
+});
+
+describe('normalizeStartTab', () => {
+  it('akzeptiert alle gültigen Start-Tabs und fällt sonst auf updates zurück', () => {
+    assert.equal(DEFAULT_START_TAB, 'updates');
+    assert.equal(normalizeStartTab('updates'), 'updates');
+    assert.equal(normalizeStartTab('INSTALLED'), 'installed');
+    assert.equal(normalizeStartTab(' archive '), 'archive');
+    assert.equal(normalizeStartTab('bundles'), 'bundles');
+    assert.equal(normalizeStartTab('discover'), 'discover');
+    assert.equal(normalizeStartTab(''), 'updates');
+    assert.equal(normalizeStartTab('unknown-tab'), 'updates');
+    assert.equal(normalizeStartTab(null), 'updates');
   });
 });

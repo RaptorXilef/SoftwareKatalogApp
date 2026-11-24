@@ -13,7 +13,7 @@ export const state = {
   settings: {},
   favorites: [],
   availableHiddenCats: [],
-  activeTab: 'archive',
+  activeTab: 'updates',
   originFilters: {
     updates: 'all',
     installed: 'all',

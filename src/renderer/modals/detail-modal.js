@@ -1,4 +1,4 @@
-import { getInstallModeBadge } from '../../shared/installer-logic.js';
+import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
 import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
@@ -44,7 +44,7 @@ function formatCacheTimestamp(ts) {
 
 function getEffectivePackageManager(item) {
   if (item.packageManager) return String(item.packageManager).trim().toLowerCase();
-  if (item.wingetId) return 'winget';
+  if (item.wingetId || item.webSourceType === 'winget' || item.packageId) return 'winget';
   return '';
 }
 
@@ -168,6 +168,60 @@ function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive 
   return `<div class="detail-hero-bar">${buttons.join('')}</div>`;
 }
 
+function buildInstallModeToggleHtml({
+  item,
+  st,
+  isWingetPkg,
+  hasFreshDownload,
+  selectedMode,
+  isSilentLocked,
+  lockTooltip,
+}) {
+  const hasInstallAction =
+    item.origin === 'remote' ||
+    (item.origin === 'pc' && isWingetPkg && st.hasWebUpdate) ||
+    (item.inArchive && (item.lastFiles?.length > 0 || hasFreshDownload || canDownloadOnline(item)));
+
+  if (!hasInstallAction) return '';
+
+  const isSilent = !isSilentLocked && selectedMode === 'silent';
+  const silentTitle = isSilentLocked
+    ? lockTooltip
+    : 'Setup möglichst ohne Rückfragen im Hintergrund ausführen';
+
+  return `
+    <div class="detail-install-mode-bar" id="detailInstallModeBar">
+      <span class="detail-install-mode-label">Installationsmodus:</span>
+      <div class="detail-mode-toggle" role="group" aria-label="Installationsmodus">
+        <button
+          type="button"
+          class="detail-mode-btn ${!isSilent ? 'active' : ''}"
+          data-detail-install-mode="interactive"
+          aria-pressed="${!isSilent ? 'true' : 'false'}"
+          title="Setup mit Assistent / Fenstern ausführen"
+        >
+          🖱️ Interaktiv
+        </button>
+        <button
+          type="button"
+          class="detail-mode-btn ${isSilent ? 'active' : ''}"
+          data-detail-install-mode="silent"
+          aria-pressed="${isSilent ? 'true' : 'false'}"
+          ${isSilentLocked ? 'disabled' : ''}
+          title="${escapeHTML(silentTitle)}"
+        >
+          ⚡ Silent
+        </button>
+      </div>
+      ${
+        isSilentLocked
+          ? `<span class="detail-mode-lock-hint" title="${escapeHTML(lockTooltip)}">🛡️ Adware-Schutz aktiv (nur Interaktiv)</span>`
+          : ''
+      }
+    </div>
+  `;
+}
+
 function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive }) {
   const hasProviderInstallBtn = item.origin === 'remote' || (item.origin === 'pc' && st.hasWebUpdate);
   if (!hasProviderInstallBtn || !isWingetPkg || item.inArchive || matchedArchive) return '';
@@ -244,12 +298,15 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
   if (!hasAnyCustomInfo) {
     if (hasPackageProfile) return '';
     return `
-      <div class="detail-section">
-        <h4>Eigene Infos & Medien</h4>
+      <section class="custom-info-card">
+        <div class="custom-info-head">
+          <h4>📝 Eigene Archiv-Notizen &amp; Zusatzinfos</h4>
+          <span class="muted"><code>_metadata/meta.json</code></span>
+        </div>
         <div class="detail-description">
           <span class="muted">Keine eigenen Zusatzinfos oder Medien hinterlegt (<code>meta.json</code> ist optional).</span>
         </div>
-      </div>
+      </section>
     `;
   }
 
@@ -303,8 +360,8 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
   return `
     <section class="custom-info-card">
       <div class="custom-info-head">
-        <h4>📝 Eigene Infos & Medien</h4>
-        <span class="muted">Optional aus <code>meta.json</code></span>
+        <h4>📝 Eigene Archiv-Notizen &amp; Zusatzinfos</h4>
+        <span class="muted">Aus <code>_metadata/meta.json</code></span>
       </div>
       ${cleanDesc ? `<div class="detail-description">${cleanDesc}</div>` : ''}
       ${infoChips.length > 0 ? `<div class="custom-info-chips">${infoChips.join('')}</div>` : ''}
@@ -481,7 +538,8 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
 }
 
 function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedAt, fallbackPm, fallbackPkgId }) {
-  const descText = pkg.shortDescription || pkg.description || '';
+  const shortDesc = String(pkg.shortDescription || '').trim();
+  const fullDesc = String(pkg.description || '').trim();
   const tags = Array.isArray(pkg.tags) ? pkg.tags : [];
   const pmLabel =
     (pkg.packageManager || fallbackPm || 'winget') === 'winget' ? 'Winget' : pkg.packageManager || fallbackPm;
@@ -495,6 +553,16 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
       </div>
     `
     : '';
+
+  const descBlocks = [];
+  if (shortDesc && fullDesc && shortDesc.toLowerCase() !== fullDesc.toLowerCase()) {
+    descBlocks.push(`<p class="pkg-profile-short-desc">${escapeHTML(shortDesc)}</p>`);
+    descBlocks.push(`<p class="pkg-profile-desc">${escapeHTML(fullDesc)}</p>`);
+  } else if (fullDesc || shortDesc) {
+    descBlocks.push(`<p class="pkg-profile-desc">${escapeHTML(fullDesc || shortDesc)}</p>`);
+  } else {
+    descBlocks.push('<p class="muted">Keine Beschreibung im Paket-Manifest hinterlegt.</p>');
+  }
 
   const tagsHtml =
     tags.length > 0
@@ -546,7 +614,7 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
 
   container.innerHTML = `
     ${staleNoticeHtml}
-    ${descText ? `<p class="pkg-profile-desc">${escapeHTML(descText)}</p>` : '<p class="muted">Keine Kurzbeschreibung im Paket-Manifest hinterlegt.</p>'}
+    ${descBlocks.join('')}
     ${tagsHtml}
     <div class="pkg-profile-grid">${gridItems.join('')}</div>
   `;
@@ -575,8 +643,12 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const effectivePm = getEffectivePackageManager(item);
   const effectivePkgId = getEffectivePackageId(item);
   const isWingetPkg = effectivePm === 'winget' && Boolean(effectivePkgId);
-  const hasPackageProfile = isWingetPkg;
+  const hasPackageProfile = Boolean(effectivePkgId) && (!effectivePm || effectivePm === 'winget');
   const matchedArchive = item.matchedArchiveItem || null;
+  const metaSource = item.inArchive ? item : matchedArchive || item;
+  const initialModeState = resolveDetailInstallMode(metaSource.installMode || item.installMode);
+  let selectedInstallMode = initialModeState.selected;
+  const isSilentLocked = initialModeState.silentLocked;
   const canUninstall = isCanUninstall(item, effectivePm, effectivePkgId);
   const onlineReady = canDownloadOnline(item);
   const supportsChangelog = (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) || isWingetPkg;
@@ -640,7 +712,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       <section class="pkg-profile-card">
         <div class="pkg-profile-head">
           <div class="pkg-profile-title">
-            <h4>📦 Automatischer Paket-Steckbrief</h4>
+            <h4>📦 Paketmanager-Steckbrief (Winget)</h4>
             <span id="pkgProfileCacheBadge" class="pkg-cache-meta">Lade...</span>
           </div>
           <button type="button" class="btn btn-ghost btn-xs" id="btnRefreshPkgProfile" data-detail-action="refresh-pkg-profile" title="Steckbrief neu abrufen">🔄 Aktualisieren</button>
@@ -697,10 +769,19 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         ${buildVersionGridHtml(item, st, { matchedArchive })}
         ${postDownloadBanner}
         ${buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive })}
+        ${buildInstallModeToggleHtml({
+          item,
+          st,
+          isWingetPkg,
+          hasFreshDownload: Boolean(freshDownload),
+          selectedMode: selectedInstallMode,
+          isSilentLocked,
+          lockTooltip: initialModeState.lockTooltip,
+        })}
         ${buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive })}
         ${pinnedNotice}
         ${packageProfileHtml}
-        ${buildCustomMetaSectionHtml(item, hasPackageProfile)}
+        ${buildCustomMetaSectionHtml(metaSource, hasPackageProfile)}
       </section>
 
       <section class="tab-panel" data-detail-panel="changelog" ${initialTab === 'changelog' ? '' : 'hidden'}>
@@ -949,13 +1030,15 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
   const runInstallerFlow = async (filePath, targetVersion) => {
     if (!filePath) return;
-    showToast(`Starte Setup für ${item.name}...`, { type: 'info' });
+    const useSilent = !isSilentLocked && selectedInstallMode === 'silent';
+    showToast(`Starte Setup für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`, { type: 'info' });
     const res = await window.electronAPI.executeInstaller({
       itemId: item.id,
       itemName: item.name,
       sourcePath: filePath,
       targetVersion: targetVersion || null,
-      allowSilent: item.installMode === 'silent',
+      allowSilent: useSilent,
+      silent: useSilent,
     });
 
     if (res.alreadyRunning) {
@@ -1014,15 +1097,19 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       }
     }
 
+    const useSilent = !isSilentLocked && selectedInstallMode === 'silent';
     btn.disabled = true;
     const origText = btn.textContent;
     btn.textContent = item.isInstalled ? '⏳ Aktualisiere...' : '⏳ Installiere...';
-    showToast(`Starte Winget-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name}...`, {
-      type: 'info',
-    });
+    showToast(
+      `Starte Winget-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`,
+      {
+        type: 'info',
+      }
+    );
 
     const res = await window.electronAPI.installPackage(effectivePm, effectivePkgId, {
-      silent: false,
+      silent: useSilent,
       itemName: item.name,
     });
 
@@ -1089,6 +1176,21 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     const tabBtn = e.target.closest('[data-detail-tab]');
     if (tabBtn) {
       switchDetailTab(tabBtn.dataset.detailTab);
+      return;
+    }
+
+    const modeBtn = e.target.closest('[data-detail-install-mode]');
+    if (modeBtn) {
+      const requested = modeBtn.dataset.detailInstallMode;
+      if (isSilentLocked && requested === 'silent') return;
+      if (requested === 'interactive' || requested === 'silent') {
+        selectedInstallMode = requested;
+        modal.querySelectorAll('[data-detail-install-mode]').forEach((b) => {
+          const active = b.dataset.detailInstallMode === selectedInstallMode;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+      }
       return;
     }
 

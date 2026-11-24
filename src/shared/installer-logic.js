@@ -34,14 +34,14 @@ export const INSTALLER_TYPE_PRESETS = Object.freeze({
     label: 'InstallShield',
     suggestedArgs: '',
     supportsInf: false,
-    hint: 'InstallShield erfordert meist eine herstellerspezifische .iss-Antwortdatei – Parameter bitte manuell prüfen.',
+    hint: 'InstallShield erfordert meist eine herstellerspezifische .iss-Antwortdatei - Parameter bitte manuell prüfen.',
   }),
   unknown: Object.freeze({
     type: 'unknown',
     label: 'Unbekannt',
     suggestedArgs: '',
     supportsInf: false,
-    hint: 'Installer-Typ nicht eindeutig erkannt – Parameter bitte manuell prüfen oder interaktiv lassen.',
+    hint: 'Installer-Typ nicht eindeutig erkannt - Parameter bitte manuell prüfen oder interaktiv lassen.',
   }),
 });
 
@@ -181,7 +181,7 @@ export function detectAdwareSignals({ name = '', fileName = '', packageId = '', 
         return {
           flagged: true,
           matchedLabel: entry.label,
-          reason: `Bekannter Adware-/Bundle-Kandidat erkannt (${entry.label}). Empfohlen wird „Immer Interaktiv (Adware-Schutz)“, damit Zusatzangebote im Setup sicher abgewählt werden können.`,
+          reason: `Bekannter Adware-/Bundle-Kandidat erkannt (${entry.label}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)", damit Zusatzangebote im Setup sicher abgewählt werden können.`,
           recommendedMode: 'interactive-required',
         };
       }
@@ -196,7 +196,7 @@ export function detectAdwareSignals({ name = '', fileName = '', packageId = '', 
         return {
           flagged: true,
           matchedLabel: marker,
-          reason: `Verdächtiger Adware-Wrapper-Marker in Setup-Datei erkannt (${marker}). Empfohlen wird „Immer Interaktiv (Adware-Schutz)“.`,
+          reason: `Verdächtiger Adware-Wrapper-Marker in Setup-Datei erkannt (${marker}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)".`,
           recommendedMode: 'interactive-required',
         };
       }
@@ -211,6 +211,32 @@ export function detectAdwareSignals({ name = '', fileName = '', packageId = '', 
   };
 }
 
+export const DETAIL_SILENT_LOCK_TOOLTIP = '🛡️ Gesperrt wegen Adware-/Klick-Schutz (in Bearbeiten änderbar)';
+
+/**
+ * Bestimmt die Vorauswahl und Sperre für den Silent-/Interaktiv-Schalter im Detail-Modal.
+ */
+export function resolveDetailInstallMode(installMode, requestedMode = null) {
+  const mode = normalizeInstallMode(installMode);
+  if (mode === 'interactive-required') {
+    return {
+      selected: 'interactive',
+      silent: false,
+      silentLocked: true,
+      lockTooltip: DETAIL_SILENT_LOCK_TOOLTIP,
+    };
+  }
+
+  const defaultSelected = mode === 'silent' ? 'silent' : 'interactive';
+  const selected = requestedMode === 'silent' || requestedMode === 'interactive' ? requestedMode : defaultSelected;
+  return {
+    selected,
+    silent: selected === 'silent',
+    silentLocked: false,
+    lockTooltip: '',
+  };
+}
+
 /**
  * Ermittelt den sicheren Ausführungsplan für ein Setup.
  * `interactive-required` erzwingt immer interaktive Ausführung und ignoriert sämtliche Silent-Parameter.
@@ -221,13 +247,14 @@ export function resolveInstallExecutionPlan({
   innoInfPath = '',
   ext = '.exe',
   allowSilent = false,
+  forceSilent = false,
   recordInfPath = '',
 } = {}) {
   const mode = normalizeInstallMode(installMode);
   const cleanArgs = sanitizeSilentArgs(silentArgs);
   const cleanInfPath = String(innoInfPath || '').trim();
   const cleanRecordPath = String(recordInfPath || '').trim();
-  void ext;
+  const lowerExt = String(ext || '').toLowerCase();
 
   if (cleanRecordPath) {
     return {
@@ -253,8 +280,11 @@ export function resolveInstallExecutionPlan({
     };
   }
 
-  if (mode === 'silent' && allowSilent === true && cleanArgs.length > 0) {
-    let extraArgs = cleanArgs;
+  const effectiveArgs = cleanArgs || (forceSilent && lowerExt === '.msi' ? '/qn /norestart' : '');
+  const silentRequested = (mode === 'silent' && allowSilent === true) || forceSilent === true;
+
+  if (silentRequested && effectiveArgs.length > 0) {
+    let extraArgs = effectiveArgs;
     let usedInf = false;
 
     if (cleanInfPath && !/\/LOADINF=/i.test(extraArgs)) {
@@ -295,7 +325,7 @@ export function getInstallModeBadge(item) {
     return {
       type: 'protected',
       label: '🛡️ Interaktiv-Schutz',
-      title: 'Immer interaktiv (Adware-Schutz) – Silent-Parameter werden immer ignoriert',
+      title: 'Immer interaktiv (Adware-Schutz) - Silent-Parameter werden immer ignoriert',
     };
   }
   const cleanArgs = sanitizeSilentArgs(item.silentArgs);

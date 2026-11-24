@@ -527,6 +527,19 @@ export function canDownloadOnline(item) {
   return Boolean(item.downloadUrl);
 }
 
+export const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover']);
+export const DEFAULT_START_TAB = 'updates';
+
+/**
+ * Normalisiert den konfigurierten Start-Tab auf einen gültigen Tab-Namen (Fallback: 'updates').
+ */
+export function normalizeStartTab(tab) {
+  const clean = String(tab || '')
+    .trim()
+    .toLowerCase();
+  return VALID_START_TABS.includes(clean) ? clean : DEFAULT_START_TAB;
+}
+
 export function computeTabCounts(packages, { visibleHiddenCats = [], versionCompareDepth = 3, bundlesCount = 0 } = {}) {
   let updates = 0;
   let installed = 0;

@@ -1,3 +1,4 @@
+import { normalizeStartTab } from '../../shared/unified-packages.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
@@ -26,6 +27,7 @@ export async function renderSettingsModal() {
     (Array.isArray(s.enabledProviders) ? s.enabledProviders : ['winget', 'archive']).map((p) => p.toLowerCase())
   );
   const saveMode = s.archiveSaveMode || 'ask';
+  const startTab = normalizeStartTab(s.startTab);
   const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
   const expiredCacheEntries = Number(cacheStats?.expiredEntries) || 0;
 
@@ -156,6 +158,16 @@ export async function renderSettingsModal() {
       <section class="settings-section">
         <h3>🎨 Darstellung & Versionsvergleich</h3>
         <div class="form-grid-2">
+          <label class="form-field">
+            <span>Start-Tab beim Öffnen der App</span>
+            <select id="cfgStartTab">
+              <option value="updates" ${startTab === 'updates' ? 'selected' : ''}>⬆️ Updates (Standard)</option>
+              <option value="installed" ${startTab === 'installed' ? 'selected' : ''}>💻 Installiert</option>
+              <option value="archive" ${startTab === 'archive' ? 'selected' : ''}>🗄️ Archiv</option>
+              <option value="bundles" ${startTab === 'bundles' ? 'selected' : ''}>📦 Bündel</option>
+              <option value="discover" ${startTab === 'discover' ? 'selected' : ''}>🛍️ Neu installieren</option>
+            </select>
+          </label>
           <label class="form-field">
             <span>"NEU"-Hinweis anzeigen für (Tage, 0 = aus)</span>
             <input type="number" id="cfgNewBadgeDays" value="${s.newBadgeDays ?? 14}" min="0" max="365">
@@ -361,6 +373,7 @@ export async function renderSettingsModal() {
         (cb) => cb.value
       );
       const autoSave = modal.querySelector('#cfgAutoSave').checked;
+      const startTabEl = modal.querySelector('#cfgStartTab');
       const newSettings = {
         enabledProviders: checkedProviders,
         archiveSaveMode: modal.querySelector('#cfgArchiveSaveMode')?.value || 'ask',
@@ -377,6 +390,7 @@ export async function renderSettingsModal() {
           .map((x) => (x.startsWith('.') ? x : `.${x}`)),
         newBadgeDays: parseInt(modal.querySelector('#cfgNewBadgeDays').value, 10) || 0,
         versionCompareDepth: parseInt(modal.querySelector('#cfgVersionDepth').value, 10) || 3,
+        startTab: normalizeStartTab(startTabEl instanceof HTMLSelectElement ? startTabEl.value : 'updates'),
         autoSaveDownloads: autoSave,
         askSaveDialog: !autoSave,
         keepOriginalNameIfVersioned: modal.querySelector('#cfgKeepOriginal').checked,

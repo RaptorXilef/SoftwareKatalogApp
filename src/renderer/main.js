@@ -1,4 +1,5 @@
 import { buildBundleDraftFromInstalled } from '../shared/bundles-logic.js';
+import { normalizeStartTab } from '../shared/unified-packages.js';
 import { initBundlesView, renderBundlesView } from './components/bundles-view.js';
 import {
   getPendingArchiveWebUpdateItems,
@@ -80,9 +81,12 @@ async function runInstalledScan({ silent = false } = {}) {
   }
 }
 
-async function reloadUI({ preserveScroll = true, rescanInstalled = false } = {}) {
+async function reloadUI({ preserveScroll = true, rescanInstalled = false, applyStartTab = false } = {}) {
   const y = window.scrollY;
   await Promise.all([refreshCatalogData(), refreshProviders(), refreshBundles()]);
+  if (applyStartTab) {
+    state.activeTab = normalizeStartTab(state.settings.startTab);
+  }
   renderTagChips();
   renderActiveView();
   if (preserveScroll) window.scrollTo(0, y);
@@ -638,7 +642,7 @@ async function bootstrap() {
     const verEl = document.getElementById('appVersion');
     if (verEl) verEl.textContent = `(v${info.version})`;
 
-    await reloadUI({ preserveScroll: false });
+    await reloadUI({ preserveScroll: false, applyStartTab: true });
     checkAppUpdateInBackground();
     runInstalledScan({ silent: true });
   } catch (err) {

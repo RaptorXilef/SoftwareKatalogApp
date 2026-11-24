@@ -5,10 +5,12 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { detectInstallerFile } from '../src/main/installer-detector.js';
 import {
+  DETAIL_SILENT_LOCK_TOOLTIP,
   detectAdwareSignals,
   detectInstallerFromBuffer,
   getInstallModeBadge,
   normalizeInstallMode,
+  resolveDetailInstallMode,
   resolveInstallExecutionPlan,
   sanitizeInnoInfFileName,
   sanitizeSilentArgs,
@@ -231,5 +233,69 @@ describe('installer-logic: Sanitizer & UI-Badges', () => {
     const protBadge = getInstallModeBadge({ installMode: 'interactive-required', silentArgs: '/S' });
     assert.equal(protBadge.type, 'protected');
     assert.equal(protBadge.label, '🛡️ Interaktiv-Schutz');
+  });
+
+  it('steuert Detail-Modal-Vorauswahl und Adware-Schutz-Sperre (resolveDetailInstallMode)', () => {
+    const defSilent = resolveDetailInstallMode('silent');
+    assert.deepEqual(defSilent, {
+      selected: 'silent',
+      silent: true,
+      silentLocked: false,
+      lockTooltip: '',
+    });
+
+    const defInteractive = resolveDetailInstallMode('interactive');
+    assert.deepEqual(defInteractive, {
+      selected: 'interactive',
+      silent: false,
+      silentLocked: false,
+      lockTooltip: '',
+    });
+
+    const toggledSilent = resolveDetailInstallMode('interactive', 'silent');
+    assert.equal(toggledSilent.selected, 'silent');
+    assert.equal(toggledSilent.silent, true);
+    assert.equal(toggledSilent.silentLocked, false);
+
+    const locked = resolveDetailInstallMode('interactive-required', 'silent');
+    assert.deepEqual(locked, {
+      selected: 'interactive',
+      silent: false,
+      silentLocked: true,
+      lockTooltip: DETAIL_SILENT_LOCK_TOOLTIP,
+    });
+  });
+
+  it('unterstützt explizites forceSilent im Detail-Modal, blockiert aber interactive-required strikt', () => {
+    const msiForced = resolveInstallExecutionPlan({
+      installMode: 'interactive',
+      silentArgs: '',
+      ext: '.msi',
+      allowSilent: true,
+      forceSilent: true,
+    });
+    assert.equal(msiForced.effectiveSilent, true);
+    assert.equal(msiForced.extraArgs, '/qn /norestart');
+
+    const exeForced = resolveInstallExecutionPlan({
+      installMode: 'interactive',
+      silentArgs: '/S',
+      ext: '.exe',
+      allowSilent: true,
+      forceSilent: true,
+    });
+    assert.equal(exeForced.effectiveSilent, true);
+    assert.equal(exeForced.extraArgs, '/S');
+
+    const lockedForced = resolveInstallExecutionPlan({
+      installMode: 'interactive-required',
+      silentArgs: '/S',
+      ext: '.exe',
+      allowSilent: true,
+      forceSilent: true,
+    });
+    assert.equal(lockedForced.effectiveSilent, false);
+    assert.equal(lockedForced.adwareProtected, true);
+    assert.equal(lockedForced.extraArgs, '');
   });
 });
