@@ -1,6 +1,7 @@
 import { getArchiveRootLabel, normalizePathKey } from '../../shared/multi-archive-logic.js';
 import {
   getPolicyEntryKey,
+  hasAccessPolicyChanges,
   normalizeAccessPolicy,
   removePolicyEntry,
   updatePolicyEntryExecutionMode,
@@ -111,6 +112,9 @@ export async function renderSettingsModal(initialTab = 'general') {
   let policyManualMatchType = 'packageId';
   let policyManualValue = '';
   let policyManualLabel = '';
+
+  const isPolicyEditable = () => !currentAuthStatus?.isReadOnlyPolicy;
+  const hasPolicyDraftChanges = () => isPolicyEditable() && hasAccessPolicyChanges(savedPolicy, draftPolicy);
 
   const getActivePolicyScopeKey = () =>
     draftPolicy.scopeMode === 'separate' ? (activePolicyScopeTab === 'install' ? 'install' : 'updates') : 'shared';
@@ -372,7 +376,7 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   const renderPolicySectionHtml = () => {
     const isReadOnly = Boolean(currentAuthStatus?.isReadOnlyPolicy);
-    const isDirty = JSON.stringify(draftPolicy) !== JSON.stringify(savedPolicy);
+    const isDirty = hasPolicyDraftChanges();
     const activeRuleSet = getActivePolicyRuleSet();
     const isSeparate = draftPolicy.scopeMode === 'separate';
     const scopeLabel = !isSeparate
@@ -1173,7 +1177,7 @@ export async function renderSettingsModal(initialTab = 'general') {
   const updateDirtyUi = () => {
     const badge = modal.querySelector('#settingsDirtyBadge');
     if (badge instanceof HTMLElement) {
-      badge.hidden = !hasSettingsDraftChanges(initialDraft, draftSettings);
+      badge.hidden = !hasSettingsDraftChanges(initialDraft, draftSettings) && !hasPolicyDraftChanges();
     }
   };
 
@@ -1234,6 +1238,7 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (sec instanceof HTMLElement) {
       sec.innerHTML = renderPolicySectionHtml();
     }
+    updateDirtyUi();
   };
 
   const refreshPolicyListsInPlace = () => {
@@ -1276,10 +1281,15 @@ export async function renderSettingsModal(initialTab = 'general') {
     }
   };
 
-  const refreshAuthSectionUi = (nextStatus) => {
+  const refreshAuthSectionUi = (nextStatus, { syncPolicy = false } = {}) => {
+    const hadUnsavedPolicy = hasPolicyDraftChanges();
     if (nextStatus) {
       currentAuthStatus = applyAuthStatus(nextStatus);
       renderAuthHeaderControls();
+      if (syncPolicy || !hadUnsavedPolicy) {
+        savedPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
+        draftPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
+      }
     }
     if (modalToken !== activeSettingsToken || overlay.hidden) return;
     const sec = modal.querySelector('#settingsAdminSection');
@@ -1955,7 +1965,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       try {
         const res = await window.electronAPI.setAuthPolicyPath(targetPath, { copyCurrentPolicy });
-        if (res?.status) refreshAuthSectionUi(res.status);
+        if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
           showToast('Speicherort der Policy-Datei wurde aktualisiert.', { type: 'success' });
@@ -1969,7 +1979,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       try {
         const res = await window.electronAPI.setAuthPolicyPath('', { copyCurrentPolicy: false });
-        if (res?.status) refreshAuthSectionUi(res.status);
+        if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
           showToast('Auf Standardpfad (data/admin-policy.json) zurückgesetzt.', { type: 'info' });
@@ -1985,7 +1995,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       try {
         const res = await window.electronAPI.lockAuthPolicyInHklm(candidatePath);
-        if (res?.status) refreshAuthSectionUi(res.status);
+        if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
           showToast('Policy-Pfad fest in HKLM-Registry gesperrt.', { type: 'success' });
@@ -2016,7 +2026,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       }
       try {
         const res = await window.electronAPI.unlockAuthPolicyInHklm();
-        if (res?.status) refreshAuthSectionUi(res.status);
+        if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
           showToast('HKLM-Policy-Sperre wurde entfernt.', { type: 'success' });
@@ -2146,28 +2156,58 @@ export async function renderSettingsModal(initialTab = 'general') {
       }
     } else if (act === 'save') {
       syncDraftFromDom();
+      const settingsChanged = hasSettingsDraftChanges(initialDraft, draftSettings);
+      const policyChanged = hasPolicyDraftChanges();
       const plan = buildSettingsSavePlan(initialDraft, draftSettings, s.providerSettings);
       const saveBtn = modal.querySelector('#btnSettingsSave');
       if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
 
-      const res = await window.electronAPI.saveSettings(plan.payload);
-      if (modalToken !== activeSettingsToken) return;
-
-      if (res.success) {
-        closeModal();
-        if (plan.needsRescan) {
-          showToast('Einstellungen gespeichert - aktualisiere Archiv...', { type: 'info' });
-          await window.electronAPI.runScan('smart');
-        } else {
-          showToast('Einstellungen gespeichert.', { type: 'success' });
+      if (policyChanged) {
+        const policyRes = await window.electronAPI.updateAccessPolicy(draftPolicy);
+        if (modalToken !== activeSettingsToken) return;
+        if (policyRes?.status) {
+          refreshAuthSectionUi(policyRes.status, { syncPolicy: true });
         }
-        await triggerCatalogReload({
-          rescanInstalled: plan.rescanInstalled,
-        });
-      } else {
-        if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
-        showToast(`Speicherfehler: ${res.error}`, { type: 'error' });
+        if (!policyRes?.success) {
+          if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
+          showToast(policyRes?.error || 'Zugriffsrichtlinien konnten nicht gespeichert werden.', {
+            type: 'error',
+            duration: 6000,
+          });
+          return;
+        }
       }
+
+      if (settingsChanged) {
+        const res = await window.electronAPI.saveSettings(plan.payload);
+        if (modalToken !== activeSettingsToken) return;
+        if (!res?.success) {
+          if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
+          showToast(`Speicherfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error' });
+          return;
+        }
+      }
+
+      closeModal();
+      if (settingsChanged && plan.needsRescan) {
+        showToast(
+          policyChanged
+            ? 'Einstellungen & Zugriffsrichtlinien gespeichert - aktualisiere Archiv...'
+            : 'Einstellungen gespeichert - aktualisiere Archiv...',
+          { type: 'info' }
+        );
+        await window.electronAPI.runScan('smart');
+      } else if (policyChanged && settingsChanged) {
+        showToast('Einstellungen & Zugriffsrichtlinien gespeichert.', { type: 'success' });
+      } else if (policyChanged) {
+        showToast('Zugriffsrichtlinien gespeichert.', { type: 'success' });
+      } else {
+        showToast('Einstellungen gespeichert.', { type: 'success' });
+      }
+
+      await triggerCatalogReload({
+        rescanInstalled: settingsChanged && plan.rescanInstalled,
+      });
     }
   };
 }

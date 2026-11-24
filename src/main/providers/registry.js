@@ -244,6 +244,14 @@ function isProviderUsableForExecution(provider) {
   return true;
 }
 
+export function getCachedProviderAvailability(providerId) {
+  const cleanId = String(providerId || '')
+    .trim()
+    .toLowerCase();
+  if (!cleanId) return null;
+  return availabilityCache.get(cleanId) || null;
+}
+
 export async function searchAcrossProviders(query, { providerIds = null, limit = 25, signal = null } = {}) {
   initDefaultProviders();
   const targets = providerIds

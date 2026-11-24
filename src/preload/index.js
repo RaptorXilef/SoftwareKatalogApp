@@ -55,6 +55,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // PC-Versionen & Installation
   scanLocalVersions: (opts) => ipcRenderer.invoke('scan-local-versions', opts),
   scanInstalledSoftware: (opts) => ipcRenderer.invoke('scan-installed-software', opts),
+  onInstalledScanProgress: (cb) => {
+    const listener = (_event, progress) => cb(progress);
+    ipcRenderer.on('installed-scan-progress', listener);
+    return () => ipcRenderer.off('installed-scan-progress', listener);
+  },
   extractCachedAppIcon: (payload) => ipcRenderer.invoke('extract-cached-app-icon', payload),
   uninstallSoftware: (payload) => ipcRenderer.invoke('uninstall-software', payload),
   autoDetectPath: (names) => ipcRenderer.invoke('auto-detect-path', names),

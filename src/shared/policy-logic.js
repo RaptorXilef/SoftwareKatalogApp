@@ -642,3 +642,13 @@ export function evaluatePackagePolicy(pkg, action = 'view', policy = null, isAdm
     allowed: true,
   };
 }
+
+/**
+ * Prueft, ob sich zwei Zugriffsrichtlinien nach Normalisierung inhaltlich unterscheiden.
+ * @param {unknown} savedPolicy
+ * @param {unknown} draftPolicy
+ * @returns {boolean}
+ */
+export function hasAccessPolicyChanges(savedPolicy, draftPolicy) {
+  return JSON.stringify(normalizeAccessPolicy(savedPolicy)) !== JSON.stringify(normalizeAccessPolicy(draftPolicy));
+}

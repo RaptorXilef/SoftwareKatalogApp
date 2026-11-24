@@ -15,6 +15,7 @@ import {
   buildExportPolicyPayload,
   createDefaultAccessPolicy,
   evaluatePackagePolicy,
+  hasAccessPolicyChanges,
   matchesPolicyEntry,
   normalizeAccessPolicy,
   POLICY_EXPORT_FORMAT,
@@ -113,6 +114,29 @@ describe('policy-logic: Normalisierung, Listen-Helper & Export/Import', () => {
     assert.equal(validateImportPolicyPayload([]).valid, false);
     assert.equal(validateImportPolicyPayload({ format: 'wrong-format', accessPolicy: policy }).valid, false);
     assert.equal(validateImportPolicyPayload({ foo: 'bar' }).valid, false);
+  });
+
+  it('erkennt ungespeicherte Aenderungen mit hasAccessPolicyChanges zuverlaessig', () => {
+    const base = createDefaultAccessPolicy();
+    const equivalent = normalizeAccessPolicy({
+      enabled: false,
+      applyToAdmin: false,
+      scopeMode: 'shared',
+    });
+    assert.equal(hasAccessPolicyChanges(base, equivalent), false);
+
+    assert.equal(hasAccessPolicyChanges(base, { ...base, enabled: true }), true);
+    assert.equal(hasAccessPolicyChanges(base, { ...base, scopeMode: 'separate' }), true);
+    assert.equal(
+      hasAccessPolicyChanges(base, {
+        ...base,
+        shared: {
+          ...base.shared,
+          entries: [{ matchType: 'packageId', value: '7zip.7zip', label: '7-Zip', executionMode: 'inherit' }],
+        },
+      }),
+      true
+    );
   });
 });
 

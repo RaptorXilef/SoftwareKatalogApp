@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import {
   buildIconCacheKey,
   deriveGitHubAvatarUrl,
@@ -31,6 +31,12 @@ import {
   sanitizeSilentArgs,
 } from '../shared/installer-logic.js';
 import { normalizePythonPackageName } from '../shared/python-parser.js';
+import {
+  createScanProgressState,
+  markScanFinished,
+  markScanPhaseMerging,
+  markScanSourceDone,
+} from '../shared/scan-progress-logic.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
 import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
@@ -38,7 +44,13 @@ import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './con
 import { isAdminSessionActive, runStartProcessElevated } from './elevated-helper.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
-import { getEnabledProviders, getProvider, initDefaultProviders, isProviderEnabled } from './providers/registry.js';
+import {
+  getCachedProviderAvailability,
+  getEnabledProviders,
+  getProvider,
+  initDefaultProviders,
+  isProviderEnabled,
+} from './providers/registry.js';
 import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
@@ -1041,229 +1053,377 @@ export async function getInstalledAppxInventory(signal = null) {
   return appxInventoryPromise;
 }
 
+/** @type {Promise<any> | null} */
+let activeInstalledScanPromise = null;
+let activeInstalledScanSilent = false;
+
+/**
+ * Sendet Live-Fortschritt des PC-/Provider-Scans an alle Renderer-Fenster.
+ * @param {import('../shared/scan-progress-logic.js').ScanProgressState} progressState
+ */
+function broadcastInstalledScanProgress(progressState) {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('installed-scan-progress', progressState);
+      }
+    }
+  } catch {
+    // In Headless-/Test-Umgebungen ohne Fenster ignorieren
+  }
+}
+
 /**
  * Kombiniert `winget export`, `winget upgrade`, Provider-Daten, Registry und AppX-Inventar
  * zu einer vollstaendigen Liste aller auf diesem PC installierten Programme.
  */
 export async function scanInstalledSoftware({ includeSystemComponents = false, silent = false } = {}) {
-  startMenuShortcutsCache = null;
-  appxInventoryCache = null;
-  failedIconKeys.clear();
-  let job = null;
-  if (!silent) {
-    job = createJob({
-      type: 'pc-scan',
-      title: 'PC-Programme & Updates scannen',
-      dedupeKey: 'pc-scan',
-      cancelable: true,
-    });
-    if (!job) return { success: false, alreadyRunning: true, error: 'Ein PC-Scan läuft bereits.' };
+  if (activeInstalledScanPromise) {
+    if (!silent && !activeInstalledScanSilent) {
+      return { success: false, alreadyRunning: true, error: 'Ein PC-Scan läuft bereits.' };
+    }
+    return activeInstalledScanPromise;
   }
 
-  const signal = job?.signal || null;
+  activeInstalledScanSilent = Boolean(silent);
+  const runPromise = (async () => {
+    startMenuShortcutsCache = null;
+    appxInventoryCache = null;
+    failedIconKeys.clear();
+    let job = null;
+    if (!silent) {
+      job = createJob({
+        type: 'pc-scan',
+        title: 'PC-Programme & Updates scannen',
+        dedupeKey: 'pc-scan',
+        cancelable: true,
+      });
+      if (!job) return { success: false, alreadyRunning: true, error: 'Ein PC-Scan läuft bereits.' };
+    }
 
-  try {
+    const signal = job?.signal || null;
+
     initDefaultProviders();
-    job?.update(15, 'Lese Windows-Registry & aktive Paketmanager...');
-
-    const wingetEnabled = isProviderEnabled('winget');
-    const msstoreEnabled = isProviderEnabled('msstore');
+    const isCachedAvailable = (id) => getCachedProviderAvailability(id)?.available !== false;
+    const wingetEnabled = isProviderEnabled('winget') && isCachedAvailable('winget');
+    const msstoreEnabled = isProviderEnabled('msstore') && isCachedAvailable('msstore');
     const msiEnabled = isProviderEnabled('msi');
     const msstoreProv = msstoreEnabled ? getProvider('msstore') : null;
-    const extraProviders = getEnabledProviders().filter((p) => !['archive', 'winget', 'msstore', 'msi'].includes(p.id));
+    const extraProviders = getEnabledProviders().filter(
+      (p) => !['archive', 'winget', 'msstore', 'msi'].includes(p.id) && isCachedAvailable(p.id)
+    );
 
-    const emptyInstalled = Promise.resolve({ success: false, packages: [] });
-    const emptyUpgrades = Promise.resolve({ success: false, upgrades: [] });
+    /** @type {Array<{ id: string, label: string, kind: 'system' | 'provider' }>} */
+    const sourceDefs = [{ id: 'registry', label: 'Windows-Registry', kind: 'system' }];
+    if (msstoreEnabled || wingetEnabled) {
+      sourceDefs.push({ id: 'appx', label: 'AppX-Inventar', kind: 'system' });
+    }
+    if (wingetEnabled) {
+      sourceDefs.push({ id: 'winget', label: 'Winget', kind: 'provider' });
+    }
+    if (msstoreProv) {
+      sourceDefs.push({ id: 'msstore', label: 'MS Store', kind: 'provider' });
+    }
+    for (const provider of extraProviders) {
+      sourceDefs.push({ id: provider.id, label: provider.name, kind: 'provider' });
+    }
 
-    const [
-      registryEntries,
-      appxEntries,
-      exportRes,
-      upgradeRes,
-      msstoreInstalledRes,
-      msstoreUpgradeRes,
-      extraProviderResults,
-    ] = await Promise.all([
-      readRegistryUninstallEntries(signal),
-      msstoreEnabled || wingetEnabled ? getInstalledAppxInventory(signal) : Promise.resolve([]),
-      wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
-      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
-      msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
-      msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
-      Promise.all(
+    let progressState = createScanProgressState(sourceDefs);
+    broadcastInstalledScanProgress(progressState);
+    job?.update(progressState.percent, 'Lese Windows-Registry & aktive Paketmanager...');
+
+    const completeSource = (sourceId, { ok = true, error = '' } = {}) => {
+      progressState = markScanSourceDone(progressState, sourceId, { ok, error });
+      broadcastInstalledScanProgress(progressState);
+      if (job) {
+        const runningLabels = progressState.sources.filter((s) => s.status === 'running').map((s) => s.label);
+        const detail =
+          runningLabels.length > 0
+            ? `Prüfe ${runningLabels.slice(0, 3).join(', ')}${runningLabels.length > 3 ? ' ...' : ''} (${progressState.completed}/${progressState.total})`
+            : `${progressState.completed}/${progressState.total} Quellen geprüft`;
+        job.update(progressState.percent, detail);
+      }
+    };
+
+    try {
+      const emptyInstalled = { success: false, packages: [] };
+      const emptyUpgrades = { success: false, upgrades: [] };
+
+      const registryTask = readRegistryUninstallEntries(signal).then((entries) => {
+        completeSource('registry', { ok: true });
+        return entries;
+      });
+
+      const appxTask =
+        msstoreEnabled || wingetEnabled
+          ? getInstalledAppxInventory(signal).then((entries) => {
+              completeSource('appx', { ok: true });
+              return entries;
+            })
+          : Promise.resolve([]);
+
+      const wingetTask = wingetEnabled
+        ? Promise.all([wingetProvider.listInstalled({ signal }), wingetProvider.listUpgrades({ signal })]).then(
+            ([inst, upg]) => {
+              completeSource('winget', {
+                ok: Boolean(upg?.success),
+                error: upg?.error || '',
+              });
+              return [inst, upg];
+            }
+          )
+        : Promise.resolve([emptyInstalled, emptyUpgrades]);
+
+      const msstoreTask = msstoreProv
+        ? Promise.all([msstoreProv.listInstalled({ signal }), msstoreProv.listUpgrades({ signal })]).then(
+            ([inst, upg]) => {
+              completeSource('msstore', {
+                ok: Boolean(upg?.success),
+                error: upg?.error || '',
+              });
+              return [inst, upg];
+            }
+          )
+        : Promise.resolve([emptyInstalled, emptyUpgrades]);
+
+      const extraTasks = Promise.all(
         extraProviders.map(async (provider) => {
-          const [installedSettled, upgradesSettled] = await Promise.allSettled([
-            provider.capabilities?.listInstalled && typeof provider.listInstalled === 'function'
-              ? provider.listInstalled({ signal })
-              : emptyInstalled,
+          const hasUpgradesCap = Boolean(
             provider.capabilities?.listUpgrades && typeof provider.listUpgrades === 'function'
-              ? provider.listUpgrades({ signal })
-              : emptyUpgrades,
+          );
+          const hasInstalledCap = Boolean(
+            provider.capabilities?.listInstalled && typeof provider.listInstalled === 'function'
+          );
+          const [installedSettled, upgradesSettled] = await Promise.allSettled([
+            hasInstalledCap ? provider.listInstalled({ signal }) : Promise.resolve(emptyInstalled),
+            hasUpgradesCap ? provider.listUpgrades({ signal }) : Promise.resolve(emptyUpgrades),
           ]);
+          const installed =
+            installedSettled.status === 'fulfilled'
+              ? installedSettled.value
+              : { success: false, packages: [], error: installedSettled.reason?.message || 'Fehler' };
+          const upgrades =
+            upgradesSettled.status === 'fulfilled'
+              ? upgradesSettled.value
+              : { success: false, upgrades: [], error: upgradesSettled.reason?.message || 'Fehler' };
+
+          const sourceOk = hasUpgradesCap ? Boolean(upgrades?.success) : Boolean(installed?.success);
+          const sourceErr = hasUpgradesCap ? upgrades?.error || '' : installed?.error || '';
+          completeSource(provider.id, { ok: sourceOk, error: sourceErr });
           return {
-            installed:
-              installedSettled.status === 'fulfilled' ? installedSettled.value : { success: false, packages: [] },
-            upgrades: upgradesSettled.status === 'fulfilled' ? upgradesSettled.value : { success: false, upgrades: [] },
+            id: provider.id,
+            name: provider.name,
+            hasUpgradesCap,
+            installed,
+            upgrades,
           };
         })
-      ),
-    ]);
+      );
 
-    if (signal?.aborted) {
-      return { success: false, canceled: true };
-    }
+      const [
+        registryEntries,
+        appxEntries,
+        [exportRes, upgradeRes],
+        [msstoreInstalledRes, msstoreUpgradeRes],
+        extraProviderResults,
+      ] = await Promise.all([registryTask, appxTask, wingetTask, msstoreTask, extraTasks]);
 
-    job?.update(80, 'Verknüpfe installierte Programme mit Archiv-Katalog...');
-    const catalogItems = loadCatalogWithLiveStatus();
+      if (signal?.aborted) {
+        return { success: false, canceled: true };
+      }
 
-    const wingetExports = exportRes.success ? exportRes.packages : [];
-    const wingetUpgrades = upgradeRes.success ? upgradeRes.upgrades : [];
+      progressState = markScanPhaseMerging(progressState);
+      broadcastInstalledScanProgress(progressState);
+      job?.update(progressState.percent, 'Verknüpfe installierte Programme mit Archiv-Katalog...');
 
-    const msstoreFromWingetExport =
-      wingetEnabled && msstoreEnabled
-        ? wingetExports
-            .filter((pkg) => String(pkg.source || '').toLowerCase() === 'msstore')
-            .map((pkg) => ({ ...pkg, packageManager: 'msstore', source: 'msstore' }))
-        : [];
-
-    const msstoreById = new Map();
-    for (const pkg of [
-      ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : []),
-      ...msstoreFromWingetExport,
-    ]) {
-      const pid = String(pkg?.packageId || pkg?.id || '').trim();
-      if (!pid) continue;
-      const key = pid.toLowerCase();
-      const prev = msstoreById.get(key);
-      if (!prev) {
-        msstoreById.set(key, pkg);
-      } else {
-        msstoreById.set(key, {
-          ...prev,
-          ...pkg,
-          name: pickBestDisplayName({ candidates: [prev.name, pkg.name], packageId: pid, packageManager: 'msstore' }),
-          version: !isUnknownVersionString(prev.version) ? prev.version : pkg.version || prev.version || '',
-          availableVersion: prev.availableVersion || pkg.availableVersion || '',
-          installedVersionIsLowerBound: Boolean(prev.installedVersionIsLowerBound || pkg.installedVersionIsLowerBound),
+      const failedProviders = [];
+      if (wingetEnabled && !upgradeRes?.success) {
+        failedProviders.push({
+          id: 'winget',
+          name: 'Winget',
+          error: upgradeRes?.error || 'Update-Prüfung fehlgeschlagen',
         });
       }
-    }
-
-    const providerInstalled = [...msstoreById.values()];
-    const providerUpgrades = [...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : [])];
-
-    for (const extra of extraProviderResults) {
-      if (extra.installed?.success && Array.isArray(extra.installed.packages)) {
-        providerInstalled.push(...extra.installed.packages);
+      if (msstoreProv && !msstoreUpgradeRes?.success) {
+        failedProviders.push({
+          id: 'msstore',
+          name: 'MS Store',
+          error: msstoreUpgradeRes?.error || 'Update-Prüfung fehlgeschlagen',
+        });
       }
-      if (extra.upgrades?.success && Array.isArray(extra.upgrades.upgrades)) {
-        providerUpgrades.push(...extra.upgrades.upgrades);
+      for (const extra of extraProviderResults) {
+        if (extra.hasUpgradesCap && !extra.upgrades?.success) {
+          failedProviders.push({
+            id: extra.id,
+            name: extra.name,
+            error: extra.upgrades?.error || 'Update-Prüfung fehlgeschlagen',
+          });
+        }
       }
-    }
 
-    const cache = getWingetCache();
-    const cachedMetadata = new Map();
-    const collectCachedMeta = (pm, pid) => {
-      const cleanPm = String(pm || '')
-        .trim()
-        .toLowerCase();
-      const cleanPid = String(pid || '').trim();
-      if (!cleanPm || !cleanPid) return;
-      const mapKey = `${cleanPm}:${cleanPid.toLowerCase()}`;
-      if (cachedMetadata.has(mapKey)) return;
-      const cacheKey = buildShowCacheKey(cleanPm, cleanPid);
-      if (!cacheKey) return;
-      const cached = cache.get(cacheKey)?.data;
-      if (cached) cachedMetadata.set(mapKey, cached);
-    };
+      const catalogItems = loadCatalogWithLiveStatus();
 
-    for (const pkg of wingetExports) collectCachedMeta('winget', pkg.packageId);
-    for (const up of wingetUpgrades) collectCachedMeta('winget', up.packageId);
-    for (const pkg of providerInstalled) collectCachedMeta(pkg.packageManager, pkg.packageId || pkg.id);
-    for (const up of providerUpgrades) collectCachedMeta(up.packageManager, up.packageId || up.id);
+      const wingetExports = exportRes.success ? exportRes.packages : [];
+      const wingetUpgrades = upgradeRes.success ? upgradeRes.upgrades : [];
 
-    const programs = mergeInstalledSoftware({
-      wingetExports,
-      wingetUpgrades,
-      providerInstalled,
-      providerUpgrades,
-      registryEntries,
-      appxEntries,
-      cachedMetadata,
-      catalogItems,
-      includeSystemComponents,
-      msiEnabled,
-    });
+      const msstoreFromWingetExport =
+        wingetEnabled && msstoreEnabled
+          ? wingetExports
+              .filter((pkg) => String(pkg.source || '').toLowerCase() === 'msstore')
+              .map((pkg) => ({ ...pkg, packageManager: 'msstore', source: 'msstore' }))
+          : [];
 
-    // Fuer MS-Store-Apps, die noch keinen lesbaren Namen haben, optional `msstore.show()` (max. 12, Parallelitaet 3)
-    if (msstoreProv && typeof msstoreProv.show === 'function' && !signal?.aborted) {
-      const unresolvedMsStore = programs
-        .filter((p) => p.packageManager === 'msstore' && isCrypticStoreId(p.name) && p.packageId)
-        .slice(0, 12);
+      const msstoreById = new Map();
+      for (const pkg of [
+        ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : []),
+        ...msstoreFromWingetExport,
+      ]) {
+        const pid = String(pkg?.packageId || pkg?.id || '').trim();
+        if (!pid) continue;
+        const key = pid.toLowerCase();
+        const prev = msstoreById.get(key);
+        if (!prev) {
+          msstoreById.set(key, pkg);
+        } else {
+          msstoreById.set(key, {
+            ...prev,
+            ...pkg,
+            name: pickBestDisplayName({ candidates: [prev.name, pkg.name], packageId: pid, packageManager: 'msstore' }),
+            version: !isUnknownVersionString(prev.version) ? prev.version : pkg.version || prev.version || '',
+            availableVersion: prev.availableVersion || pkg.availableVersion || '',
+            installedVersionIsLowerBound: Boolean(
+              prev.installedVersionIsLowerBound || pkg.installedVersionIsLowerBound
+            ),
+          });
+        }
+      }
 
-      if (unresolvedMsStore.length > 0) {
-        const executing = new Set();
-        for (const prog of unresolvedMsStore) {
-          if (signal?.aborted) break;
-          const task = (async () => {
-            try {
-              const showRes = await msstoreProv.show(prog.packageId, { signal });
-              const data = showRes?.success ? showRes.package : null;
-              if (!data) return;
-              if (data.name && !isCrypticStoreId(data.name)) {
-                prog.name = data.name;
-              }
-              if (!prog.publisher && (data.publisher || data.author)) {
-                prog.publisher = data.publisher || data.author;
-              }
-              if (!prog.homepage && (data.homepage || data.publisherUrl)) {
-                prog.homepage = data.homepage || data.publisherUrl;
-              }
-              if (!prog.installLocation && appxEntries.length > 0) {
-                const matchedAppx = matchAppxEntryForPackage(prog, appxEntries);
-                if (matchedAppx) {
-                  prog.installLocation = matchedAppx.installLocation || prog.installLocation;
-                  prog.appxPackageFamilyName = matchedAppx.packageFamilyName || prog.appxPackageFamilyName;
-                  if (isUnknownVersionString(prog.installedVersion) && matchedAppx.version) {
-                    prog.installedVersion = matchedAppx.version;
+      const providerInstalled = [...msstoreById.values()];
+      const providerUpgrades = [...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : [])];
+
+      for (const extra of extraProviderResults) {
+        if (extra.installed?.success && Array.isArray(extra.installed.packages)) {
+          providerInstalled.push(...extra.installed.packages);
+        }
+        if (extra.upgrades?.success && Array.isArray(extra.upgrades.upgrades)) {
+          providerUpgrades.push(...extra.upgrades.upgrades);
+        }
+      }
+
+      const cache = getWingetCache();
+      const cachedMetadata = new Map();
+      const collectCachedMeta = (pm, pid) => {
+        const cleanPm = String(pm || '')
+          .trim()
+          .toLowerCase();
+        const cleanPid = String(pid || '').trim();
+        if (!cleanPm || !cleanPid) return;
+        const mapKey = `${cleanPm}:${cleanPid.toLowerCase()}`;
+        if (cachedMetadata.has(mapKey)) return;
+        const cacheKey = buildShowCacheKey(cleanPm, cleanPid);
+        if (!cacheKey) return;
+        const cached = cache.get(cacheKey)?.data;
+        if (cached) cachedMetadata.set(mapKey, cached);
+      };
+
+      for (const pkg of wingetExports) collectCachedMeta('winget', pkg.packageId);
+      for (const up of wingetUpgrades) collectCachedMeta('winget', up.packageId);
+      for (const pkg of providerInstalled) collectCachedMeta(pkg.packageManager, pkg.packageId || pkg.id);
+      for (const up of providerUpgrades) collectCachedMeta(up.packageManager, up.packageId || up.id);
+
+      const programs = mergeInstalledSoftware({
+        wingetExports,
+        wingetUpgrades,
+        providerInstalled,
+        providerUpgrades,
+        registryEntries,
+        appxEntries,
+        cachedMetadata,
+        catalogItems,
+        includeSystemComponents,
+        msiEnabled,
+      });
+
+      // Fuer MS-Store-Apps, die noch keinen lesbaren Namen haben, optional `msstore.show()` (max. 12, Parallelitaet 3)
+      if (msstoreProv && typeof msstoreProv.show === 'function' && !signal?.aborted) {
+        const unresolvedMsStore = programs
+          .filter((p) => p.packageManager === 'msstore' && isCrypticStoreId(p.name) && p.packageId)
+          .slice(0, 12);
+
+        if (unresolvedMsStore.length > 0) {
+          const executing = new Set();
+          for (const prog of unresolvedMsStore) {
+            if (signal?.aborted) break;
+            const task = (async () => {
+              try {
+                const showRes = await msstoreProv.show(prog.packageId, { signal });
+                const data = showRes?.success ? showRes.package : null;
+                if (!data) return;
+                if (data.name && !isCrypticStoreId(data.name)) {
+                  prog.name = data.name;
+                }
+                if (!prog.publisher && (data.publisher || data.author)) {
+                  prog.publisher = data.publisher || data.author;
+                }
+                if (!prog.homepage && (data.homepage || data.publisherUrl)) {
+                  prog.homepage = data.homepage || data.publisherUrl;
+                }
+                if (!prog.installLocation && appxEntries.length > 0) {
+                  const matchedAppx = matchAppxEntryForPackage(prog, appxEntries);
+                  if (matchedAppx) {
+                    prog.installLocation = matchedAppx.installLocation || prog.installLocation;
+                    prog.appxPackageFamilyName = matchedAppx.packageFamilyName || prog.appxPackageFamilyName;
+                    if (isUnknownVersionString(prog.installedVersion) && matchedAppx.version) {
+                      prog.installedVersion = matchedAppx.version;
+                    }
                   }
                 }
+              } catch {
+                // Einzelne show()-Fehler blockieren keinen PC-Scan
               }
-            } catch {
-              // Einzelne show()-Fehler blockieren keinen PC-Scan
+            })();
+            executing.add(task);
+            task.finally(() => executing.delete(task));
+            if (executing.size >= 3) {
+              await Promise.race(executing);
             }
-          })();
-          executing.add(task);
-          task.finally(() => executing.delete(task));
-          if (executing.size >= 3) {
-            await Promise.race(executing);
           }
+          await Promise.all(executing);
         }
-        await Promise.all(executing);
+      }
+
+      syncArchiveInstalledVersions(programs);
+
+      const stats = {
+        total: programs.length,
+        updatesAvailable: programs.filter((p) => p.hasUpdate).length,
+        wingetManaged: programs.filter((p) => p.packageManager === 'winget').length,
+        inArchive: programs.filter((p) => p.inArchive).length,
+      };
+
+      job?.finish('done', `${stats.total} Programme erfasst (${stats.updatesAvailable} Updates verfügbar)`);
+      return {
+        success: true,
+        programs,
+        stats,
+        failedProviders,
+        wingetAvailable: exportRes.success || upgradeRes.success,
+        scannedAt: Date.now(),
+      };
+    } catch (e) {
+      job?.finish('error', e.message, { autoRemoveMs: 5000 });
+      return { success: false, error: e.message };
+    } finally {
+      broadcastInstalledScanProgress(markScanFinished(progressState));
+      if (activeInstalledScanPromise === runPromise) {
+        activeInstalledScanPromise = null;
+        activeInstalledScanSilent = false;
       }
     }
+  })();
 
-    syncArchiveInstalledVersions(programs);
-
-    const stats = {
-      total: programs.length,
-      updatesAvailable: programs.filter((p) => p.hasUpdate).length,
-      wingetManaged: programs.filter((p) => p.packageManager === 'winget').length,
-      inArchive: programs.filter((p) => p.inArchive).length,
-    };
-
-    job?.finish('done', `${stats.total} Programme erfasst (${stats.updatesAvailable} Updates verfügbar)`);
-    return {
-      success: true,
-      programs,
-      stats,
-      wingetAvailable: exportRes.success || upgradeRes.success,
-      scannedAt: Date.now(),
-    };
-  } catch (e) {
-    job?.finish('error', e.message, { autoRemoveMs: 5000 });
-    return { success: false, error: e.message };
-  }
+  activeInstalledScanPromise = runPromise;
+  return runPromise;
 }
 
 const GENERIC_SCAN_DIRS = new Set([

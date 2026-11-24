@@ -6,6 +6,7 @@ import {
   getPendingArchiveWebUpdateItems,
   getVisibleUpdateEntries,
   renderCatalogGrid,
+  renderScanProgressBanner,
   renderUpdatesBatchBar,
 } from './components/cards.js';
 import { closeContextMenu, openContextMenu } from './components/context-menu.js';
@@ -58,6 +59,7 @@ function renderActiveView() {
   syncToolbarForTab();
   updateNavCounts();
   renderUpdateQueue();
+  renderScanProgressBanner();
 
   if (state.activeTab === 'discover') {
     renderDiscoverView();
@@ -70,13 +72,17 @@ function renderActiveView() {
 
 async function runInstalledScan({ silent = false } = {}) {
   state.isScanningInstalled = true;
-  if (state.activeTab === 'updates' || state.activeTab === 'installed') {
+  state.lastScanFailedProviders = [];
+  renderScanProgressBanner();
+  if (!state.hasScannedInstalled && (state.activeTab === 'updates' || state.activeTab === 'installed')) {
     renderCatalogGrid();
   }
 
   try {
     const res = await window.electronAPI.scanInstalledSoftware({ silent });
     if (res?.success && Array.isArray(res.programs)) {
+      state.installedScanProgress = null;
+      state.lastScanFailedProviders = Array.isArray(res.failedProviders) ? res.failedProviders : [];
       setInstalledApps(res.programs);
       await refreshCatalogData();
       renderTagChips();
@@ -85,6 +91,7 @@ async function runInstalledScan({ silent = false } = {}) {
     }
 
     state.isScanningInstalled = false;
+    state.installedScanProgress = null;
     if (!silent && res?.error && !res.canceled) {
       showToast(`PC-Scan fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
     }
@@ -92,6 +99,7 @@ async function runInstalledScan({ silent = false } = {}) {
     return res;
   } catch (err) {
     state.isScanningInstalled = false;
+    state.installedScanProgress = null;
     if (!silent) {
       showToast(`PC-Scan fehlgeschlagen: ${err.message}`, { type: 'error', duration: 6000 });
     }
@@ -102,7 +110,14 @@ async function runInstalledScan({ silent = false } = {}) {
 
 async function reloadUI({ preserveScroll = true, rescanInstalled = false, applyStartTab = false } = {}) {
   const y = window.scrollY;
-  await Promise.all([refreshCatalogData(), refreshProviders(), refreshBundles(), refreshIgnoredUpdates()]);
+  await Promise.all([
+    refreshCatalogData(),
+    refreshProviders(),
+    refreshBundles(),
+    refreshIgnoredUpdates(),
+    refreshAuthStatus(),
+  ]);
+  renderAuthHeaderControls();
   if (applyStartTab) {
     state.activeTab = normalizeStartTab(state.settings.startTab);
   }
@@ -715,10 +730,28 @@ function handleAuthStatusUpdate(status) {
   }
 }
 
+function setupScanProgressBanner() {
+  const host = document.getElementById('scanProgressBanner');
+  host?.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const btn = e.target.closest('[data-scan-banner-action]');
+    if (!(btn instanceof HTMLElement)) return;
+    const act = btn.dataset.scanBannerAction;
+    if (act === 'retry-scan') {
+      state.lastScanFailedProviders = [];
+      void runInstalledScan({ silent: false });
+    } else if (act === 'dismiss-warning') {
+      state.lastScanFailedProviders = [];
+      renderScanProgressBanner();
+    }
+  });
+}
+
 async function bootstrap() {
   initLightbox();
   initModals({ onReload: reloadUI });
   setupGridEvents();
+  setupScanProgressBanner();
   setupUpdatesBatchBar();
   setupGlobalDragAndDrop();
   setupKeyboardShortcuts();
@@ -1013,10 +1046,26 @@ async function bootstrap() {
     const verEl = document.getElementById('appVersion');
     if (verEl) verEl.textContent = `(v${info.version})`;
 
+    if (typeof window.electronAPI?.onInstalledScanProgress === 'function') {
+      window.electronAPI.onInstalledScanProgress((progress) => {
+        state.installedScanProgress = progress?.active ? progress : null;
+        renderScanProgressBanner();
+      });
+    }
+
     await reloadUI({ preserveScroll: false, applyStartTab: true });
-    void refreshProviders({ checkAvailability: true }).then(() => renderActiveView());
     checkAppUpdateInBackground();
-    runInstalledScan({ silent: true });
+    void (async () => {
+      state.isCheckingProviders = true;
+      renderScanProgressBanner();
+      try {
+        await refreshProviders({ checkAvailability: true });
+      } finally {
+        state.isCheckingProviders = false;
+      }
+      renderActiveView();
+      await runInstalledScan({ silent: true });
+    })();
   } catch (err) {
     console.error('Fehler beim Starten:', err);
     showToast(`Katalog konnte nicht geladen werden: ${err.message}`, { type: 'error', duration: 0 });

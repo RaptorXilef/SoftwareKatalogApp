@@ -1,4 +1,5 @@
 import { getInstallModeBadge } from '../../shared/installer-logic.js';
+import { formatScanProgressBanner, formatSourceNameList } from '../../shared/scan-progress-logic.js';
 import { scoreCatalogItem } from '../../shared/search.js';
 import {
   canDownloadOnline,
@@ -434,11 +435,11 @@ function renderCardHtml(item, st) {
 
 function renderEmptyState() {
   if (state.activeTab === 'updates') {
-    if (state.isScanningInstalled && !state.hasScannedInstalled) {
+    if ((state.isScanningInstalled || state.isCheckingProviders) && !state.hasScannedInstalled) {
       return `
         <div class="empty-state">
           <h3>Suche nach PC- & Archiv-Updates...</h3>
-          <p>Installierte Programme und Winget-Upgrades werden gerade ermittelt.</p>
+          <p>Installierte Programme und Paketmanager-Upgrades werden gerade ermittelt.</p>
         </div>
       `;
     }
@@ -456,11 +457,11 @@ function renderEmptyState() {
   }
 
   if (state.activeTab === 'installed') {
-    if (state.isScanningInstalled && !state.hasScannedInstalled) {
+    if ((state.isScanningInstalled || state.isCheckingProviders) && !state.hasScannedInstalled) {
       return `
         <div class="empty-state">
           <h3>Scanne installierte PC-Programme...</h3>
-          <p>Winget-Pakete und Windows-Registry werden eingelesen.</p>
+          <p>Paketmanager und Windows-Registry werden eingelesen.</p>
         </div>
       `;
     }
@@ -618,8 +619,113 @@ export function renderUpdatesBatchBar(entries = null) {
   }
 }
 
+export function renderScanProgressBanner() {
+  const host = document.getElementById('scanProgressBanner');
+  if (!host) return;
+
+  if (state.activeTab !== 'updates' && state.activeTab !== 'installed') {
+    host.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+
+  let banner = formatScanProgressBanner(state.installedScanProgress, {
+    tab: state.activeTab,
+    isCheckingProviders: state.isCheckingProviders,
+  });
+
+  if (state.isScanningInstalled && !banner.visible) {
+    banner = {
+      visible: true,
+      headline:
+        state.activeTab === 'installed'
+          ? 'Installierte PC-Programme werden eingelesen...'
+          : 'Web- & Paketmanager-Updates werden geprüft...',
+      subtext: 'Ermittle installierte Pakete und Updates',
+      percent: null,
+      indeterminate: true,
+      completed: 0,
+      total: 0,
+      chips: [],
+    };
+  }
+
+  if (banner.visible) {
+    const pctHtml =
+      typeof banner.percent === 'number' && !banner.indeterminate
+        ? `<span class="pc-scan-pct">${banner.percent}%</span>`
+        : '';
+    const fillCls = banner.indeterminate ? 'pc-scan-progress-fill is-indeterminate' : 'pc-scan-progress-fill is-active';
+    const fillStyle = banner.indeterminate ? '' : `style="width: ${banner.percent ?? 10}%"`;
+
+    const chipsHtml =
+      banner.chips.length > 0
+        ? `<div class="pc-scan-sources">
+            ${banner.chips
+              .map((chip) => {
+                const statusCls =
+                  chip.status === 'done' ? 'is-done' : chip.status === 'error' ? 'is-error' : 'is-running';
+                const icon = chip.status === 'done' ? '✓' : chip.status === 'error' ? '⚠️' : '⏳';
+                const titleAttr = chip.error ? ` title="${escapeHTML(chip.error)}"` : '';
+                return `<span class="pc-scan-chip ${statusCls}"${titleAttr}>${icon} ${escapeHTML(chip.label)}</span>`;
+              })
+              .join('')}
+          </div>`
+        : '';
+
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="pc-scan-banner" role="status" aria-live="polite">
+        <div class="pc-scan-banner-top">
+          <div class="pc-scan-banner-title">
+            <span class="pc-scan-spinner" aria-hidden="true"></span>
+            <strong class="pc-scan-headline">${escapeHTML(banner.headline)}</strong>
+          </div>
+          <div class="pc-scan-meta">
+            <span>${escapeHTML(banner.subtext)}</span>
+            ${pctHtml}
+          </div>
+        </div>
+        <div class="pc-scan-progress-track">
+          <div class="${fillCls}" ${fillStyle}></div>
+        </div>
+        ${chipsHtml}
+      </div>
+    `;
+    return;
+  }
+
+  if (
+    state.activeTab === 'updates' &&
+    Array.isArray(state.lastScanFailedProviders) &&
+    state.lastScanFailedProviders.length > 0
+  ) {
+    const names = formatSourceNameList(state.lastScanFailedProviders.map((p) => p.name || p.id));
+    const detailsTitle = state.lastScanFailedProviders
+      .map((p) => `${p.name || p.id}: ${p.error || 'Fehler'}`)
+      .join('\n');
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="pc-scan-banner is-warning" role="status" title="${escapeHTML(detailsTitle)}">
+        <div class="pc-scan-warning-row">
+          <span class="pc-scan-warning-text">⚠️ Update-Prüfung für <strong>${escapeHTML(names)}</strong> fehlgeschlagen - ggf. kurzzeitig nicht erreichbar.</span>
+          <div class="pc-scan-warning-actions">
+            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="retry-scan">🔄 Erneut prüfen</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="dismiss-warning" title="Hinweis ausblenden" aria-label="Hinweis ausblenden">✕</button>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  host.hidden = true;
+  host.innerHTML = '';
+}
+
 export function renderCatalogGrid() {
   updateNavCounts();
+  renderScanProgressBanner();
 
   const grid = document.getElementById('grid');
   const countEl = document.getElementById('catalogCountDisplay');
@@ -644,13 +750,8 @@ export function renderCatalogGrid() {
     return;
   }
 
-  const bannerHtml =
-    state.isScanningInstalled && (state.activeTab === 'updates' || state.activeTab === 'installed')
-      ? '<div class="pc-scan-banner"><span>⏳ Installierte PC-Programme und Winget-Updates werden im Hintergrund aktualisiert...</span></div>'
-      : '';
-
   if (!hasSearch) {
-    grid.innerHTML = bannerHtml + entries.map((e) => renderCardHtml(e.item, e.st)).join('');
+    grid.innerHTML = entries.map((e) => renderCardHtml(e.item, e.st)).join('');
     queuePcIconExtraction(entries);
     return;
   }
@@ -659,7 +760,6 @@ export function renderCatalogGrid() {
   const descMatches = entries.filter((e) => !e.search.isCoreMatch);
 
   const htmlParts = [];
-  if (bannerHtml) htmlParts.push(bannerHtml);
   if (coreMatches.length > 0) {
     htmlParts.push(coreMatches.map((e) => renderCardHtml(e.item, e.st)).join(''));
   }
