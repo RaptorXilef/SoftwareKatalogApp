@@ -397,13 +397,32 @@ function setupKeyboardShortcuts() {
   });
 }
 
-// Fehlende Bilder sauber verstecken
+// Fehlende/defekte Bilder sauber durch passenden Platzhalter ersetzen
 document.addEventListener(
   'error',
   (e) => {
-    if (e.target?.tagName === 'IMG') {
-      e.target.hidden = true;
+    const target = e.target;
+    if (!(target instanceof HTMLImageElement)) return;
+    if (target.classList.contains('card-icon')) {
+      const card = target.closest('.card');
+      const id = card instanceof HTMLElement ? card.dataset.id : '';
+      const isPcOnly = Boolean(id?.startsWith('winget:') || id?.startsWith('registry:'));
+      const fallback = document.createElement('div');
+      fallback.className = 'card-icon-fallback';
+      fallback.textContent = isPcOnly ? '💻' : '📦';
+      target.replaceWith(fallback);
+      return;
     }
+    if (target.classList.contains('detail-icon')) {
+      const id = state.currentModalId || '';
+      const isPcOnly = Boolean(id.startsWith('winget:') || id.startsWith('registry:'));
+      const fallback = document.createElement('div');
+      fallback.className = 'detail-icon-fallback';
+      fallback.textContent = id.startsWith('remote:') ? '🛍️' : isPcOnly ? '💻' : '📦';
+      target.replaceWith(fallback);
+      return;
+    }
+    target.hidden = true;
   },
   true
 );

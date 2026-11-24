@@ -156,6 +156,7 @@ export function setInstalledApps(programs) {
   state.installedApps = Array.isArray(programs) ? programs : [];
   state.hasScannedInstalled = true;
   state.isScanningInstalled = false;
+  state.pcIconTried.clear();
   rebuildUnifiedPackages();
 }
 

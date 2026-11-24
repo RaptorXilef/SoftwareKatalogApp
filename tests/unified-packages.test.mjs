@@ -297,3 +297,72 @@ describe('buildRemotePackageItem & remote status', () => {
     assert.equal(canDownloadOnline({ inArchive: true, webSourceType: 'none' }), false);
   });
 });
+
+describe('buildUnifiedPackages: Icon-Priorität im Tab Archiv (Bug 3)', () => {
+  it('bevorzugt _metadata/icon.*, fällt sonst auf PC-/Cache-Icon zurück und liefert sonst null', () => {
+    const catalogItems = [
+      {
+        id: 'arch-with-meta',
+        name: 'VLC Media Player',
+        wingetId: 'VideoLAN.VLC',
+        icon: 'Z:\\software\\VLC\\_metadata\\icon.png',
+      },
+      {
+        id: 'arch-no-meta-pc',
+        name: 'Audacity',
+        wingetId: 'Audacity.Audacity',
+        icon: null,
+      },
+      {
+        id: 'arch-no-meta-cache',
+        name: 'GIMP',
+        wingetId: 'GIMP.GIMP',
+        icon: null,
+      },
+      {
+        id: 'arch-empty',
+        name: 'Ohne Icon Tool',
+        icon: null,
+      },
+    ];
+
+    const installedApps = [
+      {
+        id: 'winget:videolan.vlc',
+        name: 'VLC media player',
+        packageManager: 'winget',
+        packageId: 'VideoLAN.VLC',
+      },
+      {
+        id: 'winget:audacity.audacity',
+        name: 'Audacity 4.0',
+        packageManager: 'winget',
+        packageId: 'Audacity.Audacity',
+      },
+    ];
+
+    const pcIconCache = new Map([
+      ['winget:videolan.vlc', 'C:\\cache\\pc-vlc.png'],
+      ['winget:audacity.audacity', 'C:\\cache\\pc-audacity.png'],
+      ['arch-no-meta-cache', 'C:\\cache\\web-gimp.png'],
+    ]);
+
+    const unified = buildUnifiedPackages({ catalogItems, installedApps, pcIconCache });
+
+    const withMeta = unified.find((p) => p.id === 'arch-with-meta');
+    assert.equal(withMeta.icon, 'Z:\\software\\VLC\\_metadata\\icon.png');
+    assert.equal(withMeta.iconSource, 'archive');
+
+    const withPcFallback = unified.find((p) => p.id === 'arch-no-meta-pc');
+    assert.equal(withPcFallback.icon, 'C:\\cache\\pc-audacity.png');
+    assert.equal(withPcFallback.iconSource, 'pc');
+
+    const withCacheFallback = unified.find((p) => p.id === 'arch-no-meta-cache');
+    assert.equal(withCacheFallback.icon, 'C:\\cache\\web-gimp.png');
+    assert.equal(withCacheFallback.iconSource, 'cache');
+
+    const empty = unified.find((p) => p.id === 'arch-empty');
+    assert.equal(empty.icon, null);
+    assert.equal(empty.iconSource, 'placeholder');
+  });
+});

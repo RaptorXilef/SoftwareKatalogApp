@@ -95,4 +95,65 @@ describe('mergeInstalledSoftware', () => {
     assert.equal(legacy.source, 'registry');
     assert.equal(legacy.canUninstall, true);
   });
+
+  it('verhindert falsche Registry-Icon-Zuordnungen durch ungenaue Substring-Treffer (z. B. WeMod/Wand, generische ID-Tails)', () => {
+    const merged = mergeInstalledSoftware({
+      wingetExports: [
+        { packageManager: 'winget', packageId: 'WeMod.WeMod', version: '9.5.0', source: 'winget' },
+        { packageManager: 'winget', packageId: 'Vendor.App', version: '1.0.0', source: 'winget' },
+        { packageManager: 'winget', packageId: 'Audacity.Audacity', version: '4.0.0', source: 'winget' },
+      ],
+      wingetUpgrades: [
+        {
+          packageManager: 'winget',
+          packageId: 'Audacity.Audacity',
+          name: 'Audacity 4.0',
+          installedVersion: '4.0.0',
+          availableVersion: '4.0.2',
+          source: 'winget',
+        },
+      ],
+      registryEntries: [
+        {
+          displayName: 'ModOrganizer Helper',
+          displayVersion: '1.0.0',
+          displayIcon: 'C:\\Wrong\\modorganizer.exe,0',
+          registryKey: 'ModOrganizer',
+        },
+        {
+          displayName: 'Wand Utility',
+          displayVersion: '2.0.0',
+          displayIcon: 'C:\\Wrong\\wand.exe,0',
+          registryKey: 'WandUtility',
+        },
+        {
+          displayName: 'Another App Suite',
+          displayVersion: '1.0.0',
+          displayIcon: 'C:\\Wrong\\another.exe,0',
+          registryKey: 'AnotherAppSuite',
+        },
+        {
+          displayName: 'Audacity 4.0',
+          displayVersion: '4.0.0',
+          publisher: 'Audacity Team',
+          displayIcon: 'C:\\Program Files\\Audacity\\audacity.exe,0',
+          installLocation: 'C:\\Program Files\\Audacity',
+          registryKey: 'Audacity_is1',
+        },
+      ],
+      catalogItems: [],
+    });
+
+    const wemod = merged.find((p) => p.packageId === 'WeMod.WeMod');
+    assert.ok(wemod);
+    assert.equal(wemod.displayIcon, '');
+
+    const vendorApp = merged.find((p) => p.packageId === 'Vendor.App');
+    assert.ok(vendorApp);
+    assert.equal(vendorApp.displayIcon, '');
+
+    const audacity = merged.find((p) => p.packageId === 'Audacity.Audacity');
+    assert.ok(audacity);
+    assert.equal(audacity.displayIcon, 'C:\\Program Files\\Audacity\\audacity.exe,0');
+  });
 });

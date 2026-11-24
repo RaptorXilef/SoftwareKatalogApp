@@ -4,7 +4,17 @@ import { pathToFileURL } from 'node:url';
 import { net, protocol } from 'electron';
 import { isInsideIconCacheDir, isInsideTargetDir } from './config.js';
 
-const ICON_CACHE_EXT_RE = /\.(png|ico|jpg|jpeg|webp|svg)$/i;
+const ICON_CACHE_EXT_RE = /\.(png|ico|jpg|jpeg|webp|svg|gif|avif)$/i;
+const IMAGE_MIME_TYPES = {
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.avif': 'image/avif',
+};
 
 export function registerMediaScheme() {
   protocol.registerSchemesAsPrivileged([
@@ -25,13 +35,24 @@ export function setupMediaProtocolHandler() {
     try {
       const url = new URL(request.url);
       const filePath = url.searchParams.get('path');
+      const ext = filePath ? path.extname(filePath).toLowerCase() : '';
 
       const allowedArchive = filePath && isInsideTargetDir(filePath);
-      const allowedIconCache =
-        filePath && isInsideIconCacheDir(filePath) && ICON_CACHE_EXT_RE.test(path.extname(filePath));
+      const allowedIconCache = filePath && isInsideIconCacheDir(filePath) && ICON_CACHE_EXT_RE.test(ext);
 
       if (!filePath || (!allowedArchive && !allowedIconCache) || !fs.existsSync(filePath)) {
         return new Response('Not Found', { status: 404 });
+      }
+
+      if (allowedIconCache || IMAGE_MIME_TYPES[ext]) {
+        const data = await fs.promises.readFile(filePath);
+        return new Response(data, {
+          status: 200,
+          headers: {
+            'Content-Type': IMAGE_MIME_TYPES[ext] || 'application/octet-stream',
+            'Cache-Control': 'no-cache',
+          },
+        });
       }
 
       return net.fetch(pathToFileURL(filePath).toString(), {

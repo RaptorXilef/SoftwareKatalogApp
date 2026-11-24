@@ -12,10 +12,11 @@ export function loadCatalogWithLiveStatus() {
     const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
     return data.map((item) => {
       const absPath = item.path ? path.resolve(appFolder, item.path) : '';
+      const resolvedIcon = item.icon ? path.resolve(appFolder, item.icon) : null;
       const enriched = {
         ...item,
         path: absPath,
-        icon: item.icon ? path.resolve(appFolder, item.icon) : null,
+        icon: resolvedIcon && fs.existsSync(resolvedIcon) ? resolvedIcon : null,
         screenshots: (item.screenshots || []).map((s) => path.resolve(appFolder, s)),
         lastFiles: (item.lastFiles || []).map((f) => path.resolve(appFolder, f)),
         isInstalled: false,

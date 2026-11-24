@@ -1,3 +1,4 @@
+import { resolvePackageIcon } from './icon-logic.js';
 import { compareVersions, extractVersion } from './version.js';
 
 const GENERIC_DIRS = new Set([
@@ -193,14 +194,19 @@ function findMatchingPcApp(item, itemPaths, installedApps, usedIndices, pcByKey)
   return -1;
 }
 
+function lookupIconInCache(key, pcIconCache) {
+  if (!key || !pcIconCache) return null;
+  if (pcIconCache instanceof Map && pcIconCache.has(key)) {
+    return pcIconCache.get(key) || null;
+  }
+  if (typeof pcIconCache === 'object' && !(pcIconCache instanceof Map) && pcIconCache[key]) {
+    return pcIconCache[key];
+  }
+  return null;
+}
+
 function resolvePcIcon(pcApp, pcIconCache) {
-  if (pcIconCache instanceof Map && pcIconCache.has(pcApp.id)) {
-    return pcIconCache.get(pcApp.id) || null;
-  }
-  if (pcIconCache && typeof pcIconCache === 'object' && !(pcIconCache instanceof Map)) {
-    if (pcIconCache[pcApp.id]) return pcIconCache[pcApp.id];
-  }
-  return pcApp.cachedIconPath || null;
+  return lookupIconInCache(pcApp?.id, pcIconCache) || pcApp?.cachedIconPath || null;
 }
 
 /**
@@ -239,11 +245,24 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
     const packageId = item.packageId || item.wingetId || matchedPc?.packageId || null;
     const wingetId = item.wingetId || (packageManager === 'winget' ? packageId : '') || '';
 
+    const archiveIcon = item.icon || null;
+    const matchedPcIcon = matchedPc ? resolvePcIcon(matchedPc, pcIconCache) : null;
+    const directCachedIcon = lookupIconInCache(item.id, pcIconCache);
+    const resolvedIcon = resolvePackageIcon({
+      archiveIcon,
+      pcIcon: matchedPcIcon,
+      cachedIcon: directCachedIcon,
+      origin,
+    });
+
     unified.push({
       ...item,
       origin,
       inArchive: true,
       archiveItemId: item.id,
+      archiveIcon,
+      icon: resolvedIcon.icon,
+      iconSource: resolvedIcon.source,
       isInstalled,
       installedVersion,
       webVersion,
@@ -275,6 +294,10 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       ? extractVersion(pcApp.installedVersion) || pcApp.installedVersion
       : null;
     const webVersion = pcApp.availableVersion ? extractVersion(pcApp.availableVersion) || pcApp.availableVersion : null;
+    const resolvedPcIcon = resolvePackageIcon({
+      pcIcon: resolvePcIcon(pcApp, pcIconCache),
+      origin: 'pc',
+    });
 
     unified.push({
       id: pcApp.id,
@@ -283,6 +306,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       origin: 'pc',
       inArchive: false,
       archiveItemId: null,
+      archiveIcon: null,
       isInstalled: true,
       installedVersion,
       webVersion,
@@ -304,7 +328,8 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       autoPaths: [],
       installPaths: [],
       validInstallPath: null,
-      icon: resolvePcIcon(pcApp, pcIconCache),
+      icon: resolvedPcIcon.icon,
+      iconSource: resolvedPcIcon.source,
       pcApp,
       canUninstall: Boolean(pcApp.canUninstall),
       uninstallString: pcApp.uninstallString || '',

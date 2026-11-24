@@ -788,6 +788,55 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         }
         techInstallerSlot.innerHTML = extraRows.join('');
       }
+
+      if (!item.icon && (res.package.homepage || res.package.publisherUrl)) {
+        window.electronAPI
+          .extractCachedAppIcon({
+            id: item.id,
+            name: item.name || '',
+            displayIcon: item.displayIcon || '',
+            installLocation: item.installLocation || '',
+            executablePath: item.validInstallPath || item.autoPaths?.[0] || item.installPaths?.[0] || '',
+            uninstallString: item.uninstallString || '',
+            packageManager: effectivePm,
+            packageId: effectivePkgId,
+            homepage: res.package.homepage || res.package.publisherUrl || '',
+            webVersionUrl: item.webVersionUrl || '',
+            links: Array.isArray(item.links) ? item.links : [],
+          })
+          .then((iconRes) => {
+            if (!iconRes?.success || !iconRes.iconPath) return;
+            state.pcIconCache.set(item.id, iconRes.iconPath);
+            if (item.pcApp?.id) state.pcIconCache.set(item.pcApp.id, iconRes.iconPath);
+            item.icon = iconRes.iconPath;
+
+            if (isStillActive()) {
+              const fallbackEl = modal.querySelector('.detail-icon-fallback');
+              if (fallbackEl) {
+                const img = document.createElement('img');
+                img.className = 'detail-icon';
+                img.src = toMediaUrl(iconRes.iconPath);
+                img.alt = '';
+                fallbackEl.replaceWith(img);
+              }
+            }
+
+            const gridCard = document.querySelector(`#grid .card[data-id="${CSS.escape(item.id)}"]`);
+            const cardFallback = gridCard?.querySelector('.card-icon-fallback');
+            if (cardFallback) {
+              const img = document.createElement('img');
+              img.className = 'card-icon';
+              img.src = toMediaUrl(iconRes.iconPath);
+              img.loading = 'lazy';
+              img.decoding = 'async';
+              img.alt = '';
+              cardFallback.replaceWith(img);
+            }
+          })
+          .catch(() => {
+            // Platzhalter bleibt stehen
+          });
+      }
     } else {
       if (badgeEl) badgeEl.textContent = 'Nicht verfügbar';
       bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Paket-Steckbrief konnte nicht geladen werden.')}</span>`;

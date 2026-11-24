@@ -27,35 +27,80 @@ const MAX_ICON_JOBS = 4;
 
 function updateCardIconInDom(itemId, iconPath) {
   const grid = document.getElementById('grid');
-  if (!grid) return;
-  for (const card of grid.querySelectorAll('.card')) {
-    if (card.dataset.id !== itemId) continue;
-    const fallback = card.querySelector('.card-icon-fallback');
-    if (!fallback) continue;
-    const img = document.createElement('img');
-    img.className = 'card-icon';
-    img.src = toMediaUrl(iconPath);
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.alt = '';
-    fallback.replaceWith(img);
+  if (grid) {
+    for (const card of grid.querySelectorAll('.card')) {
+      if (!(card instanceof HTMLElement) || card.dataset.id !== itemId) continue;
+      const fallback = card.querySelector('.card-icon-fallback');
+      if (!fallback) continue;
+      const img = document.createElement('img');
+      img.className = 'card-icon';
+      img.src = toMediaUrl(iconPath);
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.alt = '';
+      fallback.replaceWith(img);
+    }
   }
+
+  if (state.currentModalId === itemId) {
+    const detailFallback = document.querySelector('#modalContent .detail-icon-fallback');
+    if (detailFallback) {
+      const img = document.createElement('img');
+      img.className = 'detail-icon';
+      img.src = toMediaUrl(iconPath);
+      img.alt = '';
+      detailFallback.replaceWith(img);
+    }
+  }
+}
+
+function getExecutableCandidateForItem(item) {
+  if (item.validInstallPath) return item.validInstallPath;
+  if (Array.isArray(item.autoPaths) && item.autoPaths.length > 0) return item.autoPaths[0];
+  if (Array.isArray(item.installPaths) && item.installPaths.length > 0) return item.installPaths[0];
+  return '';
+}
+
+function hasAnyIconSourceCandidate(item) {
+  return Boolean(
+    item.displayIcon ||
+      item.installLocation ||
+      item.validInstallPath ||
+      item.autoPaths?.length ||
+      item.installPaths?.length ||
+      item.uninstallString ||
+      item.packageId ||
+      item.wingetId ||
+      item.webVersionUrl ||
+      item.links?.length ||
+      item.isInstalled
+  );
 }
 
 function pumpIconQueue() {
   while (activeIconJobs < MAX_ICON_JOBS && iconQueue.length > 0) {
     const item = iconQueue.shift();
-    if (!item || state.pcIconCache.has(item.id)) continue;
+    if (!item || state.pcIconCache.has(item.id) || item.icon) continue;
     activeIconJobs++;
     window.electronAPI
       .extractCachedAppIcon({
         id: item.id,
+        name: item.name || '',
         displayIcon: item.displayIcon || '',
         installLocation: item.installLocation || '',
+        executablePath: getExecutableCandidateForItem(item),
+        uninstallString: item.uninstallString || '',
+        packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
+        packageId: item.packageId || item.wingetId || '',
+        webVersionUrl: item.webVersionUrl || '',
+        links: Array.isArray(item.links) ? item.links : [],
       })
       .then((res) => {
         if (res?.success && res.iconPath) {
           state.pcIconCache.set(item.id, res.iconPath);
+          if (item.pcApp?.id) {
+            state.pcIconCache.set(item.pcApp.id, res.iconPath);
+          }
           item.icon = res.iconPath;
           updateCardIconInDom(item.id, res.iconPath);
         }
@@ -72,8 +117,8 @@ function pumpIconQueue() {
 
 function queuePcIconExtraction(entries) {
   for (const { item } of entries) {
-    if (item.origin !== 'pc' || item.icon || state.pcIconTried.has(item.id)) continue;
-    if (!item.displayIcon && !item.installLocation) continue;
+    if (item.icon || state.pcIconTried.has(item.id)) continue;
+    if (!hasAnyIconSourceCandidate(item)) continue;
     state.pcIconTried.add(item.id);
     iconQueue.push(item);
   }

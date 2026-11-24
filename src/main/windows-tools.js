@@ -3,6 +3,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, shell } from 'electron';
+import {
+  buildIconCacheKey,
+  deriveGitHubAvatarUrl,
+  expandWindowsEnvVars,
+  extractCandidateHomepageUrls,
+  isGenericIconSource,
+  isIgnoredExecutableName,
+  parseDisplayIcon,
+  parseFaviconLinksFromHtml,
+  scoreExecutableCandidate,
+} from '../shared/icon-logic.js';
 import { mergeInstalledSoftware } from '../shared/installed-merger.js';
 import {
   normalizeInstallMode,
@@ -14,7 +25,7 @@ import { compareVersions, extractVersion } from '../shared/version.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { createJob } from './jobs.js';
-import { wingetProvider } from './providers/winget-provider.js';
+import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
 function runPowerShell(script, { signal = null, asTempFile = false } = {}) {
@@ -404,7 +415,7 @@ export async function extractExeIcon(exePath, targetSoftwareDir) {
     const metaDir = path.join(targetSoftwareDir, '_metadata');
     if (!fs.existsSync(metaDir)) fs.mkdirSync(metaDir, { recursive: true });
 
-    const icon = await app.getFileIcon(exePath, { size: 'normal' });
+    const icon = await app.getFileIcon(exePath, { size: 'large' });
     if (icon.isEmpty()) return { success: false, error: 'Kein Icon in Datei gefunden.' };
 
     const existing = await fs.promises.readdir(metaDir);
@@ -816,6 +827,8 @@ function syncArchiveInstalledVersions(programs) {
  * zu einer vollständigen Liste aller auf diesem PC installierten Programme.
  */
 export async function scanInstalledSoftware({ includeSystemComponents = false, silent = false } = {}) {
+  startMenuShortcutsCache = null;
+  failedIconKeys.clear();
   let job = null;
   if (!silent) {
     job = createJob({
@@ -879,78 +892,602 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
   }
 }
 
-function cleanDisplayIconPath(raw) {
-  if (!raw) return '';
-  return String(raw)
+const GENERIC_SCAN_DIRS = new Set([
+  'c:',
+  'c:\\program files',
+  'c:\\program files (x86)',
+  'c:\\program files\\common files',
+  'c:\\program files (x86)\\common files',
+  'c:\\windows',
+  'c:\\windows\\system32',
+  'c:\\windows\\syswow64',
+  'c:\\programdata',
+]);
+
+const SKIP_SUBDIRS = new Set([
+  'node_modules',
+  '.git',
+  'locales',
+  'locale',
+  'cache',
+  'temp',
+  'tmp',
+  'logs',
+  '__pycache__',
+]);
+const CACHE_IMAGE_EXTS = ['.png', '.ico', '.svg', '.webp', '.jpg', '.jpeg', '.gif', '.avif'];
+const ICON_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  Accept: 'image/avif,image/webp,image/png,image/svg+xml,image/x-icon,image/*;q=0.8,*/*;q=0.5',
+};
+
+let startMenuShortcutsCache = null;
+let startMenuShortcutsPromise = null;
+const failedIconKeys = new Set();
+
+function normalizeDirPath(rawDir) {
+  const expanded = expandWindowsEnvVars(String(rawDir || ''), process.env)
     .trim()
     .replace(/^["']|["']$/g, '')
-    .replace(/,-?\d+$/, '')
+    .replace(/\//g, '\\')
+    .replace(/\\+$/, '');
+  return expanded;
+}
+
+function isSafeScanDir(dirPath) {
+  if (!dirPath) return false;
+  const lower = dirPath.toLowerCase();
+  if (GENERIC_SCAN_DIRS.has(lower)) return false;
+  if (/^[a-z]:$/.test(lower)) return false;
+  if (/\\appdata\\(local|roaming|local\\programs)$/.test(lower)) return false;
+  return fs.existsSync(dirPath);
+}
+
+function extractExeFromCommandString(cmd) {
+  const raw = String(cmd || '').trim();
+  if (!raw) return '';
+  const quoted = raw.match(/^"([^"]+\.exe)"/i);
+  if (quoted) return expandWindowsEnvVars(quoted[1], process.env);
+  const plain = raw.match(/^([a-z]:\\[^"]*?\.exe)\b/i);
+  return plain ? expandWindowsEnvVars(plain[1], process.env) : '';
+}
+
+async function writeFileAtomic(targetPath, data) {
+  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.promises.writeFile(tmpPath, data);
+    await fs.promises.rename(tmpPath, targetPath);
+  } finally {
+    try {
+      if (fs.existsSync(tmpPath)) await fs.promises.unlink(tmpPath);
+    } catch {
+      // Temp-Datei ignorieren
+    }
+  }
+}
+
+async function getStartMenuShortcuts() {
+  if (startMenuShortcutsCache) return startMenuShortcutsCache;
+  if (startMenuShortcutsPromise) return startMenuShortcutsPromise;
+
+  startMenuShortcutsPromise = (async () => {
+    const psScript = `
+      [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+      $ErrorActionPreference = 'SilentlyContinue'
+      $wsh = New-Object -ComObject WScript.Shell
+      $roots = @([Environment]::GetFolderPath('CommonPrograms'), [Environment]::GetFolderPath('Programs')) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+      $results = @()
+      foreach ($root in $roots) {
+        $lnks = Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue
+        foreach ($lnk in $lnks) {
+          try {
+            $sc = $wsh.CreateShortcut($lnk.FullName)
+            $results += [PSCustomObject]@{
+              name = [System.IO.Path]::GetFileNameWithoutExtension($lnk.Name)
+              target = [string]$sc.TargetPath
+              iconLocation = [string]$sc.IconLocation
+            }
+          } catch {}
+        }
+      }
+      ConvertTo-Json -InputObject @($results) -Depth 2 -Compress
+    `;
+
+    const { code, stdout } = await runPowerShell(psScript, { asTempFile: true });
+    if (code === -1 || !stdout) return [];
+
+    try {
+      const parsed = JSON.parse(stdout);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      startMenuShortcutsCache = list.filter((s) => s && (s.target || s.iconLocation));
+      return startMenuShortcutsCache;
+    } catch {
+      return [];
+    } finally {
+      startMenuShortcutsPromise = null;
+    }
+  })();
+
+  return startMenuShortcutsPromise;
+}
+
+function normalizeNameSimple(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+\(?(?:x64|x86|64-bit|32-bit|current user|user)\)?/gi, '')
+    .replace(/[^a-z0-9äöüß]+/g, ' ')
     .trim();
 }
 
-async function resolveExecutableForIcon({ displayIcon = '', installLocation = '', executablePath = '' }) {
-  const candidates = [];
-  const cleanedIcon = cleanDisplayIconPath(displayIcon);
-  if (cleanedIcon) candidates.push(cleanedIcon);
-  if (executablePath)
-    candidates.push(
-      String(executablePath)
-        .trim()
-        .replace(/^["']|["']$/g, '')
-    );
+async function findStartMenuIconCandidate({ appName = '', installDirs = [] }) {
+  const shortcuts = await getStartMenuShortcuts();
+  if (!shortcuts.length) return null;
 
-  for (const c of candidates) {
-    if (c && fs.existsSync(c)) return c;
-  }
+  const cleanAppNorm = normalizeNameSimple(appName);
+  const normInstallDirs = installDirs.map((d) => d.toLowerCase()).filter(Boolean);
 
-  const cleanLoc = String(installLocation || '')
-    .trim()
-    .replace(/^["']|["']$/g, '');
-  if (cleanLoc && fs.existsSync(cleanLoc)) {
-    try {
-      const entries = await fs.promises.readdir(cleanLoc, { withFileTypes: true });
-      const exeFiles = entries
-        .filter((e) => e.isFile() && /\.exe$/i.test(e.name) && !/unins|uninstall|setup|update|crash/i.test(e.name))
-        .map((e) => path.join(cleanLoc, e.name));
-      if (exeFiles.length > 0) return exeFiles[0];
-    } catch {
-      // Ordner nicht lesbar
+  let bestMatch = null;
+
+  for (const sc of shortcuts) {
+    const target = expandWindowsEnvVars(String(sc.target || '').trim(), process.env);
+    const targetLower = target.toLowerCase();
+    const scNameNorm = normalizeNameSimple(sc.name);
+
+    const matchesInstallDir =
+      targetLower &&
+      normInstallDirs.some((dir) => targetLower === dir || targetLower.startsWith(`${dir}\\`)) &&
+      /\.exe$/i.test(target) &&
+      !isGenericIconSource(target) &&
+      !isIgnoredExecutableName(target);
+
+    const matchesExactName = Boolean(cleanAppNorm && scNameNorm && scNameNorm === cleanAppNorm);
+    if (!matchesInstallDir && !matchesExactName) continue;
+
+    const parsedLoc = parseDisplayIcon(sc.iconLocation, process.env);
+    if (parsedLoc.path && !parsedLoc.isGeneric && fs.existsSync(parsedLoc.path)) {
+      return { sourcePath: parsedLoc.path, iconIndex: parsedLoc.index };
+    }
+    if (target && !isGenericIconSource(target) && !isIgnoredExecutableName(target) && fs.existsSync(target)) {
+      bestMatch = { sourcePath: target, iconIndex: null };
+      if (matchesInstallDir) return bestMatch;
     }
   }
 
+  return bestMatch;
+}
+
+async function extractIconViaPowerShell(sourcePath, iconIndex, targetPngPath) {
+  const safeSrc = sourcePath.replace(/'/g, "''");
+  const idx = Number.isFinite(iconIndex) ? iconIndex : 0;
+  const tmpOut = `${targetPngPath}.${process.pid}.${Date.now()}.tmp`;
+  const safeTmp = tmpOut.replace(/'/g, "''");
+
+  const psScript = `
+    $ErrorActionPreference = 'Stop'
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -TypeDefinition @"
+      using System;
+      using System.Runtime.InteropServices;
+      public static class SkIconNative {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint ExtractIconEx(string lpszFile, int nIconIndex, IntPtr[] phiconLarge, IntPtr[] phiconSmall, uint nIcons);
+        [DllImport("user32.dll")]
+        public static extern bool DestroyIcon(IntPtr hIcon);
+      }
+"@
+    $bmp = $null
+    $hLarge = New-Object IntPtr[] 1
+    $count = [SkIconNative]::ExtractIconEx('${safeSrc}', ${idx}, $hLarge, $null, 1)
+    if ($count -gt 0 -and $hLarge[0] -ne [IntPtr]::Zero) {
+      try {
+        $ico = [System.Drawing.Icon]::FromHandle($hLarge[0])
+        $bmp = $ico.ToBitmap()
+        $ico.Dispose()
+      } finally {
+        [SkIconNative]::DestroyIcon($hLarge[0]) | Out-Null
+      }
+    }
+    if (-not $bmp) {
+      $assoc = [System.Drawing.Icon]::ExtractAssociatedIcon('${safeSrc}')
+      if ($assoc) {
+        $bmp = $assoc.ToBitmap()
+        $assoc.Dispose()
+      }
+    }
+    if (-not $bmp) { throw 'No icon extracted' }
+    $bmp.Save('${safeTmp}', [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+  `;
+
+  try {
+    const { code } = await runPowerShell(psScript, { asTempFile: true });
+    if (code === 0 && fs.existsSync(tmpOut)) {
+      const stat = await fs.promises.stat(tmpOut);
+      if (stat.size > 0) {
+        await fs.promises.rename(tmpOut, targetPngPath);
+        return true;
+      }
+    }
+  } catch {
+    // Fallback gescheitert
+  } finally {
+    try {
+      if (fs.existsSync(tmpOut)) await fs.promises.unlink(tmpOut);
+    } catch {
+      // Ignorieren
+    }
+  }
+  return false;
+}
+
+async function extractFileIconToCache({ appKey, sourceType, sourcePath, iconIndex = null, cacheDir }) {
+  if (!sourcePath || isGenericIconSource(sourcePath) || !fs.existsSync(sourcePath)) {
+    return null;
+  }
+
+  const parsed = parseDisplayIcon(sourcePath, process.env);
+  const actualPath = parsed.path || sourcePath;
+  const effectiveIndex = iconIndex !== null ? iconIndex : parsed.index;
+  const ext = path.extname(actualPath).toLowerCase();
+
+  const cacheKey = buildIconCacheKey({
+    appKey,
+    sourceType,
+    sourcePath: actualPath,
+    iconIndex: effectiveIndex,
+  });
+  const hash = crypto.createHash('sha256').update(cacheKey).digest('hex').slice(0, 32);
+
+  if (parsed.isDirectImage) {
+    const targetPath = path.join(cacheDir, `${hash}${ext}`);
+    if (fs.existsSync(targetPath)) {
+      const st = await fs.promises.stat(targetPath);
+      if (st.size > 0) return { success: true, iconPath: targetPath, fromCache: true };
+    }
+    const bytes = await fs.promises.readFile(actualPath);
+    if (bytes.length === 0) return null;
+    await writeFileAtomic(targetPath, bytes);
+    return { success: true, iconPath: targetPath, fromCache: false };
+  }
+
+  if (!parsed.isExecutableResource) return null;
+
+  const targetPngPath = path.join(cacheDir, `${hash}.png`);
+  if (fs.existsSync(targetPngPath)) {
+    const st = await fs.promises.stat(targetPngPath);
+    if (st.size > 0) return { success: true, iconPath: targetPngPath, fromCache: true };
+  }
+
+  const preferPowerShell = ext !== '.exe' || (effectiveIndex !== null && effectiveIndex !== 0);
+  if (preferPowerShell) {
+    const ok = await extractIconViaPowerShell(actualPath, effectiveIndex, targetPngPath);
+    if (ok) return { success: true, iconPath: targetPngPath, fromCache: false };
+  }
+
+  if (ext === '.exe') {
+    try {
+      const nativeIcon = await app.getFileIcon(actualPath, { size: 'large' });
+      if (nativeIcon && !nativeIcon.isEmpty()) {
+        const png = nativeIcon.toPNG();
+        if (png.length > 0) {
+          await writeFileAtomic(targetPngPath, png);
+          return { success: true, iconPath: targetPngPath, fromCache: false };
+        }
+      }
+    } catch {
+      // Fallback zu PowerShell
+    }
+  }
+
+  if (!preferPowerShell) {
+    const ok = await extractIconViaPowerShell(actualPath, effectiveIndex, targetPngPath);
+    if (ok) return { success: true, iconPath: targetPngPath, fromCache: false };
+  }
+
+  return null;
+}
+
+async function findBestLocalIconInDirectory(rootDir, { appName = '', packageId = '' }) {
+  if (!isSafeScanDir(rootDir)) return null;
+
+  const icoCandidates = [];
+  const exeCandidates = [];
+  const queue = [{ dir: rootDir, depth: 0 }];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current.dir, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < 2 && !SKIP_SUBDIRS.has(entry.name.toLowerCase())) {
+          queue.push({ dir: fullPath, depth: current.depth + 1 });
+        }
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const lower = entry.name.toLowerCase();
+      if (lower.endsWith('.ico') && current.depth <= 1) {
+        icoCandidates.push({ path: fullPath, name: lower, depth: current.depth });
+      } else if (lower.endsWith('.exe')) {
+        const score = scoreExecutableCandidate(fullPath, { appName, packageId, rootDir });
+        if (score >= 0) {
+          let size = 0;
+          try {
+            size = (await fs.promises.stat(fullPath)).size;
+          } catch {
+            size = 0;
+          }
+          exeCandidates.push({ path: fullPath, score, size });
+        }
+      }
+    }
+  }
+
+  if (icoCandidates.length > 0) {
+    const cleanApp = normalizeNameSimple(appName).replace(/\s+/g, '');
+    icoCandidates.sort((a, b) => {
+      const aPreferred = a.name === 'app.ico' || (cleanApp && a.name.replace(/\.ico$/, '') === cleanApp);
+      const bPreferred = b.name === 'app.ico' || (cleanApp && b.name.replace(/\.ico$/, '') === cleanApp);
+      if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+      return a.depth - b.depth;
+    });
+    return { sourcePath: icoCandidates[0].path, iconIndex: null };
+  }
+
+  if (exeCandidates.length > 0) {
+    exeCandidates.sort((a, b) => b.score - a.score || b.size - a.size);
+    return { sourcePath: exeCandidates[0].path, iconIndex: null };
+  }
+
+  return null;
+}
+
+function resolveOnlineIconExtension(contentType, urlStr) {
+  const ct = String(contentType || '').toLowerCase();
+  if (ct.includes('image/png')) return '.png';
+  if (ct.includes('image/svg')) return '.svg';
+  if (ct.includes('image/webp')) return '.webp';
+  if (ct.includes('image/jpeg') || ct.includes('image/jpg')) return '.jpg';
+  if (ct.includes('image/x-icon') || ct.includes('image/vnd.microsoft.icon')) return '.ico';
+  if (ct.includes('image/gif')) return '.gif';
+  if (ct.includes('image/avif')) return '.avif';
+
+  try {
+    const ext = path.extname(new URL(urlStr).pathname).toLowerCase();
+    if (CACHE_IMAGE_EXTS.includes(ext)) return ext;
+  } catch {
+    // Ignorieren
+  }
   return '';
 }
 
+async function downloadIconImage(urlStr, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(urlStr, { headers: ICON_FETCH_HEADERS, signal: controller.signal, redirect: 'follow' });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (
+      contentType &&
+      !contentType.toLowerCase().includes('image/') &&
+      !contentType.toLowerCase().includes('octet-stream')
+    ) {
+      return null;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 64 || buf.length > 2 * 1024 * 1024) return null;
+
+    const ext = resolveOnlineIconExtension(contentType, res.url || urlStr);
+    if (!ext) return null;
+    return { buffer: buf, ext };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchOnlineFaviconToCache({ appKey, homepageUrls, cacheDir }) {
+  if (!Array.isArray(homepageUrls) || homepageUrls.length === 0) return null;
+
+  for (const pageUrl of homepageUrls) {
+    const hash = crypto
+      .createHash('sha256')
+      .update(buildIconCacheKey({ appKey, sourceType: 'web', sourcePath: pageUrl }))
+      .digest('hex')
+      .slice(0, 32);
+
+    for (const ext of CACHE_IMAGE_EXTS) {
+      const existing = path.join(cacheDir, `${hash}${ext}`);
+      if (fs.existsSync(existing)) {
+        const st = await fs.promises.stat(existing);
+        if (st.size > 0) return { success: true, iconPath: existing, fromCache: true };
+      }
+    }
+
+    const iconCandidates = [];
+    const ghAvatar = deriveGitHubAvatarUrl(pageUrl);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch(pageUrl, { headers: ICON_FETCH_HEADERS, signal: controller.signal, redirect: 'follow' });
+      if (res.ok) {
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('text/html') || ct.includes('application/xhtml')) {
+          const html = await res.text();
+          iconCandidates.push(...parseFaviconLinksFromHtml(html, res.url || pageUrl));
+        }
+      }
+    } catch {
+      // Weiter mit Origin-/GitHub-Fallback
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (ghAvatar && !iconCandidates.includes(ghAvatar)) {
+      iconCandidates.push(ghAvatar);
+    }
+    try {
+      const fallbackIco = `${new URL(pageUrl).origin}/favicon.ico`;
+      if (!iconCandidates.includes(fallbackIco)) iconCandidates.push(fallbackIco);
+    } catch {
+      // Ungültige URL
+    }
+
+    for (const iconUrl of iconCandidates.slice(0, 6)) {
+      const downloaded = await downloadIconImage(iconUrl, 5000);
+      if (!downloaded) continue;
+      const targetPath = path.join(cacheDir, `${hash}${downloaded.ext}`);
+      await writeFileAtomic(targetPath, downloaded.buffer);
+      return { success: true, iconPath: targetPath, fromCache: false };
+    }
+  }
+
+  return null;
+}
+
 /**
- * Extrahiert ein Programm-Icon on-demand sicher in `userData/icon-cache/` für `catalog-media://`.
+ * Extrahiert ein Programm-Icon on-demand über mehrstufige Fallback-Kette in `userData/icon-cache/`:
+ * 1. Registry DisplayIcon (inkl. .ico/.png/.svg & .exe/.dll mit Index)
+ * 2. Installationsordner & Startmenü-.lnk-Ziele
+ * 3. Optionaler Online-Favicon-/GitHub-Avatar-Fallback über bekannte Homepage-URLs
  */
-export async function extractCachedAppIcon({ id, displayIcon = '', installLocation = '', executablePath = '' }) {
+export async function extractCachedAppIcon({
+  id,
+  name = '',
+  displayIcon = '',
+  installLocation = '',
+  executablePath = '',
+  uninstallString = '',
+  packageManager = '',
+  packageId = '',
+  homepage = '',
+  webVersionUrl = '',
+  links = [],
+  allowOnlineFallback = true,
+}) {
   if (!id) return { success: false, error: 'Keine Programm-ID für Icon-Cache angegeben.' };
+
+  const appKey = String(id).trim();
+  const failFingerprint = `${appKey}|${displayIcon}|${installLocation}|${executablePath}|${packageId}|${homepage}`;
+  if (failedIconKeys.has(failFingerprint)) {
+    return { success: false, error: 'Icon für diesen Eintrag in dieser Sitzung nicht gefunden.' };
+  }
 
   try {
     const cacheDir = getIconCacheDir();
-    const hash = crypto.createHash('sha256').update(String(id)).digest('hex').slice(0, 24);
-    const iconPath = path.join(cacheDir, `${hash}.png`);
 
-    if (fs.existsSync(iconPath)) {
-      return { success: true, iconPath, fromCache: true };
+    // Stufe 1: Registry DisplayIcon (bereinigt von Anführungszeichen, ,0 / ,-101 & %ENV%)
+    const parsedDisplay = parseDisplayIcon(displayIcon, process.env);
+    if (parsedDisplay.path && !parsedDisplay.isGeneric && fs.existsSync(parsedDisplay.path)) {
+      const stage1 = await extractFileIconToCache({
+        appKey,
+        sourceType: 'display-icon',
+        sourcePath: parsedDisplay.path,
+        iconIndex: parsedDisplay.index,
+        cacheDir,
+      });
+      if (stage1?.success) return stage1;
     }
 
-    const sourceFile = await resolveExecutableForIcon({ displayIcon, installLocation, executablePath });
-    if (!sourceFile) {
-      return { success: false, error: 'Keine ausführbare Datei oder Icon-Quelle gefunden.' };
+    // Stufe 2a: Expliziter Executable-Pfad (z. B. validInstallPath / autoPaths)
+    if (executablePath) {
+      const parsedExe = parseDisplayIcon(executablePath, process.env);
+      if (parsedExe.path && !parsedExe.isGeneric && fs.existsSync(parsedExe.path)) {
+        const stage2a = await extractFileIconToCache({
+          appKey,
+          sourceType: 'executable',
+          sourcePath: parsedExe.path,
+          iconIndex: parsedExe.index,
+          cacheDir,
+        });
+        if (stage2a?.success) return stage2a;
+      }
     }
 
-    const icon = await app.getFileIcon(sourceFile, { size: 'normal' });
-    if (icon.isEmpty()) {
-      return { success: false, error: 'Kein Icon in Quelldatei gefunden.' };
+    // Stufe 2b: InstallLocation & UninstallString-Verzeichnis nach Haupt-.exe / .ico durchsuchen
+    const candidateDirs = [];
+    const seenDirs = new Set();
+    const pushDir = (d) => {
+      const norm = normalizeDirPath(d);
+      if (norm && !seenDirs.has(norm.toLowerCase()) && isSafeScanDir(norm)) {
+        seenDirs.add(norm.toLowerCase());
+        candidateDirs.push(norm);
+      }
+    };
+
+    pushDir(installLocation);
+    const uninstallExe = extractExeFromCommandString(uninstallString);
+    if (uninstallExe && !isGenericIconSource(uninstallExe)) {
+      pushDir(path.dirname(uninstallExe));
     }
 
-    const tmpPath = `${iconPath}.tmp`;
-    await fs.promises.writeFile(tmpPath, icon.toPNG());
-    await fs.promises.rename(tmpPath, iconPath);
+    for (const dir of candidateDirs) {
+      const best = await findBestLocalIconInDirectory(dir, { appName: name, packageId });
+      if (best) {
+        const stage2b = await extractFileIconToCache({
+          appKey,
+          sourceType: 'install-dir',
+          sourcePath: best.sourcePath,
+          iconIndex: best.iconIndex,
+          cacheDir,
+        });
+        if (stage2b?.success) return stage2b;
+      }
+    }
 
-    return { success: true, iconPath, fromCache: false };
+    // Stufe 2c: Startmenü-.lnk-Ziele prüfen
+    const shortcutCandidate = await findStartMenuIconCandidate({
+      appName: name,
+      installDirs: candidateDirs,
+    });
+    if (shortcutCandidate?.sourcePath) {
+      const stage2c = await extractFileIconToCache({
+        appKey,
+        sourceType: 'shortcut',
+        sourcePath: shortcutCandidate.sourcePath,
+        iconIndex: shortcutCandidate.iconIndex,
+        cacheDir,
+      });
+      if (stage2c?.success) return stage2c;
+    }
+
+    // Stufe 3: Optionaler Online-Favicon-Fallback (aus Winget-Cache oder hinterlegten URLs)
+    if (allowOnlineFallback) {
+      let cachedPkg = null;
+      if (packageId && (!packageManager || packageManager.toLowerCase() === 'winget')) {
+        cachedPkg = getWingetCache().get(`winget:show:${String(packageId).trim().toLowerCase()}`)?.data || null;
+      }
+
+      const homepageUrls = extractCandidateHomepageUrls({
+        homepage: homepage || cachedPkg?.homepage || '',
+        publisherUrl: cachedPkg?.publisherUrl || '',
+        webVersionUrl,
+        links,
+      });
+
+      const stage3 = await fetchOnlineFaviconToCache({
+        appKey,
+        homepageUrls,
+        cacheDir,
+      });
+      if (stage3?.success) return stage3;
+    }
+
+    failedIconKeys.add(failFingerprint);
+    return { success: false, error: 'Keine ausführbare Datei oder Icon-Quelle gefunden.' };
   } catch (e) {
     return { success: false, error: e.message };
   }
