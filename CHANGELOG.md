@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.24.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.23.0...v1.24.0) (2026-11-24)
+
+### 🚀 Features
+
+* **providers:** add npm, bun, nvm, pnpm and composer providers with full update and bundle support ([a4e27d4](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/a4e27d470dd8451ddfb649f27c614631903b7a4a))
+* **providers:** add pip, uv, cargo, vcpkg, dotnet, pwsh7 and pwsh5 providers ([897226f](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/897226f4f5a7cd3384c46f65e74e5d045112e4ee))
+* **providers:** add provider lifecycle management, cli runner and settings UI ([ac9f6f9](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/ac9f6f9d98ab3cd8536fe48fbcda5e40152e42b1))
+* **providers:** add Scoop, Chocolatey, MS Store and MSI Windows providers ([de44c58](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/de44c58c7c9770fbfae39bc0f75658525c585068))
+
+### 🧹 Chore / Maintenance
+
+* add GEMINI.md and Antigravity (test work with KI) ([22c3ef6](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/22c3ef63332128702fa805924558eb3dd6bc8b7b))
+
 ## [1.23.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.22.0...v1.23.0) (2026-11-24)
 
 ### 🚀 Features
