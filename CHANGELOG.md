@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.28.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.27.0...v1.28.0) (2026-11-24)
+
+### 🚀 Features
+
+* **background:** add system tray, dual autostart, notifications, and elevated silent auto-updates ([15c6f8e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/15c6f8e1545373e6d41f823da2e535769343a964))
+
+### 🐛 Bug Fixes
+
+* **tray:** minimize to tray by default, add tray version/settings menu, and configurable tab sort defaults ([18664e2](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/18664e20474608a11246fe10279b595fa17431ff))
+
 ## [1.27.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.26.0...v1.27.0) (2026-11-24)
 
 ### 🚀 Features
