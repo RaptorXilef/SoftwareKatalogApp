@@ -58,8 +58,8 @@ export function openEditModal(id, initialTab = 'general') {
   renderEditModal(id, initialTab);
 }
 
-export function openSettingsModal() {
-  renderSettingsModal();
+export function openSettingsModal(initialTab = 'general') {
+  renderSettingsModal(initialTab);
 }
 
 export function openProviderPackageModal(providerId, packageId, summary = {}, options = {}) {

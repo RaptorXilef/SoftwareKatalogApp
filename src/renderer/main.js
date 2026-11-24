@@ -118,7 +118,7 @@ async function checkAppUpdateInBackground() {
     const notice = document.getElementById('headerUpdateNotice');
     if (notice) {
       notice.innerHTML = `<button type="button" class="update-pill" id="btnHeaderAppUpdate">🎁 App-Update v${escapeHTML(res.latestVersion)}</button>`;
-      document.getElementById('btnHeaderAppUpdate')?.addEventListener('click', () => openSettingsModal());
+      document.getElementById('btnHeaderAppUpdate')?.addEventListener('click', () => openSettingsModal('updates'));
     }
   }
 }
