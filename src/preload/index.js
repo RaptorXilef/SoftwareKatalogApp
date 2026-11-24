@@ -142,7 +142,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreBackup: () => ipcRenderer.invoke('restore-backup'),
   // App Self-Update & Admin-Sitzung
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
-  installAppUpdate: (url, isPortable) => ipcRenderer.invoke('install-app-update', url, isPortable),
+  installAppUpdate: (url, installKindOrIsPortable) =>
+    ipcRenderer.invoke('install-app-update', url, installKindOrIsPortable),
   getAdminSessionStatus: () => ipcRenderer.invoke('admin-session-status'),
   startAdminSession: () => ipcRenderer.invoke('admin-session-start'),
   stopAdminSession: () => ipcRenderer.invoke('admin-session-stop'),

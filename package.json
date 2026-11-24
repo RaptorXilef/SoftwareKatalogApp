@@ -77,10 +77,38 @@
     ],
     "win": {
       "target": [
-        "portable",
-        "zip"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "artifactName": "SoftwareKatalog-Setup-${arch}.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Software Katalog",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
     },
     "portable": {
       "artifactName": "SoftwareKatalog-Portable.exe"

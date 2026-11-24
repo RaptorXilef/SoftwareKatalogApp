@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import { detectInstallKind, normalizeArch, resolveDataDir } from '../shared/app-update-logic.js';
 import {
   getArchiveRootLabel,
   isNormalizedPathInsideDir,
@@ -51,6 +52,55 @@ const DEFAULT_STATE = {
 };
 
 let migrationChecked = false;
+/** @type {{ installKind: 'installed' | 'portable-exe' | 'portable-dir', isAllUsersInstall: boolean, arch: 'x64' | 'ia32' | 'arm64', isPackaged: boolean, platform: string } | null} */
+let cachedInstallInfo = null;
+/** @type {string | null} */
+let cachedDataDir = null;
+
+/**
+ * Echte Schreibprobe auf Verzeichnisebene (fs.accessSync W_OK ignoriert unter Windows oft NTFS-ACLs).
+ * @param {string} dirPath
+ * @returns {boolean}
+ */
+function canWriteDirectory(dirPath) {
+  if (!dirPath) return false;
+  const probeFile = path.join(dirPath, `.sk-write-test-${process.pid}-${Date.now()}`);
+  try {
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+    fs.writeFileSync(probeFile, '', 'utf-8');
+    fs.unlinkSync(probeFile);
+    return true;
+  } catch {
+    try {
+      if (fs.existsSync(probeFile)) fs.unlinkSync(probeFile);
+    } catch {
+      // Ignorieren
+    }
+    return false;
+  }
+}
+
+export function getInstallInfo() {
+  if (cachedInstallInfo) return cachedInstallInfo;
+  const detected = detectInstallKind({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    env: process.env,
+    platform: process.platform,
+    existsSync: fs.existsSync,
+    readdirSync: fs.readdirSync,
+  });
+  cachedInstallInfo = {
+    installKind: detected.installKind,
+    isAllUsersInstall: detected.isAllUsersInstall,
+    arch: normalizeArch(process.arch),
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+  };
+  return cachedInstallInfo;
+}
 
 export function getAppFolder() {
   if (app.isPackaged) {
@@ -60,11 +110,37 @@ export function getAppFolder() {
 }
 
 export function getDataFolder() {
-  const dataDir = path.join(getAppFolder(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  if (cachedDataDir) {
+    if (!fs.existsSync(cachedDataDir)) {
+      try {
+        fs.mkdirSync(cachedDataDir, { recursive: true });
+      } catch {
+        // Ignorieren falls Verzeichnis zwischenzeitlich gesperrt ist
+      }
+    }
+    return cachedDataDir;
   }
-  return dataDir;
+
+  const installInfo = getInstallInfo();
+  const resolved = resolveDataDir({
+    installKind: installInfo.installKind,
+    isAllUsersInstall: installInfo.isAllUsersInstall,
+    appFolder: getAppFolder(),
+    appDataPath: app.getPath('appData'),
+    programDataPath: process.env.ProgramData || '',
+    platform: process.platform,
+    isWritableDir: canWriteDirectory,
+  });
+
+  if (!fs.existsSync(resolved.dataDir)) {
+    try {
+      fs.mkdirSync(resolved.dataDir, { recursive: true });
+    } catch (e) {
+      console.error('Konnte data-Ordner nicht erstellen:', resolved.dataDir, e);
+    }
+  }
+  cachedDataDir = resolved.dataDir;
+  return cachedDataDir;
 }
 
 /**
@@ -133,7 +209,9 @@ function getDefaultScannerPath(appFolder) {
 export function getConfig() {
   const appFolder = getAppFolder();
   const dataDir = getDataFolder();
-  migrateLegacyFiles(appFolder, dataDir);
+  if (path.resolve(dataDir) === path.resolve(appFolder, 'data')) {
+    migrateLegacyFiles(appFolder, dataDir);
+  }
 
   const configPath = path.join(dataDir, 'config.json');
   const statePath = path.join(app.getPath('userData'), 'state.json');

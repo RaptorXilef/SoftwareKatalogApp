@@ -1,12 +1,29 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, shell } from 'electron';
-import { getAppFolder, saveConfig } from './config.js';
+import { app } from 'electron';
+import { buildUpdatePowerShellScript, selectReleaseAsset } from '../shared/app-update-logic.js';
+import { getAppFolder, getInstallInfo, saveConfig } from './config.js';
 import { createJob } from './jobs.js';
+
+function resolveUpdateInstallKind(installKindOrIsPortable) {
+  if (
+    installKindOrIsPortable === 'installed' ||
+    installKindOrIsPortable === 'portable-exe' ||
+    installKindOrIsPortable === 'portable-dir'
+  ) {
+    return installKindOrIsPortable;
+  }
+  if (typeof installKindOrIsPortable === 'boolean') {
+    return installKindOrIsPortable ? 'portable-exe' : getInstallInfo().installKind;
+  }
+  return getInstallInfo().installKind;
+}
 
 export async function checkAppUpdate() {
   try {
     const currentVersion = app.getVersion();
+    const { installKind, arch, isAllUsersInstall, platform } = getInstallInfo();
     const response = await fetch('https://api.github.com/repos/RaptorXilef/SoftwareKatalogApp/releases/latest', {
       headers: { 'User-Agent': 'SoftwareKatalogApp' },
     });
@@ -14,38 +31,48 @@ export async function checkAppUpdate() {
     if (!response.ok) return { error: `GitHub API Fehler: ${response.statusText}` };
 
     const data = await response.json();
-    const latestVersion = data.tag_name.replace(/^v/, '');
+    const latestVersion = String(data.tag_name || '').replace(/^v/, '');
     saveConfig({ lastUpdateCheck: Date.now() });
 
-    const isPortable = app.isPackaged && process.execPath.toLowerCase().includes('portable');
-    let updateAssetUrl = null;
-
-    if (isPortable) {
-      const asset = data.assets.find((a) => a.name.endsWith('-Portable.exe'));
-      if (asset) updateAssetUrl = asset.browser_download_url;
-    } else {
-      const asset = data.assets.find(
-        (a) => a.name.endsWith('.zip') && !a.name.includes('mac') && !a.name.includes('linux')
-      );
-      if (asset) updateAssetUrl = asset.browser_download_url;
-    }
+    const selected = selectReleaseAsset(data.assets, { installKind, arch, platform });
 
     return {
       updateAvailable: currentVersion !== latestVersion,
       latestVersion,
       currentVersion,
       releaseUrl: data.html_url,
-      updateAssetUrl,
-      isPortable,
+      updateAssetUrl: selected?.url || null,
+      updateAssetName: selected?.name || null,
+      installKind,
+      arch,
+      isAllUsersInstall,
+      isPortable: installKind === 'portable-exe',
     };
   } catch (e) {
     return { error: e.message };
   }
 }
 
-export async function downloadAndInstallAppUpdate(url, isPortable) {
+export async function downloadAndInstallAppUpdate(url, installKindOrIsPortable) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(url || ''));
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return { success: false, error: 'Ungueltige Update-URL.' };
+    }
+  } catch {
+    return { success: false, error: 'Ungueltige Update-URL.' };
+  }
+
+  const installInfo = getInstallInfo();
+  const installKind = resolveUpdateInstallKind(installKindOrIsPortable);
   const tempDir = app.getPath('temp');
-  const fileName = url.toLowerCase().includes('.zip') ? 'sk_update.zip' : 'sk_update.exe';
+  const fileName =
+    installKind === 'installed'
+      ? 'sk_update_setup.exe'
+      : installKind === 'portable-exe'
+        ? 'sk_update_portable.exe'
+        : 'sk_update.zip';
   const tempFilePath = path.join(tempDir, fileName);
 
   const job = createJob({
@@ -57,7 +84,7 @@ export async function downloadAndInstallAppUpdate(url, isPortable) {
   if (!job) return { success: false, alreadyRunning: true };
 
   try {
-    const res = await fetch(url, { redirect: 'follow', signal: job.signal });
+    const res = await fetch(parsedUrl.toString(), { redirect: 'follow', signal: job.signal });
     if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
     const total = parseInt(res.headers.get('content-length') || '0', 10);
@@ -81,57 +108,39 @@ export async function downloadAndInstallAppUpdate(url, isPortable) {
     job.update(100, 'Starte Update & Neustart...');
 
     const updateScriptPath = path.join(tempDir, 'sk_update.ps1');
-    const cmdScriptPath = path.join(tempDir, 'sk_update.cmd');
-    const appPath = isPortable ? process.execPath : getAppFolder();
+    const psScript = buildUpdatePowerShellScript({
+      installKind,
+      isAllUsersInstall: installInfo.isAllUsersInstall,
+      tempFilePath,
+      execPath: process.execPath,
+      portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || '',
+      appFolder: getAppFolder(),
+      pid: process.pid,
+    });
 
-    const psScript = isPortable
-      ? `
-        Move-Item -Path "${process.execPath}" -Destination "${process.execPath}.old" -Force
-        Move-Item -Path "${tempFilePath}" -Destination "${process.execPath}" -Force
-        Start-Process "${process.execPath}"
-      `
-      : `
-        $extractPath = "${path.join(tempDir, 'sk_update_extract')}"
-        $backupDir = "${path.join(tempDir, 'sk_update_backup')}"
-        Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-        Expand-Archive -Path "${tempFilePath}" -DestinationPath $extractPath -Force
+    // UTF-8 BOM stellt sicher, dass PowerShell 5.1 Sonderzeichen/Umlaute in Pfaden korrekt liest
+    fs.writeFileSync(updateScriptPath, `\uFEFF${psScript}`, 'utf-8');
 
-        $sourceDir = $extractPath
-        $subDirs = Get-ChildItem -Path $extractPath -Directory
-        $filesInRoot = Get-ChildItem -Path $extractPath -File
-        if ($subDirs.Count -eq 1 -and $filesInRoot.Count -eq 0) {
-          $sourceDir = $subDirs[0].FullName
-        }
-
-        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-        foreach ($item in @("data", "config.json", "catalog.json")) {
-          $fullPath = Join-Path "${appPath}" $item
-          if (Test-Path $fullPath) {
-            Copy-Item -Path $fullPath -Destination $backupDir -Recurse -Force
-          }
-        }
-
-        Copy-Item -Path "$sourceDir\\*" -Destination "${appPath}" -Recurse -Force
-        Copy-Item -Path "$backupDir\\*" -Destination "${appPath}" -Recurse -Force
-
-        Remove-Item -Path $backupDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "${tempFilePath}" -Force -ErrorAction SilentlyContinue
-
-        $exe = Get-ChildItem -Path "${appPath}" -Filter "*.exe" | Select-Object -First 1
-        if ($exe) { Start-Process $exe.FullName }
-      `;
-
-    fs.writeFileSync(updateScriptPath, psScript, 'utf-8');
-    const cmdContent = `@echo off
-echo Software Katalog wird aktualisiert...
-timeout /t 4 /nobreak > nul
-powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "${updateScriptPath}"
-del "${updateScriptPath}"
-del "%~f0"`;
-
-    fs.writeFileSync(cmdScriptPath, cmdContent, 'utf-8');
-    shell.openPath(cmdScriptPath);
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-WindowStyle',
+        'Hidden',
+        '-File',
+        updateScriptPath,
+      ],
+      {
+        detached: true,
+        stdio: 'ignore',
+        shell: false,
+        windowsHide: true,
+      }
+    );
+    child.unref();
 
     setTimeout(() => app.quit(), 500);
     return { success: true };

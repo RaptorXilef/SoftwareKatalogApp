@@ -1,3 +1,4 @@
+import { formatInstallModeInfo } from '../../shared/app-update-logic.js';
 import { getArchiveRootLabel, normalizePathKey } from '../../shared/multi-archive-logic.js';
 import {
   getPolicyEntryKey,
@@ -895,6 +896,11 @@ export async function renderSettingsModal(initialTab = 'general') {
     `
   ).join('');
 
+  const installModeInfo = formatInstallModeInfo(info.installKind, info.arch, {
+    isPackaged: info.isPackaged,
+    isAllUsersInstall: info.isAllUsersInstall,
+  });
+
   modal.innerHTML = `
     <div class="modal-header">
       <h2>Einstellungen</h2>
@@ -1060,9 +1066,15 @@ export async function renderSettingsModal(initialTab = 'general') {
               <span>Installierte App-Version</span>
               <div class="app-update-box">
                 <strong>v${escapeHTML(info.version)}</strong>
+                <span class="app-install-mode-badge" id="appInstallModeBadge" title="${escapeHTML(installModeInfo.detail)}">${escapeHTML(installModeInfo.label)}</span>
                 <span id="appUpdateStatus" class="muted">Prüfe...</span>
                 <button type="button" class="btn btn-ghost btn-xs" id="btnCheckAppUpdate" data-settings-action="check-app-update">🔄 Jetzt prüfen</button>
               </div>
+              ${
+                info.installKind === 'installed' && info.dataDir
+                  ? `<span class="muted">Datenordner: <code>${escapeHTML(info.dataDir)}</code></span>`
+                  : ''
+              }
             </div>
           </div>
         </section>
@@ -1427,7 +1439,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         liveBox.textContent = 'Prüfung fehlgeschlagen';
         if (manual) showToast('App-Update-Prüfung fehlgeschlagen.', { type: 'error' });
       } else if (res?.updateAvailable && res.updateAssetUrl) {
-        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-install-app-url="${escapeHTML(res.updateAssetUrl)}" data-portable="${res.isPortable}">⬆️ Auf v${escapeHTML(res.latestVersion)} updaten</button>`;
+        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-install-app-url="${escapeHTML(res.updateAssetUrl)}" data-install-kind="${escapeHTML(res.installKind || info.installKind || 'portable-dir')}" data-portable="${res.isPortable}">⬆️ Auf v${escapeHTML(res.latestVersion)} updaten</button>`;
         if (manual) showToast(`Neue Version v${res.latestVersion} verfügbar.`, { type: 'info' });
       } else if (res?.updateAvailable) {
         liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-open-release="${escapeHTML(res.releaseUrl)}">🎁 v${escapeHTML(res.latestVersion)} auf GitHub</button>`;
@@ -1846,10 +1858,10 @@ export async function renderSettingsModal(initialTab = 'general') {
       installAppBtn.disabled = true;
       closeModal();
       showToast('App-Update wird im Hintergrund geladen...', { type: 'info' });
-      const res = await window.electronAPI.installAppUpdate(
-        installAppBtn.dataset.installAppUrl,
-        installAppBtn.dataset.portable === 'true'
-      );
+      const targetInstallKind =
+        installAppBtn.dataset.installKind ||
+        (installAppBtn.dataset.portable === 'true' ? 'portable-exe' : 'portable-dir');
+      const res = await window.electronAPI.installAppUpdate(installAppBtn.dataset.installAppUrl, targetInstallKind);
       if (!res.success && !res.canceled) {
         showToast(`App-Update fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
       }

@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Windows EXE & ZIP
+    name: Build Windows Installer, Portable & ZIP
     runs-on: windows-latest # Wir nutzen Windows, um die Dateien nativ zu bauen
 
     # Gibt dem automatischen Token die Rechte, Dateien zum Release hochzuladen
@@ -37,13 +37,23 @@ jobs:
       - name: 📦 Abhängigkeiten installieren
         run: npm ci
 
-      - name: 🏗️ App-Build (Portable & ZIP)
+      - name: 🧹 Biome Code- & Format-Check
+        run: npm run chk:biome
+
+      - name: 🔍 Typecheck
+        run: npm run typecheck
+
+      - name: 🧪 Unit-Tests
+        run: npm test
+
+      - name: 🏗️ App-Build (NSIS Setup, Portable & ZIP)
         run: npm run build:dist
 
       - name: 🚀 Dateien an GitHub Release anhängen
         uses: softprops/action-gh-release@v2
         with:
-          # Der Pfad zur gebauten EXE, wie in deiner package.json definiert
+          # Pfade zu den gebauten Windows-Artefakten gemaess package.json
           files: |
+            dist/*Setup*.exe
             dist/SoftwareKatalog-Portable.exe
             dist/*.zip

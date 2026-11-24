@@ -42,7 +42,14 @@ import {
   restoreBackup,
   saveMetaJson,
 } from './catalog-service.js';
-import { getAppFolder, getConfig, getDataFolder, inspectArchiveRootPath, saveConfig } from './config.js';
+import {
+  getAppFolder,
+  getConfig,
+  getDataFolder,
+  getInstallInfo,
+  inspectArchiveRootPath,
+  saveConfig,
+} from './config.js';
 import {
   configureElevatedHelper,
   getAdminSessionStatus,
@@ -336,7 +343,17 @@ function registerIpcHandlers() {
   handleIpc('fetch-changelog', (_e, item) => fetchChangelog(item));
 
   // Einstellungen, Backup & Reset
-  handleIpc('get-app-info', () => ({ version: app.getVersion() }));
+  handleIpc('get-app-info', () => {
+    const installInfo = getInstallInfo();
+    return {
+      version: app.getVersion(),
+      installKind: installInfo.installKind,
+      arch: installInfo.arch,
+      isAllUsersInstall: installInfo.isAllUsersInstall,
+      isPackaged: installInfo.isPackaged,
+      dataDir: getDataFolder(),
+    };
+  });
   handleIpc('get-settings', () => getConfig());
   handleIpc('check-archive-path', (_e, rawPath, index = 0) => inspectArchiveRootPath(rawPath, index));
   handleIpc('save-settings', (_e, settings) => {
@@ -387,7 +404,9 @@ function registerIpcHandlers() {
 
   // App Self-Update
   handleIpc('check-app-update', () => checkAppUpdate());
-  handleIpc('install-app-update', (_e, url, isPortable) => downloadAndInstallAppUpdate(url, isPortable));
+  handleIpc('install-app-update', (_e, url, installKindOrIsPortable) =>
+    downloadAndInstallAppUpdate(url, installKindOrIsPortable)
+  );
 
   // Sitzungsbasierter Admin-Ausfuehrungsmodus (Elevated Helper)
   handleIpc('admin-session-status', async () => {
