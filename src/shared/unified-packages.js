@@ -20,6 +20,11 @@ export const PROVIDER_DISPLAY_META = Object.freeze({
   chocolatey: { id: 'chocolatey', label: 'Chocolatey', badgeClass: 'is-chocolatey' },
   msstore: { id: 'msstore', label: 'MS Store', badgeClass: 'is-msstore' },
   msi: { id: 'msi', label: 'MSI', badgeClass: 'is-msi' },
+  npm: { id: 'npm', label: 'npm', badgeClass: 'is-npm' },
+  bun: { id: 'bun', label: 'Bun', badgeClass: 'is-bun' },
+  nvm: { id: 'nvm', label: 'NVM', badgeClass: 'is-nvm' },
+  pnpm: { id: 'pnpm', label: 'pnpm', badgeClass: 'is-pnpm' },
+  composer: { id: 'composer', label: 'Composer', badgeClass: 'is-composer' },
 });
 
 /**
@@ -329,6 +334,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       wingetId,
       providerName: getProviderBadgeInfo(packageManager)?.label || '',
       bucket: matchedPc?.bucket || item.bucket || '',
+      isActive: Boolean(matchedPc?.isActive),
       publisher: matchedPc?.publisher || '',
       pcApp: matchedPc || null,
       canUninstall: Boolean(matchedPc?.canUninstall),
@@ -376,6 +382,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       wingetId: pkgManager === 'winget' ? pkgId || '' : '',
       providerName: getProviderBadgeInfo(pkgManager)?.label || '',
       bucket: pcApp.bucket || '',
+      isActive: Boolean(pcApp.isActive),
       webSourceType: pkgManager === 'winget' ? 'winget' : 'none',
       tags: pcApp.publisher ? [pcApp.publisher] : [],
       mainCategory: '',
@@ -479,6 +486,7 @@ export function buildRemotePackageItem({
     webSourceType: cleanProviderId === 'winget' ? 'winget' : 'none',
     providerName: providerName || getProviderBadgeInfo(cleanProviderId)?.label || cleanProviderId,
     bucket: summary.bucket || '',
+    isActive: Boolean(matchedPcItem?.isActive || summary.isActive),
     publisher: summary.publisher || matchedPcItem?.publisher || '',
     shortDescription: summary.shortDescription || '',
     description: summary.description || '',

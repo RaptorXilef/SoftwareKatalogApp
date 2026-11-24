@@ -504,7 +504,7 @@ export async function renderSettingsModal() {
         enabledSet.add(String(id).toLowerCase());
       }
       refreshProvidersSectionUi();
-      await triggerCatalogReload();
+      await triggerCatalogReload({ rescanInstalled: nextEnabled });
       const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
       showToast(`${providerName} ${nextEnabled ? 'aktiviert' : 'deaktiviert'}.`, { type: 'info' });
     } else {
@@ -534,7 +534,7 @@ export async function renderSettingsModal() {
         availabilityById.set(providerId, res.availability);
       }
       refreshProvidersSectionUi();
-      await triggerCatalogReload();
+      await triggerCatalogReload({ rescanInstalled: Boolean(res?.success) });
 
       if (res?.canceled) {
         showToast(`${providerName}-Installation abgebrochen.`, { type: 'info' });
@@ -601,7 +601,7 @@ export async function renderSettingsModal() {
         availabilityById.set(providerId, res.availability);
       }
       refreshProvidersSectionUi();
-      await triggerCatalogReload();
+      await triggerCatalogReload({ rescanInstalled: Boolean(res?.success) });
 
       if (res?.canceled) {
         showToast(`${providerName}-Deinstallation abgebrochen.`, { type: 'info' });
@@ -796,6 +796,11 @@ export async function renderSettingsModal() {
         oldArchivePaths.join('|') !== newSettings.archivePaths.join('|') ||
         (s.autoExtensions || []).join(',') !== newSettings.autoExtensions.join(',');
 
+      const oldProviders = new Set(
+        (Array.isArray(s.enabledProviders) ? s.enabledProviders : []).map((p) => p.toLowerCase())
+      );
+      const newlyEnabledProvider = checkedProviders.some((p) => !oldProviders.has(p.toLowerCase()));
+
       const res = await window.electronAPI.saveSettings(newSettings);
       if (res.success) {
         closeModal();
@@ -805,7 +810,7 @@ export async function renderSettingsModal() {
         } else {
           showToast('Einstellungen gespeichert.', { type: 'success' });
         }
-        await triggerCatalogReload();
+        await triggerCatalogReload({ rescanInstalled: newlyEnabledProvider });
       } else {
         showToast(`Speicherfehler: ${res.error}`, { type: 'error' });
       }

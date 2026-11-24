@@ -497,6 +497,31 @@
     background: color-mix(in srgb, var(--text-muted) 22%, transparent);
     color: var(--text);
   }
+
+  &.is-npm {
+    background: color-mix(in srgb, #cb3837 22%, transparent);
+    color: #f38ba8;
+  }
+
+  &.is-bun {
+    background: color-mix(in srgb, #fbf0df 20%, transparent);
+    color: #f9e2af;
+  }
+
+  &.is-nvm {
+    background: color-mix(in srgb, #68a063 22%, transparent);
+    color: #a6e3a1;
+  }
+
+  &.is-pnpm {
+    background: color-mix(in srgb, #f69220 22%, transparent);
+    color: #fab387;
+  }
+
+  &.is-composer {
+    background: color-mix(in srgb, #885630 24%, transparent);
+    color: #f2cdcd;
+  }
 }
 
 .discover-local-actions {

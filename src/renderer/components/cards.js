@@ -297,7 +297,9 @@ function renderCardHtml(item, st) {
   const isSelected = isUpdatesTab && state.selectedUpdateIds.has(item.id);
 
   let secondaryTag = '';
-  if (item.inArchive && isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
+  if (item.packageManager === 'nvm' && item.isActive) {
+    secondaryTag = '<span class="card-chip chip-install-silent" title="Aktuell aktive Node.js-Version">⚡ Aktiv</span>';
+  } else if (item.inArchive && isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
   else if (item.softwareType === 'portable') secondaryTag = '<span class="card-chip">Portabel</span>';
   else if (item.softwareType === 'driver') secondaryTag = '<span class="card-chip">Treiber</span>';
 

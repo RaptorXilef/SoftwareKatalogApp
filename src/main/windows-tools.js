@@ -26,7 +26,7 @@ import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
-import { getProvider, initDefaultProviders, isProviderEnabled } from './providers/registry.js';
+import { getEnabledProviders, getProvider, initDefaultProviders, isProviderEnabled } from './providers/registry.js';
 import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
@@ -901,38 +901,39 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
 
     const wingetEnabled = isProviderEnabled('winget');
     const msstoreEnabled = isProviderEnabled('msstore');
-    const scoopEnabled = isProviderEnabled('scoop');
-    const chocoEnabled = isProviderEnabled('chocolatey');
     const msiEnabled = isProviderEnabled('msi');
-
-    const scoopProv = scoopEnabled ? getProvider('scoop') : null;
-    const chocoProv = chocoEnabled ? getProvider('chocolatey') : null;
     const msstoreProv = msstoreEnabled ? getProvider('msstore') : null;
+    const extraProviders = getEnabledProviders().filter((p) => !['archive', 'winget', 'msstore', 'msi'].includes(p.id));
 
     const emptyInstalled = Promise.resolve({ success: false, packages: [] });
     const emptyUpgrades = Promise.resolve({ success: false, upgrades: [] });
 
-    const [
-      registryEntries,
-      exportRes,
-      upgradeRes,
-      msstoreInstalledRes,
-      msstoreUpgradeRes,
-      scoopInstalledRes,
-      scoopUpgradeRes,
-      chocoInstalledRes,
-      chocoUpgradeRes,
-    ] = await Promise.all([
-      readRegistryUninstallEntries(signal),
-      wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
-      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
-      !wingetEnabled && msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
-      msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
-      scoopProv ? scoopProv.listInstalled({ signal }) : emptyInstalled,
-      scoopProv ? scoopProv.listUpgrades({ signal }) : emptyUpgrades,
-      chocoProv ? chocoProv.listInstalled({ signal }) : emptyInstalled,
-      chocoProv ? chocoProv.listUpgrades({ signal }) : emptyUpgrades,
-    ]);
+    const [registryEntries, exportRes, upgradeRes, msstoreInstalledRes, msstoreUpgradeRes, extraProviderResults] =
+      await Promise.all([
+        readRegistryUninstallEntries(signal),
+        wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
+        wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
+        !wingetEnabled && msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
+        msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
+        Promise.all(
+          extraProviders.map(async (provider) => {
+            const [installedSettled, upgradesSettled] = await Promise.allSettled([
+              provider.capabilities?.listInstalled && typeof provider.listInstalled === 'function'
+                ? provider.listInstalled({ signal })
+                : emptyInstalled,
+              provider.capabilities?.listUpgrades && typeof provider.listUpgrades === 'function'
+                ? provider.listUpgrades({ signal })
+                : emptyUpgrades,
+            ]);
+            return {
+              installed:
+                installedSettled.status === 'fulfilled' ? installedSettled.value : { success: false, packages: [] },
+              upgrades:
+                upgradesSettled.status === 'fulfilled' ? upgradesSettled.value : { success: false, upgrades: [] },
+            };
+          })
+        ),
+      ]);
 
     if (signal?.aborted) {
       return { success: false, canceled: true };
@@ -953,15 +954,17 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
 
     const providerInstalled = [
       ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : msstoreFromWingetExport),
-      ...(scoopInstalledRes.success ? scoopInstalledRes.packages : []),
-      ...(chocoInstalledRes.success ? chocoInstalledRes.packages : []),
     ];
+    const providerUpgrades = [...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : [])];
 
-    const providerUpgrades = [
-      ...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : []),
-      ...(scoopUpgradeRes.success ? scoopUpgradeRes.upgrades : []),
-      ...(chocoUpgradeRes.success ? chocoUpgradeRes.upgrades : []),
-    ];
+    for (const extra of extraProviderResults) {
+      if (extra.installed?.success && Array.isArray(extra.installed.packages)) {
+        providerInstalled.push(...extra.installed.packages);
+      }
+      if (extra.upgrades?.success && Array.isArray(extra.upgrades.upgrades)) {
+        providerUpgrades.push(...extra.upgrades.upgrades);
+      }
+    }
 
     const programs = mergeInstalledSoftware({
       wingetExports,
@@ -1569,11 +1572,18 @@ export async function extractCachedAppIcon({
       if (stage2c?.success) return stage2c;
     }
 
-    // Stufe 3: Optionaler Online-Favicon-Fallback (aus Winget-Cache oder hinterlegten URLs)
+    // Stufe 3: Optionaler Online-Favicon-Fallback (aus Provider-Cache oder hinterlegten URLs)
     if (allowOnlineFallback) {
       let cachedPkg = null;
-      if (packageId && (!packageManager || packageManager.toLowerCase() === 'winget')) {
-        cachedPkg = getWingetCache().get(`winget:show:${String(packageId).trim().toLowerCase()}`)?.data || null;
+      if (packageId) {
+        const cleanPm = String(packageManager || 'winget')
+          .trim()
+          .toLowerCase();
+        const cleanPidLower = String(packageId).trim().toLowerCase();
+        const cacheKey = ['npm', 'bun', 'pnpm'].includes(cleanPm)
+          ? `npm-registry:show:${cleanPidLower}`
+          : `${cleanPm}:show:${cleanPidLower}`;
+        cachedPkg = getWingetCache().get(cacheKey)?.data || null;
       }
 
       const homepageUrls = extractCandidateHomepageUrls({

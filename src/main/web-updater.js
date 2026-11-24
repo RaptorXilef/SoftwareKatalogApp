@@ -7,6 +7,7 @@ import { buildArchiveFilename, extractVersion } from '../shared/version.js';
 import { persistWebVersion, writeCatalogAtomic } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { createJob } from './jobs.js';
+import { getProvider } from './providers/registry.js';
 import { wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { getFileVersion } from './windows-tools.js';
@@ -160,10 +161,30 @@ export async function checkSingleWebSource(
   signal = null
 ) {
   try {
+    const resolvedPm = String(packageManager || '')
+      .trim()
+      .toLowerCase();
+    const resolvedPkgId = String(packageId || '').trim();
     const resolvedWingetId = getEffectiveWingetId({ packageManager, packageId, wingetId });
+    const hasProviderSource = Boolean(
+      !sourceType &&
+        resolvedPm &&
+        resolvedPm !== 'winget' &&
+        resolvedPm !== 'archive' &&
+        resolvedPkgId &&
+        getProvider(resolvedPm)?.capabilities?.show
+    );
     const effectiveType =
       sourceType ||
-      (resolvedWingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
+      (resolvedWingetId
+        ? 'winget'
+        : hasProviderSource
+          ? 'provider'
+          : url?.toLowerCase().includes('github.com')
+            ? 'github'
+            : url
+              ? 'web'
+              : 'none');
 
     /** @type {any} */
     let result = { success: false, error: 'Keine Online-Quelle konfiguriert.' };
@@ -171,6 +192,16 @@ export async function checkSingleWebSource(
     if (effectiveType === 'winget') {
       if (!resolvedWingetId) return { success: false, error: 'Keine Winget-ID angegeben.' };
       result = await fetchWingetInfo(resolvedWingetId, signal);
+    } else if (effectiveType === 'provider') {
+      const prov = getProvider(resolvedPm);
+      if (!prov?.capabilities?.show || !resolvedPkgId) {
+        return { success: false, error: 'Provider unterstützt keine Online-Versionsprüfung.' };
+      }
+      const res = await prov.show(resolvedPkgId, { forceRefresh: true, signal });
+      result =
+        res.success && res.package?.version
+          ? { success: true, version: res.package.version, package: res.package }
+          : { success: false, error: res.error || `Paket "${resolvedPkgId}" nicht gefunden.` };
     } else if (effectiveType === 'github') {
       if (!url) return { success: false, error: 'Keine GitHub-URL angegeben.' };
       result = await fetchGitHubRelease(url, githubAssetPattern, signal);
@@ -213,10 +244,15 @@ export async function checkAllWebVersions() {
 
   try {
     const catData = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
-    const itemsToCheck = catData.filter(
-      (i) =>
-        (i.webSourceType && i.webSourceType !== 'none') || Boolean(getEffectiveWingetId(i)) || Boolean(i.webVersionUrl)
-    );
+    const itemsToCheck = catData.filter((i) => {
+      if ((i.webSourceType && i.webSourceType !== 'none') || getEffectiveWingetId(i) || i.webVersionUrl) {
+        return true;
+      }
+      const pm = String(i.packageManager || '')
+        .trim()
+        .toLowerCase();
+      return Boolean(pm && pm !== 'archive' && i.packageId && getProvider(pm)?.capabilities?.show);
+    });
 
     if (itemsToCheck.length === 0) {
       job.finish('done', 'Keine Programme mit Online-Prüfung konfiguriert.');

@@ -544,13 +544,21 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
       }
 
       const existingArchiveLink = findExistingArchiveLink(entry.source, entry.packageId);
-      job.update(basePct, `${prefix}: Installiere über ${provider.name}...`);
-      const provRes = await provider.install(entry.packageId, {
-        silent: entry.willRunSilent,
-        itemName: entry.name,
-        signal: job.signal,
-        useJob: false,
-      });
+      const isUpgradeAction = entry.action === 'update' && typeof provider.upgrade === 'function';
+      job.update(basePct, `${prefix}: ${isUpgradeAction ? 'Aktualisiere' : 'Installiere'} über ${provider.name}...`);
+      const provRes = isUpgradeAction
+        ? await provider.upgrade(entry.packageId, {
+            silent: entry.willRunSilent,
+            itemName: entry.name,
+            signal: job.signal,
+            useJob: false,
+          })
+        : await provider.install(entry.packageId, {
+            silent: entry.willRunSilent,
+            itemName: entry.name,
+            signal: job.signal,
+            useJob: false,
+          });
 
       if (job.signal.aborted) break;
 

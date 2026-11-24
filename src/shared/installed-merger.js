@@ -202,10 +202,15 @@ function cleanRegistryEntries(entries, includeSystemComponents) {
   return [...deduped.values()];
 }
 
+const REGISTRY_MATCHABLE_PMS = new Set(['winget', 'msstore', 'scoop', 'chocolatey']);
+
 function findMatchingRegistryIndex(pkgItem, upgradeInfo, registryEntries, usedRegIndices, archiveLookup = null) {
   const pkgPm = String(pkgItem.packageManager || 'winget')
     .trim()
     .toLowerCase();
+  if (!REGISTRY_MATCHABLE_PMS.has(pkgPm)) {
+    return -1;
+  }
   const pkgId = String(pkgItem.packageId || '').trim();
   const pkgIdLower = pkgId.toLowerCase();
   const idSegments = pkgId
@@ -428,6 +433,8 @@ export function mergeInstalledSoftware({
         name: String(pkg?.name || pkgId).trim(),
         version: String(pkg?.version || pkg?.installedVersion || '').trim(),
         bucket: String(pkg?.bucket || '').trim(),
+        isActive: Boolean(pkg?.isActive),
+        arch: String(pkg?.arch || '').trim(),
         source: String(pkg?.source || pm).trim(),
       });
     }
@@ -442,6 +449,8 @@ export function mergeInstalledSoftware({
         name: String(up.name || pkgId).trim(),
         version: String(up.installedVersion || '').trim(),
         bucket: String(up.bucket || '').trim(),
+        isActive: Boolean(up.isActive),
+        arch: String(up.arch || '').trim(),
         source: String(up.source || pm).trim(),
       });
     }
@@ -513,6 +522,8 @@ export function mergeInstalledSoftware({
       packageManager: provPkg.packageManager,
       packageId: provPkg.packageId,
       bucket: provPkg.bucket || '',
+      isActive: Boolean(provPkg.isActive),
+      arch: provPkg.arch || '',
       source: provPkg.source || up?.source || provPkg.packageManager,
       uninstallString: reg?.uninstallString || '',
       quietUninstallString: reg?.quietUninstallString || '',

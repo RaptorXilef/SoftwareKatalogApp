@@ -4,6 +4,7 @@ import { buildUnifiedPackages, computeTabCounts, getBaseName, getPackageStatus }
 export { getBaseName };
 
 let providersInitialized = false;
+const knownUsableSearchProviders = new Set();
 
 export const state = {
   catalog: [],
@@ -175,8 +176,17 @@ export async function refreshProviders({ checkAvailability = false } = {}) {
   if (!providersInitialized) {
     providersInitialized = true;
     state.discoverSelectedProviders = searchableUsable;
+    for (const id of searchableUsable) knownUsableSearchProviders.add(id);
   } else {
     state.discoverSelectedProviders = state.discoverSelectedProviders.filter((id) => usableSet.has(id));
+    for (const id of searchableUsable) {
+      if (!knownUsableSearchProviders.has(id)) {
+        knownUsableSearchProviders.add(id);
+        if (!state.discoverSelectedProviders.includes(id)) {
+          state.discoverSelectedProviders.push(id);
+        }
+      }
+    }
     if (state.discoverSelectedProviders.length === 0 && searchableUsable.length > 0) {
       state.discoverSelectedProviders = searchableUsable;
     }

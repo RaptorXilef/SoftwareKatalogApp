@@ -360,9 +360,8 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
       return;
     }
 
-    const onlyArchive =
-      state.discoverSelectedProviders.length === 1 && state.discoverSelectedProviders[0] === 'archive';
-    if (!onlyArchive && query.length < 2) {
+    const onlyLocalOrNvm = state.discoverSelectedProviders.every((id) => id === 'archive' || id === 'nvm');
+    if (!onlyLocalOrNvm && query.length < 2) {
       showToast('Bitte mindestens 2 Zeichen für die Suche eingeben.', { type: 'info' });
       return;
     }

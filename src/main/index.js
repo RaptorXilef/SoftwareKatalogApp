@@ -33,6 +33,7 @@ import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
 import { installProviderManager, uninstallProviderManager } from './providers/manager-bootstrap.js';
 import { installLocalMsi, readMsiFileMetadata } from './providers/msi-provider.js';
+import { useNvmVersion } from './providers/nvm-provider.js';
 import {
   checkAllProvidersAvailability,
   checkProviderAvailability,
@@ -230,6 +231,7 @@ function registerIpcHandlers() {
   handleIpc('providers-cache-clear', () => clearProviderCache());
   handleIpc('msi-inspect-file', (_e, filePath) => readMsiFileMetadata(filePath));
   handleIpc('msi-install-local', (_e, payload) => installLocalMsi(payload || {}));
+  handleIpc('nvm-use-version', (_e, version) => useNvmVersion(version));
 
   // Archiv-Linker (Aufnehmen & Verknüpfen generischer Pakete im Archiv)
   handleIpc('archive-check-collision', (_e, targetDir) => checkArchiveTargetCollision(targetDir));

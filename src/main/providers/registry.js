@@ -1,9 +1,14 @@
 import { normalizeProviderCategory, normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
+import { bunProvider } from './bun-provider.js';
 import { chocoProvider } from './choco-provider.js';
+import { composerProvider } from './composer-provider.js';
 import { msiProvider } from './msi-provider.js';
 import { msstoreProvider } from './msstore-provider.js';
+import { npmProvider } from './npm-provider.js';
+import { nvmProvider } from './nvm-provider.js';
+import { pnpmProvider } from './pnpm-provider.js';
 import { scoopProvider } from './scoop-provider.js';
 import { getWingetCache, wingetProvider } from './winget-provider.js';
 
@@ -21,8 +26,6 @@ const CAPABILITY_KEYS = [
  * Strukturell vorbereitete Liste künftiger Paketquellen (noch nicht registriert/implementiert).
  */
 export const PLANNED_PROVIDERS = [
-  { id: 'npm', name: 'npm', status: 'planned' },
-  { id: 'bun', name: 'Bun', status: 'planned' },
   { id: 'pip', name: 'pip', status: 'planned' },
   { id: 'cargo', name: 'Cargo', status: 'planned' },
   { id: 'vcpkg', name: 'vcpkg', status: 'planned' },
@@ -116,6 +119,11 @@ export function initDefaultProviders() {
   registerProvider(scoopProvider);
   registerProvider(chocoProvider);
   registerProvider(msiProvider);
+  registerProvider(npmProvider);
+  registerProvider(bunProvider);
+  registerProvider(nvmProvider);
+  registerProvider(pnpmProvider);
+  registerProvider(composerProvider);
 }
 
 export function getProvider(id) {

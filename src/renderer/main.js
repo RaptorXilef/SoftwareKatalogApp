@@ -426,7 +426,9 @@ document.addEventListener(
     if (target.classList.contains('card-icon')) {
       const card = target.closest('.card');
       const id = card instanceof HTMLElement ? card.dataset.id : '';
-      const isPcOnly = Boolean(id && /^(?:winget|scoop|chocolatey|msstore|msi|registry):/.test(id));
+      const isPcOnly = Boolean(
+        id && /^(?:winget|scoop|chocolatey|msstore|msi|npm|bun|nvm|pnpm|composer|registry):/.test(id)
+      );
       const fallback = document.createElement('div');
       fallback.className = 'card-icon-fallback';
       fallback.textContent = isPcOnly ? '💻' : '📦';
@@ -435,7 +437,7 @@ document.addEventListener(
     }
     if (target.classList.contains('detail-icon')) {
       const id = state.currentModalId || '';
-      const isPcOnly = /^(?:winget|scoop|chocolatey|msstore|msi|registry):/.test(id);
+      const isPcOnly = /^(?:winget|scoop|chocolatey|msstore|msi|npm|bun|nvm|pnpm|composer|registry):/.test(id);
       const fallback = document.createElement('div');
       fallback.className = 'detail-icon-fallback';
       fallback.textContent = id.startsWith('remote:') ? '🛍️' : isPcOnly ? '💻' : '📦';
@@ -607,17 +609,27 @@ async function bootstrap() {
       }
     },
     onCheckOnline: async () => {
-      const res = await window.electronAPI.checkWebVersions();
+      const [res, pcRes] = await Promise.all([
+        window.electronAPI.checkWebVersions(),
+        runInstalledScan({ silent: true }),
+      ]);
       if (res.alreadyRunning) {
         showToast('Online-Prüfung läuft bereits.', { type: 'info' });
         return;
       }
+      const providerUpd = pcRes?.success ? (pcRes.stats?.updatesAvailable ?? 0) : 0;
       if (res.success) {
         await reloadUI();
-        showToast(
-          res.count > 0 ? `${res.count} neue Online-Versionen gefunden!` : 'Alle Online-Quellen sind aktuell.',
-          { type: res.count > 0 ? 'success' : 'info' }
-        );
+        const archiveUpd = res.count || 0;
+        if (archiveUpd > 0 && providerUpd > 0) {
+          showToast(`${archiveUpd} Archiv- und ${providerUpd} Paketmanager-Updates gefunden!`, { type: 'success' });
+        } else if (archiveUpd > 0) {
+          showToast(`${archiveUpd} neue Online-Versionen gefunden!`, { type: 'success' });
+        } else if (providerUpd > 0) {
+          showToast(`${providerUpd} Paketmanager-Updates auf diesem PC verfügbar.`, { type: 'success' });
+        } else {
+          showToast('Alle Online-Quellen sind aktuell.', { type: 'info' });
+        }
       } else if (res.error && !res.canceled) {
         showToast(`Online-Prüfung fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
       }

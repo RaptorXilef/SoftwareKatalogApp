@@ -3,8 +3,30 @@ import { scoreCatalogItem } from './search.js';
 import { canDownloadOnline, getBaseName, getPackageStatus, isPackageVisible } from './unified-packages.js';
 import { compareVersions, extractVersion } from './version.js';
 
-const BUNDLE_SOURCES = Object.freeze(['archive', 'winget', 'scoop', 'chocolatey', 'msstore', 'msi']);
-const BUNDLE_REMOTE_SOURCES = Object.freeze(['winget', 'scoop', 'chocolatey', 'msstore']);
+const BUNDLE_SOURCES = Object.freeze([
+  'archive',
+  'winget',
+  'scoop',
+  'chocolatey',
+  'msstore',
+  'msi',
+  'npm',
+  'bun',
+  'nvm',
+  'pnpm',
+  'composer',
+]);
+const BUNDLE_REMOTE_SOURCES = Object.freeze([
+  'winget',
+  'scoop',
+  'chocolatey',
+  'msstore',
+  'npm',
+  'bun',
+  'nvm',
+  'pnpm',
+  'composer',
+]);
 export const DEFAULT_BUNDLE_ICON = '📦';
 export const BUNDLE_ICON_PRESETS = Object.freeze(['📦', '💻', '🛠️', '🎮', '🎬', '🚀', '🏢', '🧰', '🎨', '🔒']);
 
@@ -570,7 +592,9 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
           pkgStatus.localVersion &&
           compareVersions(pkgStatus.webVersion, pkgStatus.localVersion, versionCompareDepth) > 0
       );
-      isOutdated = Boolean(pkgStatus.hasWebUpdate || matchedPackage.hasWingetUpgrade || webNewerThanPc);
+      isOutdated = Boolean(
+        pkgStatus.hasWebUpdate || matchedPackage.hasWingetUpgrade || matchedPackage.hasProviderUpgrade || webNewerThanPc
+      );
     }
   }
 

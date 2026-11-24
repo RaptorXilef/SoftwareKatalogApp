@@ -119,6 +119,17 @@ function buildArchiveHeroAction(item, st) {
   return null;
 }
 
+function buildNvmUseButtonHtml(item, { large = false } = {}) {
+  if (getEffectivePackageManager(item) !== 'nvm' || !item.isInstalled) return '';
+  const pkgVer = getEffectivePackageId(item);
+  if (!pkgVer) return '';
+  if (item.isActive) {
+    return '<button type="button" class="btn btn-ghost" disabled>✅ Aktive Node-Version</button>';
+  }
+  const sizeCls = large ? 'btn-lg ' : '';
+  return `<button type="button" class="btn ${sizeCls}btn-local" data-detail-action="nvm-use">✅ Als aktive Node-Version setzen (nvm use ${escapeHTML(pkgVer)})</button>`;
+}
+
 function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) {
   const buttons = [];
   const provLabel = provMeta.label || 'Paketmanager';
@@ -135,6 +146,11 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
       `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(installLabel)}</button>`
     );
 
+    const nvmBtn = buildNvmUseButtonHtml(item);
+    if (nvmBtn) {
+      buttons.push(nvmBtn);
+    }
+
     if (matchedArchive) {
       buttons.push(
         '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
@@ -145,7 +161,10 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
       );
     }
   } else if (item.origin === 'pc') {
-    if (canProviderInstall && st.hasWebUpdate) {
+    const nvmBtn = buildNvmUseButtonHtml(item, { large: true });
+    if (nvmBtn) {
+      buttons.push(nvmBtn);
+    } else if (canProviderInstall && st.hasWebUpdate) {
       buttons.push(
         `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
       );
@@ -641,6 +660,11 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
       `<div class="pkg-profile-item"><span class="pkg-profile-label">Startseite</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.homepage)}">${escapeHTML(pkg.homepage)} ↗</button></div></div>`
     );
   }
+  if (pkg.repositoryUrl && pkg.repositoryUrl !== pkg.homepage) {
+    gridItems.push(
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">Repository</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.repositoryUrl)}">${escapeHTML(pkg.repositoryUrl)} ↗</button></div></div>`
+    );
+  }
   if (pmLabel) {
     gridItems.push(
       `<div class="pkg-profile-item"><span class="pkg-profile-label">Paketmanager</span><div class="pkg-profile-val">${escapeHTML(pmLabel)}</div></div>`
@@ -711,6 +735,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const extraProviderChip = ORIGIN_CHIPS[item.origin] ? providerChip : '';
 
   const newChip = isItemNew(item) ? '<span class="card-chip chip-new">NEU</span>' : '';
+  const nvmActiveChip =
+    effectivePm === 'nvm' && item.isActive
+      ? '<span class="card-chip chip-install-silent" title="Aktuell aktive Node.js-Version">⚡ Aktiv</span>'
+      : '';
   const typeChip =
     item.softwareType === 'portable'
       ? '<span class="card-chip">Portabel</span>'
@@ -803,6 +831,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
             ${inArchiveRemoteChip}
             ${offlineArchiveChip}
             ${multiRootChip}
+            ${nvmActiveChip}
             ${newChip}
             ${typeChip}
             ${keepChip}
@@ -1296,6 +1325,38 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       else if (res.error) showToast(`Kopierfehler: ${res.error}`, { type: 'error' });
     } else if (action === 'provider-install') {
       await runProviderInstallFlow(btn);
+    } else if (action === 'nvm-use' && effectivePm === 'nvm' && effectivePkgId) {
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      const origText = btn.textContent || '';
+      btn.textContent = '⏳ Aktiviere Node-Version...';
+      showToast(`Aktiviere Node.js v${effectivePkgId} über NVM...`, { type: 'info' });
+
+      const res = await window.electronAPI.useNvmVersion(effectivePkgId);
+      if (isStillActive() && btn instanceof HTMLButtonElement) {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
+
+      if (res?.alreadyRunning) {
+        showToast('Es wird bereits eine Node-Version umgeschaltet.', { type: 'warn' });
+      } else if (res?.canceled) {
+        showToast('Umschalten wurde abgebrochen.', { type: 'info' });
+      } else if (res?.success) {
+        showToast(`Node.js v${effectivePkgId} ist jetzt aktiv!`, { type: 'success' });
+        await triggerCatalogReload({ rescanInstalled: true });
+        if (isStillActive()) {
+          if (item.origin === 'remote') {
+            renderRemoteDetailModal(effectivePm, effectivePkgId, loadedPkgProfile || item);
+          } else {
+            renderDetailModal(item.id);
+          }
+        }
+      } else {
+        showToast(`NVM-Fehler: ${res?.error || 'Node-Version konnte nicht aktiviert werden.'}`, {
+          type: 'error',
+          duration: 6000,
+        });
+      }
     } else if (action === 'save-to-archive') {
       const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
       const res = await savePackageToArchive(buildArchivePayloadFromItem(), {
