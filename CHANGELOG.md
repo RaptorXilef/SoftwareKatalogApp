@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.23.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.22.0...v1.23.0) (2026-11-24)
+
+### 🚀 Features
+
+* **archive:** support prioritized multi-root archive paths and fix reported diagnostics ([a45b17c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/a45b17c7ebad0aa459c7a0c37d6ecd0bcb5fff90))
+* **bundles:** implement software bundles service, PC snapshot, and execution queue ([6dffaed](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/6dffaed072078354ccf870d4f2c8ad714768c3d1))
+* **installer:** add installer type detection, opt-in silent install and adware protection ([2dbcf0d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2dbcf0d4198decb14bf0ba75d3abe357193db3e1))
+* **modals:** unify detail modal across origins and add archive collision & provider settings ([c3bc757](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c3bc757e55044b864faef8c5a42180d19d4cbb2d))
+* **power-tools:** add winget archive matcher, batch updates, and manual archive cleaner ([2b98e29](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2b98e294882f2db39d9ca7bfa1742e6721e67e29))
+* **providers:** add provider registry, winget offline cache, PC scanner and archive linker ([f4eb8ce](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f4eb8cec63ac82ce512fa37f440a8b22f13f1aa8))
+* **queue:** add sequential visual update queue in main process and Updates tab ([f832088](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f83208888b99149c508594e2fd5f49b8bf4b2648))
+* **renderer:** implement 5-tab navigation, unified package state, and Archive terminology ([27d4eee](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/27d4eee73bcd57a5ad79ea3912af0ac0d4be97fd))
+* **search,metadata:** Add weighted relevance search, auto-fill details, and live changelogs ([12bcba8](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/12bcba86afe8907d3f9bdeb7369ff6830566e3ad))
+* **ux:** add configurable startTab, detail-modal silent/interactive toggle, and additive Winget + meta.json display ([0a43b19](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/0a43b19a7a031409570a3e794f31bbbb065c777e))
+
+### 🐛 Bug Fixes
+
+* **bundles:** harden IPC registration, show all archive & winget packages in editor, and complete export/import ([1a0f1f5](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/1a0f1f54872f4961e3b07389e75434560197ee0c))
+* **icons:** enforce strict registry matching, collision-free icon cache, multi-stage extraction, and archive icon priority ([de7ce68](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/de7ce6872700eaf787c12f14a40f30a92b76dd13))
+* **main:** Import missing fetchSoftwareMetadata and fetchChangelog IPC handlers ([8886b3c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/8886b3c2c91ad80c2de6b41c5e14f03cefe0a648))
+* **renderer:** resolve audit findings, modal listener leaks, and dev bundles-load lock ([5ae8515](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/5ae851520d3441a4458aefbbee896f8f546f7e34))
+* **tooling:** resolve ESM warnings and all 181 typecheck errors ([4af958d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/4af958ddf86bdcca06ea4722073df69d9eb29fbc))
+
+### ⚙️ Refactoring
+
+* **cleanup:** remove unused internal exports, test provider registry, and fix JSDoc types ([aeb5713](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/aeb5713082a648fb07cc4e8b245d626f23123769))
+
+### 🧪 Tests
+
+* **suite:** add comprehensive node:test integration suite and enable dev --watch ([b56d096](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/b56d0966ee6ce0ef0850acbf147a7d4a3ad47fe9))
+
+### 🧹 Chore / Maintenance
+
+* **tooling:** Add TypeScript checkJs typechecking, Knip dead-code analysis, and pre-commit checks ([29ae241](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/29ae2418a6d4541f87de9335cca81472bbc3ebf9))
+* **tooling:** Tune jsconfig for ESNext/checkJs, fix local Knip schema, and activate Husky pre-commit ([152a790](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/152a790d8eb424e36375ad04987f2fb2cc1871ba))
+
 ## [1.22.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.21.0...v1.22.0) (2026-11-19)
 
 ### 🚀 Features
