@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.26.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.25.0...v1.26.0) (2026-11-24)
+
+### 🚀 Features
+
+* **auth:** add optional scrypt admin authentication and HKLM policy protection ([7c57841](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/7c57841ec265d6d42da69176cb4c41ce88b40a02))
+
 ## [1.25.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.24.1...v1.25.0) (2026-11-24)
 
 ### 🚀 Features
