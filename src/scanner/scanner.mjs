@@ -10,9 +10,10 @@ import {
   normalizeArchivePaths,
   normalizePathKey,
 } from '../shared/multi-archive-logic.js';
+import { resolveScannerAppDir } from '../shared/scanner-path-logic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const APP_DIR = process.env.SK_APP_DIR ? path.resolve(process.env.SK_APP_DIR) : path.resolve(__dirname, '../..');
+const APP_DIR = resolveScannerAppDir(__dirname, process.env);
 const DATA_DIR = process.env.SK_DATA_DIR ? path.resolve(process.env.SK_DATA_DIR) : path.join(APP_DIR, 'data');
 
 const META_FOLDER_NAME = '_metadata';

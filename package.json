@@ -64,11 +64,12 @@
     "publish": null,
     "files": [
       "out/**/*",
+      "!out/scanner/**/*",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "src/scanner/scanner.mjs",
+        "from": "out/scanner/scanner.mjs",
         "to": "scanner.mjs"
       },
       {
