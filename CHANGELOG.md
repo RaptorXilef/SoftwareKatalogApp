@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.27.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.26.0...v1.27.0) (2026-11-24)
+
+### 🚀 Features
+
+* **installer:** add Windows NSIS installer, install-mode data path fallback and arch-aware self-updater ([24d47a0](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/24d47a0a6a1eb45f95108b34aea896c41efaf80a))
+* **policy:** implement whitelist/blacklist and silent-only access policies ([9b436dc](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9b436dc40cf265d7ac43ad4cbde1b197fbc1836d))
+* **updates,settings:** show live provider scan progress and save policies from settings footer ([46e8ed4](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/46e8ed483ae527071101d7f4fd383219216fac90))
+
 ## [1.26.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.25.0...v1.26.0) (2026-11-24)
 
 ### 🚀 Features
