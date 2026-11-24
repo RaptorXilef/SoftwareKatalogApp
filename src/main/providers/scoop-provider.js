@@ -49,11 +49,21 @@ async function runScoop(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } 
     timeoutMs: 5000,
     extraPaths: getScoopExtraPaths(),
   });
-  const binary = scoopCmd || 'scoop';
-  return runCli(binary, args, {
+  if (process.platform === 'win32' && !scoopCmd) {
+    return {
+      code: -1,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      aborted: Boolean(signal?.aborted),
+      notFound: true,
+      error: 'Scoop ist auf diesem PC nicht verfügbar.',
+      errorCode: 'ENOENT',
+    };
+  }
+  return runCli(scoopCmd || 'scoop', args, {
     signal,
     timeoutMs,
-    shell: process.platform === 'win32',
     windowsHide: true,
   });
 }

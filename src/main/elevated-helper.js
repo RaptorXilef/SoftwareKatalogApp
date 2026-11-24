@@ -4,8 +4,62 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { buildSafeSpawnSpec } from '../shared/cli-spawn-logic.js';
 
 export const PIPE_PREFIX = 'SoftwareKatalog_Elev_';
+
+/**
+ * Loest den Standardpfad zu `elevated-worker.mjs` fuer Dev-Modus und gepackten Build auf.
+ * @param {{ isPackaged?: boolean, resourcesPath?: string, appPath?: string, moduleDir?: string }} [options]
+ * @returns {string}
+ */
+export function resolveDefaultWorkerPath({
+  isPackaged = false,
+  resourcesPath = process.resourcesPath || '',
+  appPath = process.cwd(),
+  moduleDir = '',
+} = {}) {
+  const candidates = isPackaged
+    ? [
+        resourcesPath ? path.join(resourcesPath, 'elevated-worker.mjs') : '',
+        appPath ? path.join(appPath, 'resources', 'elevated-worker.mjs') : '',
+      ]
+    : [
+        appPath ? path.join(appPath, 'src', 'main', 'elevated-worker.mjs') : '',
+        moduleDir ? path.resolve(moduleDir, 'elevated-worker.mjs') : '',
+        moduleDir ? path.resolve(moduleDir, '../../src/main/elevated-worker.mjs') : '',
+      ];
+
+  const filtered = candidates.filter(Boolean);
+  for (const candidate of filtered) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Ignorieren
+    }
+  }
+  return filtered[0] || path.resolve(process.cwd(), 'src', 'main', 'elevated-worker.mjs');
+}
+
+/**
+ * Erstellt den sauber gequoteten `cmd.exe`-Argument-String zum Starten des Node-Workers via `ELECTRON_RUN_AS_NODE=1`.
+ * @param {string} execPath
+ * @param {string} workerPath
+ * @param {string} cfgPath
+ * @returns {string}
+ */
+export function buildWorkerLaunchArgString(execPath, workerPath, cfgPath) {
+  const sanitizePathArg = (val) =>
+    String(val || '')
+      .replace(/[\r\n\0"]/g, '')
+      .trim();
+  const cleanExec = sanitizePathArg(execPath);
+  const cleanWorker = sanitizePathArg(workerPath);
+  const cleanCfg = sanitizePathArg(cfgPath);
+  return `/d /s /c "set "ELECTRON_RUN_AS_NODE=1"&&"${cleanExec}" "${cleanWorker}" "${cleanCfg}""`;
+}
 
 const VALID_ACTIONS = new Set(['ping', 'exec', 'powershell', 'start-process', 'shutdown']);
 
@@ -21,7 +75,7 @@ function killProcessTree(child) {
   if (!child) return;
   if (process.platform === 'win32' && child.pid) {
     try {
-      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true });
     } catch {
       // Ignorieren
     }
@@ -276,7 +330,10 @@ function defaultDirectExec(
   }
 
   return new Promise((resolve) => {
-    const useShell = shell ?? (process.platform === 'win32' && /\.(cmd|bat)$/i.test(cleanCommand));
+    const spec = buildSafeSpawnSpec(cleanCommand, Array.isArray(args) ? args : [], {
+      platform: process.platform,
+      shell: Boolean(shell),
+    });
     /** @type {any} */
     let child = null;
     let stdout = '';
@@ -310,10 +367,10 @@ function defaultDirectExec(
     };
 
     try {
-      child = spawn(cleanCommand, Array.isArray(args) ? args : [], {
+      child = spawn(spec.command, spec.args, {
         windowsHide,
         cwd,
-        shell: useShell,
+        ...spec.spawnOptions,
       });
     } catch (err) {
       const errCode = err?.code || null;
@@ -484,20 +541,13 @@ async function defaultLaunchWorker({ pipeName, token, workerPath, tempDir }) {
     return { success: false, error: `Konfigurationsdatei konnte nicht geschrieben werden: ${err.message}` };
   }
 
-  const safeCfgPath = escapeSingleQuotedPs(cfgPath);
-  const safeWorkerPath = escapeSingleQuotedPs(workerPath);
+  const cmdArgs = buildWorkerLaunchArgString(process.execPath, workerPath, cfgPath);
   const launcherScript = `
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
     $ErrorActionPreference = 'Stop'
     try {
-      $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-      if ($sid -and (Test-Path -LiteralPath '${safeCfgPath}')) {
-        $raw = Get-Content -LiteralPath '${safeCfgPath}' -Raw -Encoding UTF8 | ConvertFrom-Json
-        $raw | Add-Member -NotePropertyName 'parentSid' -NotePropertyValue $sid -Force
-        [System.IO.File]::WriteAllText('${safeCfgPath}', ($raw | ConvertTo-Json -Depth 3 -Compress), (New-Object System.Text.UTF8Encoding($false)))
-      }
-      $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', '${safeWorkerPath}', '-ConfigPath', '${safeCfgPath}') -Verb RunAs -PassThru -ErrorAction Stop
+      $p = Start-Process -FilePath 'cmd.exe' -ArgumentList '${escapeSingleQuotedPs(cmdArgs)}' -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
       Write-Output "SK_ELEV_PID:$($p.Id)"
     } catch {
       Write-Output "SK_ELEV_ERR:$($_.Exception.Message)"
@@ -560,7 +610,7 @@ export function createElevatedHelperService(deps = {}) {
   let resolveWorkerPath =
     typeof deps.resolveWorkerPath === 'function'
       ? deps.resolveWorkerPath
-      : () => path.resolve(process.cwd(), 'src', 'main', 'elevated-worker.ps1');
+      : () => resolveDefaultWorkerPath({ appPath: process.cwd() });
 
   const checkElevationFn =
     typeof deps.checkElevationFn === 'function' ? deps.checkElevationFn : () => defaultCheckElevation(platform);
@@ -584,7 +634,7 @@ export function createElevatedHelperService(deps = {}) {
       : (pid) => {
           if (platform === 'win32' && pid > 0) {
             try {
-              spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+              spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { shell: false, windowsHide: true });
             } catch {
               // Ignorieren
             }
@@ -1007,7 +1057,7 @@ export function createElevatedHelperService(deps = {}) {
       sessionActive = true;
       activePipeName = pipeName;
       activeToken = token;
-      workerPid = launchRes.workerPid || readyRes.pid || null;
+      workerPid = readyRes.pid || launchRes.workerPid || null;
       startedAt = Date.now();
       notifyStatusChange();
 

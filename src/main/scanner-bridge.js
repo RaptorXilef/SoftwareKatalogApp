@@ -52,6 +52,8 @@ export async function runArchiveScan(mode = 'smart') {
 
     child = spawn(process.execPath, args, {
       cwd: appFolder,
+      shell: false,
+      windowsHide: true,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -140,6 +142,8 @@ export async function scanSingleFolder(absSoftwarePath) {
     /** @type {any} */
     const child = spawn(process.execPath, [absScriptPath, '--single', absSoftwarePath], {
       cwd: appFolder,
+      shell: false,
+      windowsHide: true,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',

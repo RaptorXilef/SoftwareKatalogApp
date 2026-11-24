@@ -35,15 +35,26 @@ function parseComposerVersionOutput(stdout) {
 }
 
 async function runComposer(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const composerBin = await findBinaryPath('composer', {
+  const composerBin = await findBinaryPath(process.platform === 'win32' ? 'composer.bat' : 'composer', {
     signal,
     timeoutMs: 5000,
     extraPaths: getComposerExtraPaths(),
   });
+  if (process.platform === 'win32' && !composerBin) {
+    return {
+      code: -1,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      aborted: Boolean(signal?.aborted),
+      notFound: true,
+      error: 'Composer ist auf diesem PC nicht verfügbar.',
+      errorCode: 'ENOENT',
+    };
+  }
   return runCli(composerBin || 'composer', args, {
     signal,
     timeoutMs,
-    shell: process.platform === 'win32',
     windowsHide: true,
   });
 }
@@ -88,7 +99,7 @@ export const composerProvider = {
   },
 
   checkAvailability: createCliAvailabilityChecker({
-    binary: 'composer',
+    binary: process.platform === 'win32' ? 'composer.bat' : 'composer',
     versionArgs: ['--version'],
     extraPaths: getComposerExtraPaths,
     parseVersion: parseComposerVersionOutput,

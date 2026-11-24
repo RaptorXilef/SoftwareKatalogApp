@@ -33,6 +33,7 @@ import {
   getAdminSessionStatus,
   isAdminSessionActive,
   isProcessElevated,
+  resolveDefaultWorkerPath,
   startAdminSession,
   stopAdminSession,
 } from './elevated-helper.js';
@@ -365,9 +366,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 } else {
   configureElevatedHelper({
     resolveWorkerPath: () =>
-      app.isPackaged
-        ? path.join(process.resourcesPath, 'elevated-worker.ps1')
-        : path.join(getAppFolder(), 'src', 'main', 'elevated-worker.ps1'),
+      resolveDefaultWorkerPath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath || '',
+        appPath: app.isPackaged ? getAppFolder() : app.getAppPath(),
+        moduleDir: __dirname,
+      }),
     onStatusChange: (status) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {

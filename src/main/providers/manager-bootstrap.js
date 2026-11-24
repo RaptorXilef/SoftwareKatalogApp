@@ -28,6 +28,14 @@ export function createCliAvailabilityChecker({
     try {
       const resolvedExtra = typeof extraPaths === 'function' ? extraPaths() : extraPaths;
       const binaryPath = await findBinaryPath(binary, { signal, timeoutMs, extraPaths: resolvedExtra });
+      if (process.platform === 'win32' && !binaryPath && /\.(cmd|bat)$/i.test(binary)) {
+        return {
+          available: false,
+          version: null,
+          binaryPath: null,
+          error: notFoundMessage || `${binary} ist auf diesem PC nicht installiert.`,
+        };
+      }
       const executable = binaryPath || binary;
 
       const res = await runCli(executable, versionArgs, { signal, timeoutMs });

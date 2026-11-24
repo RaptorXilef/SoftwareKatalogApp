@@ -37,7 +37,6 @@ async function runPnpm(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } =
   return runCli(pnpmBin || 'pnpm', args, {
     signal,
     timeoutMs,
-    shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(pnpmBin || ''),
     windowsHide: true,
   });
 }

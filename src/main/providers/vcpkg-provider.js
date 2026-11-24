@@ -226,12 +226,10 @@ export const vcpkgProvider = {
     }
 
     onProgress?.(60, 'Fuehre bootstrap-vcpkg.bat aus...');
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    const bootRes = await runCli(comspec, ['/d', '/s', '/c', bootstrapBat, '-disableMetrics'], {
+    const bootRes = await runCli(bootstrapBat, ['-disableMetrics'], {
       cwd: targetDir,
       signal,
       timeoutMs: 15 * 60 * 1000,
-      shell: false,
       windowsHide: true,
     });
     if (bootRes.aborted) return { success: false, canceled: true };

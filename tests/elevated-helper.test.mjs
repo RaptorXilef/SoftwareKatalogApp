@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -6,6 +7,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import {
   buildElevatedCommandPayload,
+  buildWorkerLaunchArgString,
   createElevatedHelperService,
   generatePipeName,
   generateSessionToken,
@@ -13,6 +15,7 @@ import {
   isUacCanceledError,
   PIPE_PREFIX,
   parsePipeMessage,
+  resolveDefaultWorkerPath,
   serializePipeMessage,
   validateSessionToken,
 } from '../src/main/elevated-helper.js';
@@ -353,5 +356,122 @@ describe('elevated-helper: End-to-End Pipe-Protokoll & Abbruch-Handling', () => 
     assert.ok(statusEvents.includes('off'));
     assert.ok(receivedRequests.some((r) => r.action === 'shutdown'));
     assert.ok(sockPath.endsWith('.sock'));
+  });
+});
+
+describe('elevated-helper: Worker-Pfadaufloesung, Quoting & echter Node-Worker', () => {
+  it('loest elevated-worker.mjs im Dev- und Packaged-Modus auf und quotet Pfade mit Leerzeichen', () => {
+    const devWorker = resolveDefaultWorkerPath({ isPackaged: false, appPath: process.cwd() });
+    assert.equal(devWorker, path.join(process.cwd(), 'src', 'main', 'elevated-worker.mjs'));
+    assert.equal(fs.existsSync(devWorker), true);
+
+    const packagedWorker = resolveDefaultWorkerPath({
+      isPackaged: true,
+      resourcesPath: 'C:\\Program Files\\Software Katalog\\resources',
+    });
+    assert.equal(packagedWorker, path.join('C:\\Program Files\\Software Katalog\\resources', 'elevated-worker.mjs'));
+
+    const cmdArgStr = buildWorkerLaunchArgString(
+      'C:\\Program Files\\Software Katalog\\Software Katalog.exe',
+      'C:\\Program Files\\Software Katalog\\resources\\elevated-worker.mjs',
+      'C:\\Users\\Max Mustermann\\AppData\\Local\\Temp\\sk_elev_cfg.json'
+    );
+    assert.equal(
+      cmdArgStr,
+      '/d /s /c "set "ELECTRON_RUN_AS_NODE=1"&&"C:\\Program Files\\Software Katalog\\Software Katalog.exe" "C:\\Program Files\\Software Katalog\\resources\\elevated-worker.mjs" "C:\\Users\\Max Mustermann\\AppData\\Local\\Temp\\sk_elev_cfg.json""'
+    );
+  });
+
+  it('startet den echten elevated-worker.mjs Prozess und prueft ping, UNAUTHORIZED, exec & shutdown', async (t) => {
+    const workerPath = resolveDefaultWorkerPath({ isPackaged: false, appPath: process.cwd() });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-real-worker-'));
+    const cfgPath = path.join(tempDir, 'worker cfg.json');
+    let workerProc = null;
+    let activePipeName = '';
+
+    t.after(() => {
+      if (workerProc && !workerProc.killed) {
+        try {
+          workerProc.kill('SIGKILL');
+        } catch {
+          // Ignorieren
+        }
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    const service = createElevatedHelperService({
+      platform: process.platform,
+      tempDir,
+      pingTimeoutMs: 5000,
+      pingIntervalMs: 50,
+      checkElevationFn: async () => false,
+      killPidFn: () => {},
+      resolveWorkerPath: () => workerPath,
+      launchWorkerFn: async ({ pipeName, token, workerPath: resolvedWorker }) => {
+        activePipeName = pipeName;
+        fs.writeFileSync(
+          cfgPath,
+          JSON.stringify({
+            pipeName,
+            token,
+            parentPid: process.pid,
+            cancelDir: tempDir,
+          }),
+          'utf8'
+        );
+        workerProc = spawn(process.execPath, [resolvedWorker, cfgPath], {
+          shell: false,
+          windowsHide: true,
+        });
+        return { success: true, workerPid: workerProc.pid };
+      },
+    });
+
+    if (process.platform !== 'win32') return;
+
+    const startRes = await service.startSession();
+    assert.equal(startRes.success, true);
+    assert.equal(service.isSessionActive(), true);
+    assert.equal(fs.existsSync(cfgPath), false);
+
+    // Falscher Token an echte Pipe -> UNAUTHORIZED
+    const unauthRes = await new Promise((resolve, reject) => {
+      const client = net.createConnection(getPipePath(activePipeName, process.platform), () => {
+        client.write(
+          serializePipeMessage(buildElevatedCommandPayload({ token: generateSessionToken(), action: 'ping' }))
+        );
+      });
+      let buf = '';
+      client.on('data', (chunk) => {
+        buf += chunk.toString('utf8');
+        if (buf.includes('\n')) {
+          const parsed = parsePipeMessage(buf);
+          client.destroy();
+          resolve(parsed);
+        }
+      });
+      client.on('error', reject);
+    });
+    assert.equal(unauthRes.valid, true);
+    if (unauthRes.valid) {
+      assert.equal(unauthRes.message.ok, false);
+      assert.equal(unauthRes.message.error, 'UNAUTHORIZED');
+    }
+
+    const execRes = await service.runCommandElevated(process.execPath, ['-e', "console.log('WORKER_OK')"], {
+      timeoutMs: 10000,
+    });
+    assert.equal(execRes.code, 0);
+    assert.equal(execRes.stdout.trim(), 'WORKER_OK');
+
+    const exitPromise = new Promise((resolve) => {
+      workerProc.once('exit', (code) => resolve(code));
+    });
+    const stopRes = await service.stopSession();
+    assert.equal(stopRes.success, true);
+    assert.equal(service.isSessionActive(), false);
+    const workerExitCode = await exitPromise;
+    assert.equal(workerExitCode, 0);
   });
 });

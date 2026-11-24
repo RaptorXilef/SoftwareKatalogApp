@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { buildSafeSpawnSpec, isWindowsBatchCommand, pickBestWindowsExecutable } from '../../shared/cli-spawn-logic.js';
 import {
   isAdminSessionActive,
   isProcessElevated,
@@ -19,7 +20,7 @@ function killProcessTree(child) {
   if (!child) return;
   if (process.platform === 'win32' && child.pid) {
     try {
-      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true });
     } catch {
       // Ignorieren
     }
@@ -83,14 +84,14 @@ export async function runCli(
     };
   }
 
-  const useShell = shell ?? (process.platform === 'win32' && /\.(cmd|bat)$/i.test(cleanCommand));
+  const wantsCmdWrapper = Boolean(shell) || (process.platform === 'win32' && isWindowsBatchCommand(cleanCommand));
   if (preferElevated === true && isAdminSessionActive() && !(await isProcessElevated())) {
     const elevatedRes = await runCommandElevated(cleanCommand, Array.isArray(args) ? args : [], {
       signal,
       timeoutMs,
       cwd,
       windowsHide,
-      shell: useShell,
+      shell: wantsCmdWrapper,
     });
     if (!elevatedRes.notElevated) {
       if (elevatedRes.stdout && typeof onStdout === 'function') onStdout(elevatedRes.stdout);
@@ -109,6 +110,10 @@ export async function runCli(
   }
 
   return new Promise((resolve) => {
+    const spawnSpec = buildSafeSpawnSpec(cleanCommand, Array.isArray(args) ? args : [], {
+      platform: process.platform,
+      shell: Boolean(shell),
+    });
     /** @type {any} */
     let child = null;
     let stdout = '';
@@ -148,11 +153,11 @@ export async function runCli(
     };
 
     try {
-      child = spawn(cleanCommand, Array.isArray(args) ? args : [], {
+      child = spawn(spawnSpec.command, spawnSpec.args, {
         windowsHide,
         cwd,
         env,
-        shell: useShell,
+        ...spawnSpec.spawnOptions,
       });
     } catch (err) {
       const errCode = err?.code || null;
@@ -248,14 +253,21 @@ export async function findBinaryPath(binaryName, { signal = null, timeoutMs = 50
     .map((line) => line.trim())
     .filter(Boolean);
 
+  const existingFiles = [];
   for (const line of lines) {
     try {
       if (fs.existsSync(line) && fs.statSync(line).isFile()) {
-        return line;
+        existingFiles.push(line);
       }
     } catch {
       // Weiter prüfen
     }
+  }
+  if (existingFiles.length > 0) {
+    if (process.platform === 'win32') {
+      return pickBestWindowsExecutable(existingFiles) || existingFiles[0];
+    }
+    return existingFiles[0];
   }
   return lines[0] || null;
 }

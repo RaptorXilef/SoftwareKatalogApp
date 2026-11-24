@@ -38,10 +38,21 @@ async function runNpm(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = 
     timeoutMs: 5000,
     extraPaths: getNpmExtraPaths(),
   });
+  if (process.platform === 'win32' && !npmCmd) {
+    return {
+      code: -1,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      aborted: Boolean(signal?.aborted),
+      notFound: true,
+      error: 'npm ist auf diesem PC nicht verfügbar.',
+      errorCode: 'ENOENT',
+    };
+  }
   return runCli(npmCmd || 'npm', args, {
     signal,
     timeoutMs,
-    shell: process.platform === 'win32',
     windowsHide: true,
   });
 }

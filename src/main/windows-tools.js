@@ -56,14 +56,14 @@ function runPowerShell(script, { signal = null, asTempFile = false } = {}) {
     }
 
     /** @type {any} */
-    const child = spawn('powershell.exe', args);
+    const child = spawn('powershell.exe', args, { shell: false, windowsHide: true });
     let stdout = '';
     let stderr = '';
 
     const onAbort = () => {
       if (process.platform === 'win32' && child.pid) {
         try {
-          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true });
         } catch {
           // Ignorieren
         }

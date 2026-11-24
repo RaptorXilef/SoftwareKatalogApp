@@ -71,8 +71,8 @@
         "to": "scanner.mjs"
       },
       {
-        "from": "src/main/elevated-worker.ps1",
-        "to": "elevated-worker.ps1"
+        "from": "src/main/elevated-worker.mjs",
+        "to": "elevated-worker.mjs"
       }
     ],
     "win": {
