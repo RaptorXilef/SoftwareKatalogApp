@@ -96,6 +96,9 @@ export function syncToolbarForTab() {
   const updatesBatchBar = document.getElementById('updatesBatchBar');
   if (updatesBatchBar) updatesBatchBar.hidden = tab !== 'updates';
 
+  const updateQueuePanel = document.getElementById('updateQueuePanel');
+  if (updateQueuePanel && tab !== 'updates') updateQueuePanel.hidden = true;
+
   const grid = document.getElementById('grid');
   const bundlesView = document.getElementById('bundlesView');
   const discoverView = document.getElementById('discoverView');

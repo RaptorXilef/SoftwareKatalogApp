@@ -185,9 +185,7 @@ function buildInstallModeToggleHtml({
   if (!hasInstallAction) return '';
 
   const isSilent = !isSilentLocked && selectedMode === 'silent';
-  const silentTitle = isSilentLocked
-    ? lockTooltip
-    : 'Setup möglichst ohne Rückfragen im Hintergrund ausführen';
+  const silentTitle = isSilentLocked ? lockTooltip : 'Setup möglichst ohne Rückfragen im Hintergrund ausführen';
 
   return `
     <div class="detail-install-mode-bar" id="detailInstallModeBar">

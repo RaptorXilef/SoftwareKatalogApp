@@ -43,6 +43,13 @@ export function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS 
     };
 
     const onAbort = () => {
+      if (process.platform === 'win32' && child.pid) {
+        try {
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+        } catch {
+          // Ignorieren
+        }
+      }
       if (!child.killed) child.kill('SIGTERM');
     };
 

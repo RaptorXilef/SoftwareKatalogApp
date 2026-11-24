@@ -464,7 +464,13 @@ export function renderUpdatesBatchBar(entries = null) {
       <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
         ⬇️ Alle Online-Updates ins Archiv laden <span class="btn-count-badge">${pendingArchiveDownloads}</span>
       </button>
-      <button type="button" class="btn btn-primary" id="btnBatchUpdateSelected" ${selectedCount === 0 ? 'disabled' : disabledAttr}>
+      <button type="button" class="btn btn-primary" id="btnUpdateAllStandard" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+        ⬆️ Alle Updaten <span class="btn-count-badge">${totalCount}</span>
+      </button>
+      <button type="button" class="btn btn-local" id="btnUpdateAllSilent" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+        ⚡ Alle Updaten (silent) <span class="btn-count-badge">${totalCount}</span>
+      </button>
+      <button type="button" class="btn btn-ghost" id="btnBatchUpdateSelected" ${selectedCount === 0 ? 'disabled' : disabledAttr}>
         ⬆️ Ausgewählte aktualisieren <span class="btn-count-badge">${selectedCount}</span>
       </button>
     </div>

@@ -18,6 +18,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('jobs-updated', listener);
   },
 
+  // Sequentielle Update-Warteschlange
+  enqueueUpdates: (items, opts) => ipcRenderer.invoke('queue-enqueue', items, opts),
+  reorderQueue: (fromIndex, toIndex) => ipcRenderer.invoke('queue-reorder', fromIndex, toIndex),
+  cancelQueueItem: (queueId) => ipcRenderer.invoke('queue-cancel-item', queueId),
+  cancelAllQueue: () => ipcRenderer.invoke('queue-cancel-all'),
+  getQueueState: () => ipcRenderer.invoke('queue-get-state'),
+  onQueueUpdated: (cb) => {
+    const listener = (_event, queueState) => cb(queueState);
+    ipcRenderer.on('queue-updated', listener);
+    return () => ipcRenderer.off('queue-updated', listener);
+  },
+
   // Katalog & Scanner
   loadCatalog: () => ipcRenderer.invoke('load-catalog'),
   runScan: (mode) => ipcRenderer.invoke('run-scan', mode),

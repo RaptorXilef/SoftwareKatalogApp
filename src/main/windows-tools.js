@@ -48,6 +48,13 @@ function runPowerShell(script, { signal = null, asTempFile = false } = {}) {
     let stderr = '';
 
     const onAbort = () => {
+      if (process.platform === 'win32' && child.pid) {
+        try {
+          spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+        } catch {
+          // Ignorieren
+        }
+      }
       if (!child.killed) child.kill('SIGTERM');
     };
     if (signal) {
@@ -457,6 +464,7 @@ export async function executeAndVerifyInstaller({
   targetVersion = null,
   useJob = true,
   onProgress = null,
+  signal = null,
   allowSilent = false,
   silent = null,
   installMode = null,
@@ -555,10 +563,21 @@ export async function executeAndVerifyInstaller({
   };
 
   try {
+    if (signal?.aborted) {
+      job?.finish('canceled', 'Installation abgebrochen.', { autoRemoveMs: 3500 });
+      return { success: false, canceled: true };
+    }
+
     reportProgress(15, 'Kopiere Setup-Datei aus dem Archiv in lokalen Temp-Ordner...');
     await fs.promises.copyFile(sourcePath, tempPath);
     if (tempInfPath && sourceInfPath) {
       await fs.promises.copyFile(sourceInfPath, tempInfPath);
+    }
+
+    if (signal?.aborted) {
+      await cleanupTempFiles([tempPath, tempInfPath]);
+      job?.finish('canceled', 'Installation abgebrochen.', { autoRemoveMs: 3500 });
+      return { success: false, canceled: true };
     }
 
     reportProgress(null, plan.bannerHint);
@@ -586,10 +605,21 @@ export async function executeAndVerifyInstaller({
           }
         `;
 
-    const { stdout } = await runPowerShell(launchScript);
+    const { stdout } = await runPowerShell(launchScript, { signal });
 
     // Temp-Dateien aufräumen
     await cleanupTempFiles([tempPath, tempInfPath]);
+
+    if (signal?.aborted) {
+      job?.finish('canceled', 'Installation abgebrochen.', { autoRemoveMs: 3500 });
+      return {
+        success: false,
+        canceled: true,
+        effectiveSilent: plan.effectiveSilent,
+        adwareProtected: plan.adwareProtected,
+        usedInf: plan.usedInf,
+      };
+    }
 
     if (stdout.startsWith('ERR:')) {
       const msg = stdout.replace('ERR:', '').trim();

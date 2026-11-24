@@ -31,6 +31,7 @@ import { getAppFolder, getConfig, saveConfig } from './config.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
+import { cancelAllQueue, cancelQueueItem, enqueueUpdates, getQueueState, reorderQueue } from './update-queue.js';
 import {
   checkProviderAvailability,
   clearProviderCache,
@@ -164,6 +165,13 @@ function registerIpcHandlers() {
   handleIpc('get-jobs', () => getJobsSnapshot());
   handleIpc('cancel-job', (_e, jobId) => cancelJob(jobId));
   handleIpc('dismiss-job', (_e, jobId) => dismissJob(jobId));
+
+  // Update-Warteschlange (streng sequentiell)
+  handleIpc('queue-enqueue', (_e, items, opts) => enqueueUpdates(items, opts || {}));
+  handleIpc('queue-reorder', (_e, fromIndex, toIndex) => reorderQueue(fromIndex, toIndex));
+  handleIpc('queue-cancel-item', (_e, queueId) => cancelQueueItem(queueId));
+  handleIpc('queue-cancel-all', () => cancelAllQueue());
+  handleIpc('queue-get-state', () => getQueueState());
 
   // Katalog & Scans
   handleIpc('load-catalog', () => loadCatalogWithLiveStatus());

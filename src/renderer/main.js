@@ -12,6 +12,7 @@ import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
 import { initToolbar, renderTagChips, syncToolbarForTab, updateNavCounts } from './components/toolbar.js';
+import { initUpdateQueue, renderUpdateQueue } from './components/update-queue.js';
 import { askBatchArchiveSaveChoice, openNestedDialog, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
 import {
   closeModal,
@@ -39,6 +40,7 @@ import { escapeHTML } from './utils/sanitize.js';
 function renderActiveView() {
   syncToolbarForTab();
   updateNavCounts();
+  renderUpdateQueue();
 
   if (state.activeTab === 'discover') {
     renderDiscoverView();
@@ -150,6 +152,87 @@ function setupGridEvents() {
   });
 }
 
+async function enqueueUpdateItems(targetItems, { silent = false } = {}) {
+  if (!Array.isArray(targetItems) || targetItems.length === 0) return;
+
+  const saveMode = state.settings.archiveSaveMode || 'ask';
+  const nonArchiveWinget = targetItems.filter(
+    (item) => !item.inArchive && item.packageManager === 'winget' && item.packageId
+  );
+  const saveSpecsById = new Map();
+
+  if (saveMode === 'ask' && nonArchiveWinget.length > 0) {
+    for (let idx = 0; idx < nonArchiveWinget.length; idx++) {
+      const item = nonArchiveWinget[idx];
+      const choice = await askBatchArchiveSaveChoice({
+        softwareName: item.name,
+        packageId: item.packageId,
+        index: idx + 1,
+        total: nonArchiveWinget.length,
+      });
+      if (choice === 'cancel') return;
+      if (choice === 'skip-archive') {
+        saveSpecsById.set(item.id, { saveMode: 'none' });
+        continue;
+      }
+      const picked = await pickArchiveTargetFolder({
+        softwareName: item.name,
+        packageId: item.packageId,
+      });
+      if (picked.canceled) return;
+      saveSpecsById.set(item.id, {
+        saveMode: 'ask',
+        targetDir: picked.targetDir,
+        collisionMode: picked.collisionMode,
+      });
+    }
+  }
+
+  const queueItems = targetItems.map((item) => {
+    const st = getItemStatus(item);
+    const archiveSaveSpec = !item.inArchive
+      ? saveSpecsById.get(item.id) || { saveMode: saveMode === 'auto-id' ? 'auto-id' : 'none' }
+      : null;
+
+    return {
+      id: item.id,
+      itemId: item.id,
+      name: item.name,
+      icon: item.icon || null,
+      fromVersion: st.localVersion || item.installedVersion || '',
+      toVersion: st.webVersion || st.archiveVersion || '',
+      source: item.inArchive ? 'archive' : item.packageManager || 'winget',
+      inArchive: Boolean(item.inArchive),
+      isInstalled: Boolean(item.isInstalled),
+      packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
+      packageId: item.packageId || item.wingetId || '',
+      wingetId: item.wingetId || '',
+      publisher: item.publisher || '',
+      hasWebUpdate: Boolean(st.hasWebUpdate),
+      hasArchiveUpdate: Boolean(st.hasArchiveUpdate),
+      installMode: item.installMode || 'interactive',
+      archiveSaveSpec,
+    };
+  });
+
+  const res = await window.electronAPI.enqueueUpdates(queueItems, { silent });
+  if (res?.success) {
+    for (const qItem of queueItems) {
+      state.selectedUpdateIds.delete(qItem.itemId);
+    }
+    renderUpdatesBatchBar();
+
+    if (res.added > 0) {
+      const modeHint = silent ? ' (Silent-Modus mit Adware-Schutz)' : '';
+      showToast(`${res.added} Update(s) in die Warteschlange eingereiht${modeHint}.`, { type: 'info' });
+    } else {
+      showToast('Alle ausgewählten Updates befinden sich bereits in der Warteschlange.', { type: 'info' });
+    }
+  } else if (res?.error) {
+    showToast(`Warteschlangen-Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+  }
+}
+
 function setupUpdatesBatchBar() {
   const bar = document.getElementById('updatesBatchBar');
   if (!bar) return;
@@ -200,95 +283,17 @@ function setupUpdatesBatchBar() {
       return;
     }
 
+    if (btn.id === 'btnUpdateAllStandard' || btn.id === 'btnUpdateAllSilent') {
+      const entries = getVisibleUpdateEntries();
+      const targetItems = entries.map((entry) => entry.item);
+      await enqueueUpdateItems(targetItems, { silent: btn.id === 'btnUpdateAllSilent' });
+      return;
+    }
+
     if (btn.id === 'btnBatchUpdateSelected') {
       const entries = getVisibleUpdateEntries();
       const selectedItems = entries.map((entry) => entry.item).filter((item) => state.selectedUpdateIds.has(item.id));
-      if (selectedItems.length === 0) return;
-
-      const saveMode = state.settings.archiveSaveMode || 'ask';
-      const nonArchiveWinget = selectedItems.filter(
-        (item) => !item.inArchive && item.packageManager === 'winget' && item.packageId
-      );
-      const saveSpecsById = new Map();
-
-      if (saveMode === 'ask' && nonArchiveWinget.length > 0) {
-        for (let idx = 0; idx < nonArchiveWinget.length; idx++) {
-          const item = nonArchiveWinget[idx];
-          const choice = await askBatchArchiveSaveChoice({
-            softwareName: item.name,
-            packageId: item.packageId,
-            index: idx + 1,
-            total: nonArchiveWinget.length,
-          });
-          if (choice === 'cancel') {
-            return;
-          }
-          if (choice === 'skip-archive') {
-            saveSpecsById.set(item.id, { saveMode: 'none' });
-            continue;
-          }
-          const picked = await pickArchiveTargetFolder({
-            softwareName: item.name,
-            packageId: item.packageId,
-          });
-          if (picked.canceled) {
-            return;
-          }
-          saveSpecsById.set(item.id, {
-            saveMode: 'ask',
-            targetDir: picked.targetDir,
-            collisionMode: picked.collisionMode,
-          });
-        }
-      }
-
-      const tasks = selectedItems.map((item) => {
-        const st = getItemStatus(item);
-        const archiveSaveSpec = !item.inArchive
-          ? saveSpecsById.get(item.id) || { saveMode: saveMode === 'auto-id' ? 'auto-id' : 'none' }
-          : null;
-        return {
-          id: item.id,
-          name: item.name,
-          origin: item.origin,
-          inArchive: Boolean(item.inArchive),
-          isInstalled: Boolean(item.isInstalled),
-          packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
-          packageId: item.packageId || item.wingetId || '',
-          hasWebUpdate: Boolean(st.hasWebUpdate),
-          hasArchiveUpdate: Boolean(st.hasArchiveUpdate),
-          archiveSaveSpec,
-        };
-      });
-
-      state.isBatchActionRunning = true;
-      renderUpdatesBatchBar();
-      showToast(`Aktualisiere ${tasks.length} ausgewählte Paket(e)...`, { type: 'info' });
-
-      try {
-        const res = await window.electronAPI.batchUpdatePackages(tasks, { allowSilent: true });
-        if (Array.isArray(res?.results)) {
-          for (const r of res.results) {
-            if (r.status === 'done') state.selectedUpdateIds.delete(r.id);
-          }
-        }
-        await reloadUI({ rescanInstalled: true });
-        if (res?.canceled) {
-          showToast('Massenaktualisierung abgebrochen.', { type: 'info' });
-        } else if (res?.success) {
-          const type = res.failed > 0 ? 'warn' : 'success';
-          showToast(`${res.completed} Paket(e) aktualisiert (${res.skipped} übersprungen, ${res.failed} Fehler).`, {
-            type,
-          });
-        } else if (res?.alreadyRunning) {
-          showToast('Eine Massenaktualisierung läuft bereits.', { type: 'info' });
-        } else if (res?.error) {
-          showToast(`Fehler: ${res.error}`, { type: 'error', duration: 6000 });
-        }
-      } finally {
-        state.isBatchActionRunning = false;
-        renderUpdatesBatchBar();
-      }
+      await enqueueUpdateItems(selectedItems, { silent: false });
     }
   });
 }
@@ -450,6 +455,24 @@ async function bootstrap() {
         } else {
           showToast('Version konnte noch nicht ausgelesen werden.', { type: 'warn' });
         }
+      }
+    },
+  });
+
+  initUpdateQueue({
+    onItemCompleted: () => {
+      void reloadUI({ rescanInstalled: true });
+    },
+    onQueueDrained: async ({ completed, failed, canceled }) => {
+      await reloadUI({ rescanInstalled: true });
+      if (completed === 0 && failed === 0 && canceled > 0) {
+        showToast('Update-Warteschlange wurde abgebrochen.', { type: 'info' });
+      } else if (completed > 0 || failed > 0) {
+        const type = failed > 0 ? 'warn' : 'success';
+        const parts = [`${completed} aktualisiert`];
+        if (canceled > 0) parts.push(`${canceled} abgebrochen`);
+        if (failed > 0) parts.push(`${failed} fehlgeschlagen`);
+        showToast(`Warteschlange abgeschlossen: ${parts.join(' · ')}`, { type, duration: 5500 });
       }
     },
   });
