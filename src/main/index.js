@@ -5,6 +5,18 @@ import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
 import { executeArchiveCleanup, previewArchiveCleanup, setKeepAllVersions } from './archive-cleaner.js';
 import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArchive } from './archive-linker.js';
 import { applyWingetMatches, runWingetMatcherScan } from './archive-matcher.js';
+import {
+  checkAdminIpcAccess,
+  configureAuthService,
+  getAuthStatus,
+  initAuthService,
+  lockAuthPolicyInHklm,
+  loginAuth,
+  logoutAuth,
+  setAuthPolicyPath,
+  unlockAuthPolicyInHklm,
+  updateAuthConfig,
+} from './auth-service.js';
 import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-updater.js';
 import {
   deleteBundle,
@@ -27,7 +39,7 @@ import {
   restoreBackup,
   saveMetaJson,
 } from './catalog-service.js';
-import { getAppFolder, getConfig, inspectArchiveRootPath, saveConfig } from './config.js';
+import { getAppFolder, getConfig, getDataFolder, inspectArchiveRootPath, saveConfig } from './config.js';
 import {
   configureElevatedHelper,
   getAdminSessionStatus,
@@ -144,7 +156,18 @@ function createWindow() {
 
 function handleIpc(channel, handler) {
   ipcMain.removeHandler(channel);
-  ipcMain.handle(channel, handler);
+  ipcMain.handle(channel, async (event, ...args) => {
+    const access = checkAdminIpcAccess(channel);
+    if (!access.allowed) {
+      return {
+        success: false,
+        authRequired: true,
+        code: access.code || 'AUTH_REQUIRED',
+        error: access.error || 'Admin-Anmeldung erforderlich.',
+      };
+    }
+    return handler(event, ...args);
+  });
 }
 
 function registerBundleIpcHandlers() {
@@ -321,6 +344,17 @@ function registerIpcHandlers() {
       return { success: false, error: e.message };
     }
   });
+  handleIpc('save-favorites', (_e, favorites) => {
+    try {
+      const cleanFavorites = Array.isArray(favorites)
+        ? [...new Set(favorites.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
+        : [];
+      saveConfig({ favorites: cleanFavorites });
+      return { success: true, favorites: cleanFavorites };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
   handleIpc('select-dir', async (_e, opts = {}) => {
     const defaultPath = opts?.defaultPath || (opts?.defaultToArchive ? getConfig().absTargetPath : undefined);
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -359,6 +393,15 @@ function registerIpcHandlers() {
   });
   handleIpc('admin-session-start', () => startAdminSession());
   handleIpc('admin-session-stop', () => stopAdminSession());
+
+  // Admin-Authentifizierung & Policy-Schutz
+  handleIpc('auth-get-status', () => getAuthStatus());
+  handleIpc('auth-login', (_e, username, password) => loginAuth(username, password));
+  handleIpc('auth-logout', () => logoutAuth());
+  handleIpc('auth-update-config', (_e, payload) => updateAuthConfig(payload || {}));
+  handleIpc('auth-set-policy-path', (_e, policyPath, opts) => setAuthPolicyPath(policyPath, opts || {}));
+  handleIpc('auth-lock-hklm', (_e, policyPath) => lockAuthPolicyInHklm(policyPath));
+  handleIpc('auth-unlock-hklm', () => unlockAuthPolicyInHklm());
 }
 
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
@@ -381,6 +424,20 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     },
   });
 
+  configureAuthService({
+    getConfigFn: getConfig,
+    saveConfigFn: saveConfig,
+    getAppFolderFn: getAppFolder,
+    getDataFolderFn: getDataFolder,
+    onStatusChange: (status) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('auth-status-updated', status);
+        }
+      }
+    },
+  });
+
   registerIpcHandlers();
 
   app.on('second-instance', () => {
@@ -390,8 +447,13 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     void isProcessElevated();
+    try {
+      await initAuthService();
+    } catch (err) {
+      console.error('Fehler beim Initialisieren des Auth-Services:', err);
+    }
     try {
       initDefaultProviders();
     } catch (err) {

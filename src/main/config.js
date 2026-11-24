@@ -39,8 +39,9 @@ const DEFAULT_CONFIG = {
   archiveSaveMode: 'ask', // 'ask' | 'auto-id' | 'none'
   enabledProviders: [...DEFAULT_ENABLED_PROVIDERS],
   providerSettings: { ...DEFAULT_PROVIDER_SETTINGS },
-  // Sitzungsbasierter Admin-Ausfuehrungsmodus
+  // Sitzungsbasierter Admin-Ausfuehrungsmodus & Policy-Datei
   autoRequestAdminForBatch: false,
+  authFilePath: '',
 };
 
 const DEFAULT_STATE = {

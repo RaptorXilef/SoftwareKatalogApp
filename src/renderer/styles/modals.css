@@ -3251,3 +3251,196 @@
     color: var(--color-warn);
   }
 }
+
+/* Login-Modal & Sicherheit / Richtlinien Auth-Bereich */
+.login-modal-body {
+  gap: 14px;
+}
+
+.login-password-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  & input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.login-error-box {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--color-danger) 14%, var(--bg));
+  color: var(--color-danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login-warning-box {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--color-warn) 55%, var(--border));
+  background: color-mix(in srgb, var(--color-warn) 14%, var(--bg));
+  color: var(--color-warn);
+  font-size: 12.5px;
+}
+
+.login-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.auth-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+}
+
+.auth-status-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.auth-badges-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auth-storage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+
+  &.is-writable {
+    background: color-mix(in srgb, var(--color-ok) 15%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-ok) 45%, var(--border));
+    color: var(--color-ok);
+  }
+
+  &.is-readonly {
+    background: color-mix(in srgb, var(--color-warn) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-warn) 50%, var(--border));
+    color: var(--color-warn);
+  }
+
+  &.is-hklm {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    color: var(--accent);
+  }
+
+  &.is-integrity-ok {
+    background: color-mix(in srgb, var(--color-ok) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-ok) 35%, var(--border));
+    color: var(--color-ok);
+  }
+
+  &.is-integrity-bad {
+    background: color-mix(in srgb, var(--color-danger) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-danger) 50%, var(--border));
+    color: var(--color-danger);
+  }
+}
+
+.auth-integrity-banner {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.45;
+
+  &.is-warn {
+    border: 1px solid color-mix(in srgb, var(--color-warn) 45%, var(--border));
+    background: color-mix(in srgb, var(--color-warn) 12%, var(--bg));
+    color: var(--color-warn);
+  }
+
+  &.is-error {
+    border: 1px solid color-mix(in srgb, var(--color-danger) 50%, var(--border));
+    background: color-mix(in srgb, var(--color-danger) 14%, var(--bg));
+    color: var(--color-danger);
+  }
+}
+
+.auth-policy-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+
+  & h4 {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+}
+
+.auth-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.auth-effective-path {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12.5px;
+
+  & code {
+    word-break: break-all;
+    color: var(--accent);
+  }
+}
+
+.auth-hklm-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+
+.auth-hklm-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auth-hklm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}

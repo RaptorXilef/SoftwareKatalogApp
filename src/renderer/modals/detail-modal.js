@@ -10,6 +10,7 @@ import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } from './archive-target-modal.js';
 import { closeModal, openEditModal, resetModalContent, triggerCatalogReload } from './index.js';
+import { ensureAdminAuthenticated } from './login-modal.js';
 
 const SOURCE_LABELS = {
   winget: 'Winget',
@@ -1411,6 +1412,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         });
       }
     } else if (action === 'save-to-archive') {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum Aufnehmen von Paketen ins Archiv ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
       const res = await savePackageToArchive(buildArchivePayloadFromItem(), {
         mode: targetMode,

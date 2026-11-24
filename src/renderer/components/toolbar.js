@@ -36,6 +36,32 @@ function getOriginFilterOptionsForTab(tab) {
   return null;
 }
 
+export function renderAuthHeaderControls() {
+  const container = document.getElementById('authHeaderControls');
+  if (!(container instanceof HTMLElement)) return;
+
+  const auth = /** @type {Record<string, any>} */ (state.authStatus || {});
+  if (!auth.enabled) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+
+  container.hidden = false;
+  if (auth.isAuthenticated) {
+    const displayUser = String(auth.authenticatedUser || auth.username || 'Admin').trim() || 'Admin';
+    container.innerHTML = `
+      <span class="auth-user-badge" title="Angemeldet als Administrator: ${escapeHTML(displayUser)}">🔓 ${escapeHTML(displayUser)}</span>
+      <button type="button" class="auth-header-btn is-logout" data-auth-header-action="logout" title="Admin-Sitzung abmelden">Abmelden</button>
+    `;
+    return;
+  }
+
+  container.innerHTML = `
+    <button type="button" class="auth-header-btn is-locked" data-auth-header-action="login" title="Als Administrator anmelden, um Einstellungen und Katalog zu bearbeiten">🔒 Admin-Login</button>
+  `;
+}
+
 export function renderAdminSessionButton() {
   const btn = document.getElementById('btnAdminSessionToggle');
   if (!(btn instanceof HTMLButtonElement)) return;
@@ -309,6 +335,15 @@ export function initToolbar(handlers) {
     handlers.onToggleAdminSession?.();
   });
 
+  document.getElementById('authHeaderControls')?.addEventListener('click', (e) => {
+    const btn = closestEl(e.target, '[data-auth-header-action]');
+    if (!btn) return;
+    closePopovers();
+    const action = btn.dataset.authHeaderAction;
+    if (action === 'login') handlers.onAuthLogin?.();
+    else if (action === 'logout') handlers.onAuthLogout?.();
+  });
+
   document.addEventListener('click', (e) => {
     if (
       !closestEl(e.target, '.menu-anchor') &&
@@ -325,6 +360,7 @@ export function initToolbar(handlers) {
     tb?.classList.toggle('shrink', window.scrollY > 40);
   });
 
+  renderAuthHeaderControls();
   renderAdminSessionButton();
   syncToolbarForTab();
 }

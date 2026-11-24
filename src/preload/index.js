@@ -128,6 +128,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   checkArchivePath: (rawPath, index) => ipcRenderer.invoke('check-archive-path', rawPath, index),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  saveFavorites: (favorites) => ipcRenderer.invoke('save-favorites', favorites),
   selectDir: (opts) => ipcRenderer.invoke('select-dir', opts),
   selectFile: (filters, returnAbsolute = false) => ipcRenderer.invoke('select-file', filters, returnAbsolute),
   resetPaths: (type) => ipcRenderer.invoke('reset-paths', type),
@@ -144,5 +145,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event, status) => cb(status);
     ipcRenderer.on('admin-session-updated', listener);
     return () => ipcRenderer.off('admin-session-updated', listener);
+  },
+
+  // Admin-Authentifizierung & Policy-Schutz
+  getAuthStatus: () => ipcRenderer.invoke('auth-get-status'),
+  loginAuth: (username, password) => ipcRenderer.invoke('auth-login', username, password),
+  logoutAuth: () => ipcRenderer.invoke('auth-logout'),
+  updateAuthConfig: (payload) => ipcRenderer.invoke('auth-update-config', payload),
+  setAuthPolicyPath: (policyPath, opts) => ipcRenderer.invoke('auth-set-policy-path', policyPath, opts),
+  lockAuthPolicyInHklm: (policyPath) => ipcRenderer.invoke('auth-lock-hklm', policyPath),
+  unlockAuthPolicyInHklm: () => ipcRenderer.invoke('auth-unlock-hklm'),
+  onAuthStatusUpdated: (cb) => {
+    const listener = (_event, status) => cb(status);
+    ipcRenderer.on('auth-status-updated', listener);
+    return () => ipcRenderer.off('auth-status-updated', listener);
   },
 });

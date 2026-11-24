@@ -16,6 +16,7 @@ import { showToast } from './components/toast.js';
 import {
   initToolbar,
   renderAdminSessionButton,
+  renderAuthHeaderControls,
   renderTagChips,
   syncToolbarForTab,
   updateNavCounts,
@@ -23,6 +24,7 @@ import {
 import { initUpdateQueue, renderUpdateQueue } from './components/update-queue.js';
 import { askBatchArchiveSaveChoice, openNestedDialog, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
 import {
+  closeAdminModalIfOpen,
   closeModal,
   initModals,
   openArchiveLinkModal,
@@ -35,9 +37,12 @@ import {
   openSettingsModal,
   openWingetMatcherModal,
 } from './modals/index.js';
+import { ensureAdminAuthenticated, openLoginModal } from './modals/login-modal.js';
 import {
+  applyAuthStatus,
   getItemById,
   getItemStatus,
+  refreshAuthStatus,
   refreshBundles,
   refreshCatalogData,
   refreshIgnoredUpdates,
@@ -502,6 +507,11 @@ function setupGlobalDragAndDrop() {
     const droppedPath = window.electronAPI.getFilePath(files[0]);
     if (!droppedPath) return;
 
+    const ok = await ensureAdminAuthenticated({
+      reason: 'Zum Hinzufügen von Software ins Archiv ist eine Admin-Anmeldung erforderlich.',
+    });
+    if (!ok) return;
+
     const res = await window.electronAPI.addSoftwareFromPath(droppedPath);
     if (res.success) {
       await reloadUI();
@@ -660,6 +670,22 @@ async function toggleAdminSession() {
   }
 }
 
+let manualLogoutInFlight = false;
+
+function handleAuthStatusUpdate(status) {
+  const prev = /** @type {Record<string, any>} */ (state.authStatus || {});
+  const wasAuthenticated = Boolean(prev.enabled && prev.isAuthenticated);
+  const next = applyAuthStatus(status);
+  renderAuthHeaderControls();
+
+  if (wasAuthenticated && next.enabled && !next.isAuthenticated) {
+    closeAdminModalIfOpen();
+    if (!manualLogoutInFlight) {
+      showToast('Admin-Sitzung abgelaufen - bitte erneut anmelden.', { type: 'info' });
+    }
+  }
+}
+
 async function bootstrap() {
   initLightbox();
   initModals({ onReload: reloadUI });
@@ -731,6 +757,10 @@ async function bootstrap() {
         onRescanPc: () => runInstalledScan({ silent: false }),
       }),
     onDuplicateBundle: async (bundleId) => {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum Duplizieren von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const res = await window.electronAPI.duplicateBundle(bundleId);
       if (res?.success) {
         await reloadUI();
@@ -740,6 +770,10 @@ async function bootstrap() {
       }
     },
     onDeleteBundle: async (bundle) => {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum Löschen von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const decision = await openNestedDialog({
         defaultAction: 'cancel',
         html: `
@@ -784,6 +818,10 @@ async function bootstrap() {
       }
     },
     onImportBundle: async () => {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum Importieren von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const res = await window.electronAPI.importBundle();
       if (res?.success) {
         await reloadUI();
@@ -807,6 +845,28 @@ async function bootstrap() {
     onFilterChange: () => renderCatalogGrid(),
     onOpenSettings: () => openSettingsModal(),
     onToggleAdminSession: () => toggleAdminSession(),
+    onAuthLogin: async () => {
+      const res = await openLoginModal({
+        reason: 'Als Administrator anmelden, um Einstellungen und Katalog zu bearbeiten.',
+      });
+      if (res?.authenticated) {
+        showToast('Als Administrator angemeldet.', { type: 'success' });
+      }
+    },
+    onAuthLogout: async () => {
+      manualLogoutInFlight = true;
+      try {
+        const res = await window.electronAPI.logoutAuth();
+        if (res?.status) {
+          applyAuthStatus(res.status);
+        }
+        closeAdminModalIfOpen();
+        renderAuthHeaderControls();
+        showToast('Admin-Sitzung abgemeldet.', { type: 'info' });
+      } finally {
+        manualLogoutInFlight = false;
+      }
+    },
     onScanArchive: async (mode) => {
       const res = await window.electronAPI.runScan(mode);
       if (res.alreadyRunning) {
@@ -868,6 +928,10 @@ async function bootstrap() {
       }
     },
     onAddSoftware: async () => {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum Hinzufügen eines Software-Ordners ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const res = await window.electronAPI.addSoftware();
       if (res.success) {
         await reloadUI();
@@ -877,6 +941,10 @@ async function bootstrap() {
       }
     },
     onAutoDetectAll: async () => {
+      const ok = await ensureAdminAuthenticated({
+        reason: 'Zum automatischen Speichern fehlender PC-Pfade ist eine Admin-Anmeldung erforderlich.',
+      });
+      if (!ok) return;
       const res = await window.electronAPI.autoDetectAll();
       if (res.alreadyRunning) {
         showToast('Pfadsuche läuft bereits.', { type: 'info' });
@@ -897,6 +965,12 @@ async function bootstrap() {
   });
 
   try {
+    if (typeof window.electronAPI?.onAuthStatusUpdated === 'function') {
+      window.electronAPI.onAuthStatusUpdated((status) => handleAuthStatusUpdate(status));
+    }
+    await refreshAuthStatus();
+    renderAuthHeaderControls();
+
     if (typeof window.electronAPI?.onAdminSessionUpdated === 'function') {
       window.electronAPI.onAdminSessionUpdated((status) => applyAdminSessionStatus(status));
     }

@@ -73,6 +73,57 @@
   }
 }
 
+.auth-header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-ok) 50%, var(--border));
+  background: color-mix(in srgb, var(--color-ok) 15%, var(--surface));
+  color: var(--color-ok);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.auth-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &.is-locked:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  &.is-logout:hover {
+    border-color: color-mix(in srgb, var(--color-danger) 55%, var(--border));
+    background: color-mix(in srgb, var(--color-danger) 14%, var(--surface));
+    color: var(--color-danger);
+  }
+}
+
 .update-pill {
   background: color-mix(in srgb, var(--color-ok) 18%, transparent);
   color: var(--color-ok);

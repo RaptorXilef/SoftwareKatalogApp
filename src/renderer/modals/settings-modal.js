@@ -11,8 +11,8 @@ import {
 } from '../../shared/settings-draft-logic.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
-import { renderAdminSessionButton } from '../components/toolbar.js';
-import { state } from '../state.js';
+import { renderAdminSessionButton, renderAuthHeaderControls } from '../components/toolbar.js';
+import { applyAuthStatus, state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -74,7 +74,7 @@ export async function renderSettingsModal(initialTab = 'general') {
   const modalToken = ++activeSettingsToken;
   let activeTab = normalizeSettingsTab(initialTab);
 
-  const [s, info, providersInfo, cacheStats, initialAdminStatus] = await Promise.all([
+  const [s, info, providersInfo, cacheStats, initialAdminStatus, initialAuthStatus] = await Promise.all([
     window.electronAPI.getSettings(),
     window.electronAPI.getAppInfo(),
     window.electronAPI.listProviders(),
@@ -82,15 +82,171 @@ export async function renderSettingsModal(initialTab = 'general') {
     typeof window.electronAPI?.getAdminSessionStatus === 'function'
       ? window.electronAPI.getAdminSessionStatus()
       : Promise.resolve(state.adminSession),
+    typeof window.electronAPI?.getAuthStatus === 'function'
+      ? window.electronAPI.getAuthStatus()
+      : Promise.resolve(state.authStatus),
   ]);
 
   if (modalToken !== activeSettingsToken) return;
+
+  let currentAuthStatus = applyAuthStatus(initialAuthStatus || state.authStatus);
+  renderAuthHeaderControls();
 
   let currentAdminStatus = initialAdminStatus || state.adminSession || { mode: 'off', supported: true };
   if (initialAdminStatus) {
     state.adminSession = { ...state.adminSession, ...initialAdminStatus };
     renderAdminSessionButton();
   }
+
+  const renderAuthSectionHtml = (authSt) => {
+    const auth = authSt || {};
+    const isEnabled = Boolean(auth.enabled);
+    const isHklmLocked = Boolean(auth.isHklmLocked);
+    const isReadOnly = Boolean(auth.isReadOnlyPolicy);
+    const integrityValid = auth.integrityValid !== false;
+    const checksumShort = auth.integrityChecksum ? String(auth.integrityChecksum).slice(0, 12) : '';
+    const sourceLabel =
+      auth.pathSource === 'hklm'
+        ? 'Windows-Registry (HKLM)'
+        : auth.pathSource === 'config'
+          ? 'Benutzerdefiniert (config.json)'
+          : 'Standard (data/admin-policy.json)';
+
+    const storageBadge = isHklmLocked
+      ? '<span class="auth-storage-badge is-hklm" title="Pfad durch Windows HKLM-Policy gesperrt">🏛️ Per HKLM gesperrt</span>'
+      : isReadOnly
+        ? '<span class="auth-storage-badge is-readonly" title="Nur-Lese-Zugriff auf die Policy-Datei">🔒 Schreibgeschützt</span>'
+        : '<span class="auth-storage-badge is-writable" title="Policy-Datei ist beschreibbar">🟢 Schreibbar</span>';
+
+    const readOnlySecondaryBadge =
+      isHklmLocked && isReadOnly
+        ? '<span class="auth-storage-badge is-readonly" title="Nur-Lese-Zugriff auf die Policy-Datei">🔒 Schreibgeschützt</span>'
+        : '';
+
+    const integrityBadge = integrityValid
+      ? checksumShort
+        ? `<span class="auth-storage-badge is-integrity-ok" title="SHA-256 Integrität geprüft: ${escapeHTML(auth.integrityChecksum || '')}">✓ Integrität OK (${escapeHTML(checksumShort)}...)</span>`
+        : ''
+      : '<span class="auth-storage-badge is-integrity-bad" title="Integritätsprüfung fehlgeschlagen">⚠️ Integrität ungültig</span>';
+
+    const timeoutVal = Number(auth.sessionTimeoutMinutes) || 0;
+    const hklmDisabled = auth.platformSupportedForHklm === false;
+
+    return `
+      <h3>🔐 Admin-Modus & Authentifizierung</h3>
+
+      <div class="auth-status-card">
+        <div class="auth-status-top">
+          <div class="auth-badges-row">
+            <span class="admin-session-status-badge ${isEnabled ? 'is-active' : 'is-off'}">
+              ${isEnabled ? `🔒 Schutz aktiv (${escapeHTML(auth.username || 'Admin')})` : '🔓 Schutz deaktiviert'}
+            </span>
+            ${storageBadge}
+            ${readOnlySecondaryBadge}
+            ${integrityBadge}
+          </div>
+          <span class="muted">Quelle: <strong>${escapeHTML(sourceLabel)}</strong></span>
+        </div>
+
+        ${
+          !integrityValid && auth.integrityWarning
+            ? `<div class="auth-integrity-banner is-error" role="alert">⚠️ ${escapeHTML(auth.integrityWarning)}</div>`
+            : ''
+        }
+
+        ${
+          isReadOnly
+            ? '<div class="auth-integrity-banner is-warn" role="status">🔒 Die Policy-Datei liegt schreibgeschützt (Nur-Lese-Zugriff). Lokale Änderungen an Benutzer/Passwort werden blockiert und müssen direkt durch einen Administrator am geschützten Speicherort erfolgen.</div>'
+            : ''
+        }
+      </div>
+
+      <div class="auth-policy-box">
+        <h4>👤 Admin-Konto & Zugriffsschutz</h4>
+        <label class="check-row">
+          <input type="checkbox" id="cfgAuthEnabled" ${isEnabled ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
+          <span>Admin-Schutz für Einstellungen & Bearbeiten aktivieren</span>
+        </label>
+
+        <div class="form-grid-2">
+          <label class="form-field">
+            <span>Admin-Benutzername</span>
+            <input type="text" id="cfgAuthUsername" value="${escapeHTML(auth.username || '')}" placeholder="z. B. admin" ${isReadOnly ? 'disabled' : ''}>
+          </label>
+          <label class="form-field">
+            <span>Inaktivitäts-Timeout</span>
+            <select id="cfgAuthTimeout" ${isReadOnly ? 'disabled' : ''}>
+              <option value="0" ${timeoutVal === 0 ? 'selected' : ''}>Kein Timeout (bis Logout / App-Ende)</option>
+              <option value="15" ${timeoutVal === 15 ? 'selected' : ''}>15 Minuten</option>
+              <option value="30" ${timeoutVal === 30 ? 'selected' : ''}>30 Minuten</option>
+              <option value="60" ${timeoutVal === 60 ? 'selected' : ''}>60 Minuten</option>
+              <option value="240" ${timeoutVal === 240 ? 'selected' : ''}>4 Stunden</option>
+            </select>
+          </label>
+          <label class="form-field">
+            <span>${auth.policyExists && isEnabled ? 'Neues Passwort (leer = beibehalten)' : 'Passwort (mind. 6 Zeichen)'}</span>
+            <input type="password" id="cfgAuthPassword" value="" placeholder="${auth.policyExists && isEnabled ? 'Leer lassen zum Beibehalten' : 'Sicheres Passwort vergeben'}" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
+          </label>
+          <label class="form-field">
+            <span>Passwort bestätigen</span>
+            <input type="password" id="cfgAuthPasswordConfirm" value="" placeholder="Passwort wiederholen" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
+          </label>
+        </div>
+
+        <div class="auth-form-actions">
+          <span class="muted">Passwörter werden ausschließlich als <code>scrypt</code>-Hash mit 16-Byte-Salt gespeichert.</span>
+          <button type="button" class="btn btn-primary" data-settings-action="auth-save-config" ${isReadOnly ? 'disabled' : ''}>🔐 Zugangsdaten & Schutz speichern</button>
+        </div>
+      </div>
+
+      <div class="auth-policy-box">
+        <h4>📁 Speicherort der Policy-Datei & Manipulationsschutz</h4>
+        <div class="auth-effective-path">
+          <span class="muted">Aktive Policy-Datei:</span>
+          <code>${escapeHTML(auth.policyPath || '')}</code>
+        </div>
+
+        <label class="form-field">
+          <span>Benutzerdefinierter Pfad (z. B. schreibgeschütztes Netzlaufwerk / Archiv-Share)</span>
+          <div class="input-action-row">
+            <input type="text" id="cfgAuthPolicyPath" value="${escapeHTML(auth.configuredPolicyPath || auth.policyPath || '')}" placeholder="Standard: data/admin-policy.json" ${isHklmLocked ? 'disabled' : ''}>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-file" ${isHklmLocked ? 'disabled' : ''}>📂 Datei...</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-dir" ${isHklmLocked ? 'disabled' : ''}>📁 Ordner...</button>
+          </div>
+        </label>
+
+        <label class="check-row">
+          <input type="checkbox" id="cfgAuthCopyPolicy" checked ${isHklmLocked ? 'disabled' : ''}>
+          <span>Aktuelle Policy-Datei automatisch an den neuen Ort kopieren (falls dort noch nicht vorhanden)</span>
+        </label>
+
+        <div class="inline-btn-group">
+          <button type="button" class="btn btn-ghost" data-settings-action="auth-save-path" ${isHklmLocked ? 'disabled' : ''}>💾 Pfad übernehmen</button>
+          <button type="button" class="btn btn-ghost" data-settings-action="auth-reset-path" ${isHklmLocked || auth.pathSource === 'default' ? 'disabled' : ''}>↩️ Standardpfad</button>
+        </div>
+
+        <div class="auth-hklm-box">
+          <div class="auth-hklm-info">
+            <strong>🏛️ Firmen- / Admin-Modus (HKLM-Registry-Sperre)</strong>
+            <p class="panel-hint">
+              Schreibt den <code>PolicyFilePath</code> per UAC fest in <code>HKLM\\SOFTWARE\\Policies\\SoftwareKatalog</code>.
+              Normale Windows-Benutzer können diesen Pfad ohne Adminrechte weder in der App noch in der Config umbiegen.
+            </p>
+          </div>
+          <div class="auth-hklm-actions">
+            <button type="button" class="btn btn-primary" data-settings-action="auth-lock-hklm" ${hklmDisabled ? 'disabled' : ''} title="${hklmDisabled ? 'Nur unter Windows verfügbar' : 'Aktuellen oder gewählten Pfad per HKLM-Policy sperren'}">
+              🔒 Pfad per HKLM-Policy sperren (Admin)
+            </button>
+            ${
+              isHklmLocked
+                ? `<button type="button" class="btn btn-danger" data-settings-action="auth-unlock-hklm" ${hklmDisabled ? 'disabled' : ''} title="HKLM-Sperre entfernen (2x klicken)">🔓 HKLM-Sperre aufheben (Admin)</button>`
+                : ''
+            }
+          </div>
+        </div>
+      </div>
+    `;
+  };
 
   const getAdminUiMeta = (adminSt) => {
     if (adminSt?.supported === false) {
@@ -497,16 +653,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         </section>
 
         <section class="settings-section" id="settingsAdminSection">
-          <h3>🔐 Admin-Modus & Authentifizierung</h3>
-          <div class="settings-placeholder-card">
-            <div class="settings-placeholder-head">
-              <strong>Admin-Login & Schreibschutz</strong>
-              <span class="settings-placeholder-badge">Vorbereitet (P6)</span>
-            </div>
-            <p class="panel-hint">
-              Hier werden künftig Admin-Anmeldung, Passwortschutz und Berechtigungsstufen für Katalog- und Einstellungsänderungen verwaltet.
-            </p>
-          </div>
+          ${renderAuthSectionHtml(currentAuthStatus)}
         </section>
 
         <section class="settings-section" id="settingsPolicySection">
@@ -632,6 +779,18 @@ export async function renderSettingsModal(initialTab = 'general') {
       autoRequestAdminForBatch: Boolean(getInputEl(modal, '#cfgAutoRequestAdminForBatch')?.checked),
     });
     updateDirtyUi();
+  };
+
+  const refreshAuthSectionUi = (nextStatus) => {
+    if (nextStatus) {
+      currentAuthStatus = applyAuthStatus(nextStatus);
+      renderAuthHeaderControls();
+    }
+    if (modalToken !== activeSettingsToken || overlay.hidden) return;
+    const sec = modal.querySelector('#settingsAdminSection');
+    if (sec instanceof HTMLElement) {
+      sec.innerHTML = renderAuthSectionHtml(currentAuthStatus);
+    }
   };
 
   const refreshProvidersSectionUi = () => {
@@ -1050,7 +1209,141 @@ export async function renderSettingsModal(initialTab = 'general') {
     const act = btn.dataset.settingsAction;
 
     if (act === 'close') closeModal();
-    else if (act === 'toggle-admin-session') {
+    else if (act === 'auth-save-config') {
+      const enabledChk = getInputEl(modal, '#cfgAuthEnabled');
+      const userInp = getInputEl(modal, '#cfgAuthUsername');
+      const passInp = getInputEl(modal, '#cfgAuthPassword');
+      const passConfirmInp = getInputEl(modal, '#cfgAuthPasswordConfirm');
+      const timeoutSel = getSelectEl(modal, '#cfgAuthTimeout');
+
+      const enabled = Boolean(enabledChk?.checked);
+      const username = userInp?.value.trim() || '';
+      const password = passInp?.value || '';
+      const passwordConfirm = passConfirmInp?.value || '';
+      const sessionTimeoutMinutes = Number.parseInt(timeoutSel?.value || '0', 10) || 0;
+
+      if (enabled && (password || passwordConfirm) && password !== passwordConfirm) {
+        showToast('Die eingegebenen Passwörter stimmen nicht überein.', { type: 'error' });
+        return;
+      }
+
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      try {
+        const res = await window.electronAPI.updateAuthConfig({
+          enabled,
+          username,
+          password,
+          sessionTimeoutMinutes,
+        });
+        if (res?.status) refreshAuthSectionUi(res.status);
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.success) {
+          showToast(enabled ? 'Admin-Schutz und Zugangsdaten gespeichert.' : 'Admin-Schutz wurde deaktiviert.', {
+            type: 'success',
+          });
+        } else {
+          showToast(res?.error || 'Auth-Konfiguration konnte nicht gespeichert werden.', {
+            type: 'error',
+            duration: 6000,
+          });
+        }
+      } finally {
+        if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
+      }
+    } else if (act === 'auth-browse-file') {
+      const picked = await window.electronAPI.selectFile([{ name: 'Policy JSON', extensions: ['json'] }], true);
+      if (!picked || modalToken !== activeSettingsToken) return;
+      const pathInp = getInputEl(modal, '#cfgAuthPolicyPath');
+      if (pathInp) pathInp.value = picked;
+    } else if (act === 'auth-browse-dir') {
+      const dir = await window.electronAPI.selectDir({ title: 'Ordner für Admin-Policy auswählen' });
+      if (!dir || modalToken !== activeSettingsToken) return;
+      const sep = dir.includes('\\') ? '\\' : '/';
+      const cleanDir = dir.endsWith('\\') || dir.endsWith('/') ? dir.slice(0, -1) : dir;
+      const pathInp = getInputEl(modal, '#cfgAuthPolicyPath');
+      if (pathInp) pathInp.value = `${cleanDir}${sep}admin-policy.json`;
+    } else if (act === 'auth-save-path') {
+      const pathInp = getInputEl(modal, '#cfgAuthPolicyPath');
+      const copyChk = getInputEl(modal, '#cfgAuthCopyPolicy');
+      const targetPath = pathInp?.value.trim() || '';
+      const copyCurrentPolicy = copyChk ? copyChk.checked : true;
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      try {
+        const res = await window.electronAPI.setAuthPolicyPath(targetPath, { copyCurrentPolicy });
+        if (res?.status) refreshAuthSectionUi(res.status);
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.success) {
+          showToast('Speicherort der Policy-Datei wurde aktualisiert.', { type: 'success' });
+        } else {
+          showToast(res?.error || 'Policy-Pfad konnte nicht geändert werden.', { type: 'error', duration: 6000 });
+        }
+      } finally {
+        if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
+      }
+    } else if (act === 'auth-reset-path') {
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      try {
+        const res = await window.electronAPI.setAuthPolicyPath('', { copyCurrentPolicy: false });
+        if (res?.status) refreshAuthSectionUi(res.status);
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.success) {
+          showToast('Auf Standardpfad (data/admin-policy.json) zurückgesetzt.', { type: 'info' });
+        } else {
+          showToast(res?.error || 'Standardpfad konnte nicht gesetzt werden.', { type: 'error', duration: 6000 });
+        }
+      } finally {
+        if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
+      }
+    } else if (act === 'auth-lock-hklm') {
+      const pathInp = getInputEl(modal, '#cfgAuthPolicyPath');
+      const candidatePath = !currentAuthStatus?.isHklmLocked ? pathInp?.value.trim() || '' : '';
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      try {
+        const res = await window.electronAPI.lockAuthPolicyInHklm(candidatePath);
+        if (res?.status) refreshAuthSectionUi(res.status);
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.success) {
+          showToast('Policy-Pfad fest in HKLM-Registry gesperrt.', { type: 'success' });
+        } else if (res?.canceled) {
+          showToast('UAC-Abfrage abgebrochen - HKLM-Policy nicht gesetzt.', { type: 'info' });
+        } else {
+          showToast(res?.error || 'HKLM-Sperre konnte nicht gesetzt werden.', { type: 'error', duration: 6000 });
+        }
+      } finally {
+        if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
+      }
+    } else if (act === 'auth-unlock-hklm') {
+      if (btn instanceof HTMLButtonElement) {
+        if (btn.dataset.armed !== 'true') {
+          btn.dataset.armed = 'true';
+          btn.dataset.origText = btn.textContent || '';
+          btn.textContent = '⚠️ Sperre wirklich aufheben?';
+          setTimeout(() => {
+            if (btn.isConnected && btn.dataset.armed === 'true') {
+              btn.dataset.armed = 'false';
+              btn.textContent = btn.dataset.origText || '🔓 HKLM-Sperre aufheben (Admin)';
+            }
+          }, 4000);
+          return;
+        }
+        btn.dataset.armed = 'false';
+        btn.disabled = true;
+      }
+      try {
+        const res = await window.electronAPI.unlockAuthPolicyInHklm();
+        if (res?.status) refreshAuthSectionUi(res.status);
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.success) {
+          showToast('HKLM-Policy-Sperre wurde entfernt.', { type: 'success' });
+        } else if (res?.canceled) {
+          showToast('UAC-Abfrage abgebrochen - HKLM-Sperre bleibt aktiv.', { type: 'info' });
+        } else {
+          showToast(res?.error || 'HKLM-Sperre konnte nicht aufgehoben werden.', { type: 'error', duration: 6000 });
+        }
+      } finally {
+        if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
+      }
+    } else if (act === 'toggle-admin-session') {
       if (currentAdminStatus?.mode === 'elevated' || currentAdminStatus?.isProcessElevated) return;
       const toggleBtn = modal.querySelector('#btnSettingsToggleAdminSession');
       if (toggleBtn instanceof HTMLButtonElement) toggleBtn.disabled = true;

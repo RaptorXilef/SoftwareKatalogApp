@@ -6,6 +6,7 @@ import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
 import { renderIgnoreListModal } from './ignore-list-modal.js';
+import { ensureAdminAuthenticated } from './login-modal.js';
 import { openProviderSourcesModal } from './provider-sources-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
@@ -40,6 +41,8 @@ export function resetModalContent() {
   content.ondragend = null;
 }
 
+const ADMIN_MODAL_KINDS = new Set(['settings', 'edit', 'winget-matcher', 'cleanup', 'bundle-editor']);
+
 export function closeModal() {
   const overlay = document.getElementById('modalOverlay');
   const content = document.getElementById('modalContent');
@@ -47,26 +50,50 @@ export function closeModal() {
   if (overlay) overlay.hidden = true;
   if (content) content.innerHTML = '';
   state.currentModalId = null;
+  state.currentModalKind = null;
   state.isEditModalOpen = false;
 }
 
+export function closeAdminModalIfOpen() {
+  if (state.currentModalKind && ADMIN_MODAL_KINDS.has(state.currentModalKind)) {
+    closeModal();
+  }
+}
+
 export function openDetailModal(id, options = {}) {
+  state.currentModalKind = 'detail';
   renderDetailModal(id, options);
 }
 
-export function openEditModal(id, initialTab = 'general') {
+export async function openEditModal(id, initialTab = 'general') {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Zum Bearbeiten von Software-Details ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'edit';
   renderEditModal(id, initialTab);
+  return true;
 }
 
-export function openSettingsModal(initialTab = 'general') {
-  renderSettingsModal(initialTab);
+export async function openSettingsModal(initialTab = 'general') {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Zum Öffnen der Einstellungen ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'settings';
+  return renderSettingsModal(initialTab);
 }
 
 export function openProviderPackageModal(providerId, packageId, summary = {}, options = {}) {
+  state.currentModalKind = 'detail';
   renderRemoteDetailModal(providerId, packageId, summary, options);
 }
 
-export function openArchiveLinkModal(pkg, options = {}) {
+export async function openArchiveLinkModal(pkg, options = {}) {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Zum Aufnehmen von Paketen ins Archiv ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return { success: false, canceled: true };
   const defaultMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
   const pm = String(pkg?.packageManager || pkg?.providerId || (pkg?.wingetId ? 'winget' : ''))
     .trim()
@@ -82,22 +109,39 @@ export function openArchiveLinkModal(pkg, options = {}) {
 
 export { openProviderSourcesModal };
 
-export function openWingetMatcherModal() {
+export async function openWingetMatcherModal() {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Für die Winget-ID-Zuordnung ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'winget-matcher';
   return renderWingetMatcherModal();
 }
 
-export function openCleanupModal() {
+export async function openCleanupModal() {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Für den Archiv-Aufräumer ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'cleanup';
   return renderCleanupModal();
 }
 
 export function openIgnoreListModal() {
+  state.currentModalKind = 'ignore-list';
   return renderIgnoreListModal();
 }
 
-export function openBundleEditorModal(options = {}) {
+export async function openBundleEditorModal(options = {}) {
+  const ok = await ensureAdminAuthenticated({
+    reason: 'Zum Erstellen oder Bearbeiten von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'bundle-editor';
   return renderBundleEditorModal(options);
 }
 
 export function openBundleRunnerModal(bundleId, options = {}) {
+  state.currentModalKind = 'bundle-runner';
   return renderBundleRunnerModal(bundleId, options);
 }

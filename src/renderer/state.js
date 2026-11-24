@@ -42,6 +42,7 @@ export const state = {
   pcIconCache: new Map(),
   pcIconTried: new Set(),
   currentModalId: null,
+  currentModalKind: null,
   isEditModalOpen: false,
   hasCheckedAppUpdate: false,
   selectedUpdateIds: new Set(),
@@ -58,6 +59,26 @@ export const state = {
     supported: true,
   },
   adminSessionBusy: false,
+  authStatus: {
+    enabled: false,
+    isAuthenticated: false,
+    username: '',
+    authenticatedUser: '',
+    sessionTimeoutMinutes: 0,
+    lastActivityAt: null,
+    policyPath: '',
+    configuredPolicyPath: '',
+    defaultPolicyPath: '',
+    pathSource: 'default',
+    isHklmLocked: false,
+    hklmPolicyPath: '',
+    isReadOnlyPolicy: false,
+    policyExists: false,
+    integrityValid: true,
+    integrityWarning: '',
+    integrityChecksum: '',
+    platformSupportedForHklm: true,
+  },
 };
 
 function rebuildUnifiedPackages() {
@@ -241,7 +262,39 @@ export async function toggleFavorite(id) {
   if (idx > -1) state.favorites.splice(idx, 1);
   else state.favorites.push(id);
 
-  await window.electronAPI.saveSettings({ favorites: state.favorites });
+  if (typeof window.electronAPI?.saveFavorites === 'function') {
+    await window.electronAPI.saveFavorites(state.favorites);
+  } else {
+    await window.electronAPI.saveSettings({ favorites: state.favorites });
+  }
+}
+
+export function applyAuthStatus(status) {
+  if (!status || typeof status !== 'object') return state.authStatus;
+  state.authStatus = {
+    ...state.authStatus,
+    ...status,
+    enabled: Boolean(status.enabled),
+    isAuthenticated: Boolean(status.isAuthenticated),
+    isHklmLocked: Boolean(status.isHklmLocked),
+    isReadOnlyPolicy: Boolean(status.isReadOnlyPolicy),
+    policyExists: Boolean(status.policyExists),
+    integrityValid: status.integrityValid !== false,
+    platformSupportedForHklm: status.platformSupportedForHklm !== false,
+  };
+  return state.authStatus;
+}
+
+export async function refreshAuthStatus() {
+  if (typeof window.electronAPI?.getAuthStatus !== 'function') {
+    return state.authStatus;
+  }
+  try {
+    const status = await window.electronAPI.getAuthStatus();
+    return applyAuthStatus(status);
+  } catch {
+    return state.authStatus;
+  }
 }
 
 export async function refreshBundles() {
