@@ -1,7 +1,13 @@
 import { closestButton, closestEl } from '../utils/dom.js';
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 let onJobActionCallback = null;
+let lastJobs = [];
+
+export function rerenderJobsBar() {
+  renderJobs(lastJobs);
+}
 
 /**
  * @param {{ onJobAction?: (payload: { jobId?: string, type?: string, itemId?: string }) => void }} [options]
@@ -42,21 +48,22 @@ export function initJobsBar({ onJobAction } = {}) {
 }
 
 function renderJobs(jobs) {
+  lastJobs = Array.isArray(jobs) ? jobs : [];
   const container = document.getElementById('jobsContainer');
   if (!container) return;
 
-  if (!jobs || jobs.length === 0) {
+  if (lastJobs.length === 0) {
     container.hidden = true;
     container.innerHTML = '';
     return;
   }
 
   container.hidden = false;
-  container.innerHTML = jobs
+  container.innerHTML = lastJobs
     .map((job) => {
       const isIndeterminate = job.status === 'running' && job.progress === null;
       const pct = job.progress ?? 0;
-      const pctText = job.status === 'running' ? (isIndeterminate ? 'läuft...' : `${pct}%`) : '';
+      const pctText = job.status === 'running' ? (isIndeterminate ? t('jobs.running') : `${pct}%`) : '';
 
       const actionHtml = job.action
         ? `<button type="button" class="job-action-btn" data-job-id="${escapeHTML(job.id)}" data-job-action="${escapeHTML(job.action.type)}" data-item-id="${escapeHTML(job.action.itemId || '')}">${escapeHTML(job.action.label)}</button>`
@@ -64,9 +71,9 @@ function renderJobs(jobs) {
 
       const controlHtml =
         job.status === 'running' && job.cancelable
-          ? `<button type="button" class="job-cancel-btn" data-cancel-job="${escapeHTML(job.id)}" title="Vorgang abbrechen">Abbrechen</button>`
+          ? `<button type="button" class="job-cancel-btn" data-cancel-job="${escapeHTML(job.id)}" title="${escapeHTML(t('jobs.cancelTitle'))}">${escapeHTML(t('jobs.cancel'))}</button>`
           : job.status !== 'running'
-            ? `<button type="button" class="job-dismiss-btn" data-dismiss-job="${escapeHTML(job.id)}" title="Schließen">✕</button>`
+            ? `<button type="button" class="job-dismiss-btn" data-dismiss-job="${escapeHTML(job.id)}" title="${escapeHTML(t('jobs.closeTitle'))}">✕</button>`
             : '';
 
       return `

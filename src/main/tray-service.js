@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, Menu, nativeImage, Tray } from 'electron';
 import { buildTrayMenuDescriptors, formatTrayTooltip } from '../shared/background-update-logic.js';
+import { t } from '../shared/i18n.js';
 import { getAppFolder } from './config.js';
 
 /** @type {Tray | null} */
@@ -29,12 +30,14 @@ export function resolveTrayIconPath() {
     app.isPackaged && process.resourcesPath ? path.join(process.resourcesPath, 'icon.ico') : '',
     path.join(getAppFolder(), 'build', 'icon.ico'),
     path.join(app.getAppPath(), 'build', 'icon.ico'),
+    path.resolve(__dirname, '../../build/icon.ico'),
   ].filter(Boolean);
 
   for (const candidate of candidates) {
     try {
-      if (fs.existsSync(candidate)) {
-        return candidate;
+      const resolved = path.resolve(candidate);
+      if (fs.existsSync(resolved)) {
+        return resolved;
       }
     } catch {
       // Ignorieren
@@ -44,7 +47,7 @@ export function resolveTrayIconPath() {
 }
 
 function buildTrayMenu() {
-  const descriptors = buildTrayMenuDescriptors(trayState);
+  const descriptors = buildTrayMenuDescriptors({ ...trayState, t });
   /** @type {Record<string, () => void>} */
   const actionMap = {
     'open-window': () => trayHandlers.onOpenWindow?.(),
@@ -72,7 +75,7 @@ function buildTrayMenu() {
 
 function refreshTrayUi() {
   if (!tray || tray.isDestroyed()) return;
-  tray.setToolTip(formatTrayTooltip(trayState));
+  tray.setToolTip(formatTrayTooltip({ ...trayState, t }));
   tray.setContextMenu(buildTrayMenu());
 }
 

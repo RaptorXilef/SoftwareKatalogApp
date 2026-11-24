@@ -177,6 +177,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getBackgroundStatus: () => ipcRenderer.invoke('background-get-status'),
   runBackgroundCheckNow: () => ipcRenderer.invoke('background-check-now'),
   setAutoUpdatePaused: (paused) => ipcRenderer.invoke('background-set-auto-update-paused', paused),
+
+  // Mehrsprachigkeit (i18n)
+  getI18nState: () => ipcRenderer.invoke('i18n-get-state'),
+  setLanguage: (code) => ipcRenderer.invoke('i18n-set-language', code),
+  onLanguageChanged: (cb) => {
+    const listener = (_event, state) => cb(state);
+    ipcRenderer.on('language-changed', listener);
+    return () => ipcRenderer.off('language-changed', listener);
+  },
   onNavigateTab: (cb) => {
     const listener = (_event, tab) => cb(tab);
     ipcRenderer.on('navigate-tab', listener);

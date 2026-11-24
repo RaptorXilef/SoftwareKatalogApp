@@ -34,6 +34,7 @@ describe('settings-draft-logic: Tabs & Eingabe-Normalisierung', () => {
 describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () => {
   it('erzeugt saubere Defaults und behandelt 0 sowie askSaveDialog korrekt', () => {
     const defaults = createSettingsDraft({});
+    assert.equal(defaults.language, 'en');
     assert.equal(defaults.startTab, 'updates');
     assert.equal(defaults.newBadgeDays, 14);
     assert.equal(defaults.versionCompareDepth, 3);
@@ -145,6 +146,8 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
       autoExtensions: ['.exe', '.msi'],
     });
 
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, language: 'de' }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, language: 'auto' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, startTab: 'discover' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, newBadgeDays: 0 }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, versionCompareDepth: 4 }), true);
@@ -217,6 +220,8 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
       customSources: [{ name: 'corp', url: 'https://npm.example.org' }],
     });
     assert.equal(plan.needsRescan, true);
+    assert.equal(plan.languageChanged, false);
+    assert.equal(plan.payload.language, 'en');
     assert.equal(plan.providersChanged, true);
     assert.equal(plan.newlyEnabledProvider, true);
     assert.equal(plan.vcpkgRootChanged, true);
@@ -227,12 +232,15 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
 
     const withBg = {
       ...current,
+      language: 'de',
       autostartEnabled: true,
       autostartMode: 'admin',
       autoUpdateEnabled: true,
       defaultSortModes: { updates: 'updates', installed: 'az', archive: 'newest' },
     };
     const bgPlan = buildSettingsSavePlan(initial, withBg);
+    assert.equal(bgPlan.languageChanged, true);
+    assert.equal(bgPlan.payload.language, 'de');
     assert.equal(bgPlan.autostartChanged, true);
     assert.equal(bgPlan.sortDefaultsChanged, true);
     assert.equal(bgPlan.backgroundChanged, true);

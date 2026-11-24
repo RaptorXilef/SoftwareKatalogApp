@@ -74,6 +74,17 @@ export function createBackgroundUpdater(deps = {}) {
   const clearIntervalFn = typeof deps.clearIntervalFn === 'function' ? deps.clearIntervalFn : clearInterval;
   const setTimeoutFn = typeof deps.setTimeoutFn === 'function' ? deps.setTimeoutFn : setTimeout;
   const clearTimeoutFn = typeof deps.clearTimeoutFn === 'function' ? deps.clearTimeoutFn : clearTimeout;
+  const tFn = typeof deps.tFn === 'function' ? deps.tFn : null;
+
+  function tr(key, params, fallback) {
+    if (tFn) {
+      const translated = tFn(key, params);
+      if (typeof translated === 'string' && translated && translated !== key) {
+        return translated;
+      }
+    }
+    return fallback;
+  }
 
   let onStatusChange = typeof deps.onStatusChange === 'function' ? deps.onStatusChange : null;
   let onOpenUpdatesTab = typeof deps.onOpenUpdatesTab === 'function' ? deps.onOpenUpdatesTab : null;
@@ -203,18 +214,28 @@ export function createBackgroundUpdater(deps = {}) {
 
   function formatUpdatesAvailableBody(newUpdates) {
     const count = newUpdates.length;
+    const fallbackName = tr('notifications.fallbackProgramName', {}, 'Program');
     const previewNames = newUpdates
       .slice(0, 3)
       .map((u) => {
-        const name = String(u.item?.name || u.item?.packageId || 'Programm').trim();
+        const name = String(u.item?.name || u.item?.packageId || fallbackName).trim();
         return u.targetVersion ? `${name} (v${u.targetVersion})` : name;
       })
       .join(', ');
     if (count === 1) {
-      return `1 neues Update verfuegbar: ${previewNames}`;
+      return tr(
+        'notifications.updatesAvailableOne',
+        { items: previewNames },
+        `1 new update available: ${previewNames}`
+      );
     }
-    const suffix = count > 3 ? ` + ${count - 3} weitere` : '';
-    return `${count} neue Updates verfuegbar: ${previewNames}${suffix}`;
+    const suffix =
+      count > 3 ? tr('notifications.updatesAvailableMoreSuffix', { count: count - 3 }, ` + ${count - 3} more`) : '';
+    return tr(
+      'notifications.updatesAvailableMany',
+      { count, items: previewNames, suffix },
+      `${count} new updates available: ${previewNames}${suffix}`
+    );
   }
 
   async function runCheck({ manual = false } = {}) {
@@ -311,11 +332,22 @@ export function createBackgroundUpdater(deps = {}) {
               if (autoUpdatedCount > 0) {
                 const countLabel =
                   autoUpdatedCount === 1
-                    ? '1 Programm automatisch aktualisiert.'
-                    : `${autoUpdatedCount} Programme automatisch aktualisiert.`;
-                const failSuffix = autoFailedCount > 0 ? ` (${autoFailedCount} fehlgeschlagen)` : '';
+                    ? tr('notifications.autoUpdateBodyOne', {}, '1 program updated automatically.')
+                    : tr(
+                        'notifications.autoUpdateBodyMany',
+                        { count: autoUpdatedCount },
+                        `${autoUpdatedCount} programs updated automatically.`
+                      );
+                const failSuffix =
+                  autoFailedCount > 0
+                    ? tr(
+                        'notifications.autoUpdateFailedSuffix',
+                        { count: autoFailedCount },
+                        ` (${autoFailedCount} failed)`
+                      )
+                    : '';
                 sendNotificationFn({
-                  title: 'Software Katalog - Auto-Update',
+                  title: tr('notifications.autoUpdateTitle', {}, 'Software Catalog - Auto-Update'),
                   body: `${countLabel}${failSuffix}`,
                   iconPath: resolveIconPathFn(),
                   onClick: () => onOpenUpdatesTab?.(),
@@ -335,7 +367,7 @@ export function createBackgroundUpdater(deps = {}) {
         }
         if (delta.newUpdates.length > 0) {
           sendNotificationFn({
-            title: 'Software Katalog - Updates verfuegbar',
+            title: tr('notifications.updatesAvailableTitle', {}, 'Software Catalog - Updates available'),
             body: formatUpdatesAvailableBody(delta.newUpdates),
             iconPath: resolveIconPathFn(),
             onClick: () => onOpenUpdatesTab?.(),
@@ -353,7 +385,7 @@ export function createBackgroundUpdater(deps = {}) {
         status: getStatus(),
       };
     } catch (err) {
-      lastError = err?.message || 'Hintergrund-Update-Pruefung fehlgeschlagen.';
+      lastError = err?.message || tr('notifications.backgroundCheckFailed', {}, 'Background update check failed.');
       return { success: false, error: lastError, status: getStatus() };
     } finally {
       isChecking = false;

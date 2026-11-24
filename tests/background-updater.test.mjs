@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { createAutostartService } from '../src/main/autostart-core.js';
 import { createBackgroundUpdater } from '../src/main/background-updater-core.js';
@@ -15,6 +17,7 @@ import {
   removeAutoUpdateEntry,
   upsertAutoUpdateEntry,
 } from '../src/shared/background-update-logic.js';
+import { createI18n } from '../src/shared/i18n.js';
 import { createDefaultAccessPolicy } from '../src/shared/policy-logic.js';
 
 describe('background-update-logic: CLI-Flags, Tooltip & Normalisierung', () => {
@@ -27,14 +30,18 @@ describe('background-update-logic: CLI-Flags, Tooltip & Normalisierung', () => {
   });
 
   it('formatiert den dynamischen Tray-Tooltip mit ASCII-Bindestrichen', () => {
-    assert.equal(formatTrayTooltip({ updateCount: 0 }), 'Software Katalog - Alle Programme aktuell');
-    assert.equal(formatTrayTooltip({ updateCount: 1 }), 'Software Katalog - 1 Update verfuegbar');
-    assert.equal(formatTrayTooltip({ updateCount: 3 }), 'Software Katalog - 3 Updates verfuegbar');
-    assert.equal(formatTrayTooltip({ isChecking: true }), 'Software Katalog - Pruefe auf Updates...');
+    assert.equal(formatTrayTooltip({ updateCount: 0 }), 'Software Catalog - All programs up to date');
+    assert.equal(formatTrayTooltip({ updateCount: 1 }), 'Software Catalog - 1 update available');
+    assert.equal(formatTrayTooltip({ updateCount: 3 }), 'Software Catalog - 3 updates available');
+    assert.equal(formatTrayTooltip({ isChecking: true }), 'Software Catalog - Checking for updates...');
     assert.equal(
       formatTrayTooltip({ updateCount: 2, autoUpdateEnabled: true, autoUpdatePaused: true }),
-      'Software Katalog - 2 Updates verfuegbar (Auto-Update pausiert)'
+      'Software Catalog - 2 updates available (Auto-Update paused)'
     );
+
+    const deDict = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'src', 'locales', 'de.json'), 'utf-8'));
+    const deI18n = createI18n({ locale: 'de', messages: deDict });
+    assert.equal(formatTrayTooltip({ updateCount: 2, t: deI18n.t }), 'Software Katalog - 2 Updates verfügbar');
   });
 
   it('setzt minimizeToTrayOnClose standardmaessig auf true und baut Tray-Menue mit Version & Einstellungen', () => {
@@ -51,11 +58,26 @@ describe('background-update-logic: CLI-Flags, Tooltip & Normalisierung', () => {
     });
     assert.equal(unlockedMenu[0].type, 'item');
     if (unlockedMenu[0].type === 'item') {
-      assert.equal(unlockedMenu[0].label, 'Software Katalog v1.27.0');
+      assert.equal(unlockedMenu[0].label, 'Software Catalog v1.27.0');
       assert.equal(unlockedMenu[0].enabled, false);
     }
     assert.equal(
       unlockedMenu.some((item) => item.type === 'item' && item.actionId === 'open-settings'),
+      true
+    );
+
+    const deDict = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'src', 'locales', 'de.json'), 'utf-8'));
+    const deI18n = createI18n({ locale: 'de', messages: deDict });
+    const deMenu = buildTrayMenuDescriptors({
+      appVersion: '1.27.0',
+      settingsLocked: false,
+      t: deI18n.t,
+    });
+    assert.equal(deMenu[0].type === 'item' && deMenu[0].label, 'Software Katalog v1.27.0');
+    assert.equal(
+      deMenu.some(
+        (item) => item.type === 'item' && item.actionId === 'open-settings' && item.label.includes('Einstellungen')
+      ),
       true
     );
 
@@ -391,9 +413,9 @@ describe('background-updater & autostart-core: Orchestrierung mit Mocks', () => 
     assert.equal(enqueuedCalls[0].opts.silent, true);
     assert.equal(enqueuedCalls[0].opts.skipAutoAdminPrompt, true);
     assert.equal(notifications.length, 2);
-    assert.equal(notifications[0].title, 'Software Katalog - Auto-Update');
-    assert.match(notifications[0].body, /1 Programm automatisch aktualisiert/);
-    assert.equal(notifications[1].title, 'Software Katalog - Updates verfuegbar');
+    assert.equal(notifications[0].title, 'Software Catalog - Auto-Update');
+    assert.match(notifications[0].body, /1 program updated automatically/);
+    assert.equal(notifications[1].title, 'Software Catalog - Updates available');
     assert.match(notifications[1].body, /CCleaner/);
 
     // Zweiter Lauf ohne neue Updates sendet keine doppelte "Updates verfuegbar"-Benachrichtigung

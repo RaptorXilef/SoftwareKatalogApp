@@ -1,4 +1,5 @@
 import { state } from '../state.js';
+import { t } from '../utils/i18n.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 
 let queueState = {
@@ -19,12 +20,12 @@ let wasRunning = false;
 
 function getModeBadgeHtml(item) {
   if (item.interactiveRequired) {
-    return '<span class="update-queue-mode-badge is-protected" title="Adware-/Klick-Schutz: wird immer interaktiv ausgeführt">🛡️ Interaktiv-Schutz</span>';
+    return `<span class="update-queue-mode-badge is-protected" title="${escapeHTML(t('queue.modeProtectedTitle'))}">🛡️ ${escapeHTML(t('queue.modeProtected'))}</span>`;
   }
   if (item.mode === 'silent') {
-    return '<span class="update-queue-mode-badge is-silent">⚡ Silent</span>';
+    return `<span class="update-queue-mode-badge is-silent">⚡ ${escapeHTML(t('queue.modeSilent'))}</span>`;
   }
-  return '<span class="update-queue-mode-badge is-interactive">🖱️ Interaktiv</span>';
+  return `<span class="update-queue-mode-badge is-interactive">🖱️ ${escapeHTML(t('queue.modeInteractive'))}</span>`;
 }
 
 function getVersionText(item) {
@@ -70,7 +71,7 @@ export function renderUpdateQueue() {
       if (isActive) {
         return `
           <li class="update-queue-item is-active" draggable="false" data-queue-index="0" data-queue-id="${escapeHTML(item.queueId)}">
-            <span class="update-queue-pos is-running" title="Läuft gerade (Platz 1 gesperrt)">▶ #1</span>
+            <span class="update-queue-pos is-running" title="${escapeHTML(t('queue.runningSlotTitle'))}">▶ #1</span>
             ${iconHtml}
             <div class="update-queue-item-main">
               <div class="update-queue-item-top">
@@ -78,7 +79,7 @@ export function renderUpdateQueue() {
                 ${versionText ? `<span class="update-queue-item-ver">${escapeHTML(versionText)}</span>` : ''}
                 ${modeBadge}
               </div>
-              <div class="update-queue-item-detail">${escapeHTML(item.detail || 'Wird aktualisiert...')}</div>
+              <div class="update-queue-item-detail">${escapeHTML(item.detail || t('queue.updatingDefault'))}</div>
               <div class="update-queue-progress-track">
                 <div class="update-queue-progress-fill"></div>
               </div>
@@ -87,9 +88,9 @@ export function renderUpdateQueue() {
               type="button"
               class="btn btn-danger btn-xs"
               data-queue-cancel="${escapeHTML(item.queueId)}"
-              title="Aktives Update abbrechen"
+              title="${escapeHTML(t('queue.cancelActiveTitle'))}"
             >
-              ✕ Abbrechen
+              ✕ ${escapeHTML(t('queue.cancelActive'))}
             </button>
           </li>
         `;
@@ -97,7 +98,7 @@ export function renderUpdateQueue() {
 
       return `
         <li class="update-queue-item is-pending" draggable="true" data-queue-index="${idx}" data-queue-id="${escapeHTML(item.queueId)}">
-          <span class="update-queue-drag-handle" title="Per Drag & Drop umsortieren (nicht vor Platz 1)">⋮⋮</span>
+          <span class="update-queue-drag-handle" title="${escapeHTML(t('queue.dragHandleTitle'))}">⋮⋮</span>
           <span class="update-queue-pos">#${idx + 1}</span>
           ${iconHtml}
           <div class="update-queue-item-main">
@@ -106,14 +107,14 @@ export function renderUpdateQueue() {
               ${versionText ? `<span class="update-queue-item-ver">${escapeHTML(versionText)}</span>` : ''}
               ${modeBadge}
             </div>
-            <div class="update-queue-item-detail">${escapeHTML(item.detail || 'Wartend')}</div>
+            <div class="update-queue-item-detail">${escapeHTML(item.detail || t('queue.waitingDefault'))}</div>
           </div>
           <button
             type="button"
             class="btn btn-ghost btn-xs"
             data-queue-cancel="${escapeHTML(item.queueId)}"
-            title="Aus Warteschlange entfernen"
-            aria-label="Entfernen"
+            title="${escapeHTML(t('queue.removeTitle'))}"
+            aria-label="${escapeHTML(t('queue.removeAria'))}"
           >
             ✕
           </button>
@@ -125,11 +126,11 @@ export function renderUpdateQueue() {
   panel.innerHTML = `
     <div class="update-queue-header">
       <div class="update-queue-title">
-        <strong>📦 Update-Warteschlange</strong>
-        <span class="update-queue-counts">${activeCount} aktiv, ${pendingCount} wartend</span>
+        <strong>📦 ${escapeHTML(t('queue.title'))}</strong>
+        <span class="update-queue-counts">${escapeHTML(t('queue.counts', { active: activeCount, pending: pendingCount }))}</span>
       </div>
       <button type="button" class="btn btn-danger btn-xs" data-queue-action="cancel-all">
-        🛑 Alle abbrechen
+        🛑 ${escapeHTML(t('queue.cancelAll'))}
       </button>
     </div>
     <ul class="update-queue-list" id="updateQueueList">

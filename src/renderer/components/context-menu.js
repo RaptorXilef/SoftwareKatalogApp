@@ -1,3 +1,4 @@
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 /** @type {HTMLDivElement | null} */
@@ -55,7 +56,7 @@ export function closeContextMenu({ restoreFocus = false } = {}) {
  * Oeffnet ein tastaturbedienbares In-App-Kontextmenue an (x, y) innerhalb des Viewports.
  * @param {{ x: number, y: number, items: Array<Record<string, any>>, ariaLabel?: string }} options
  */
-export function openContextMenu({ x, y, items = [], ariaLabel = 'Kontextmenü' }) {
+export function openContextMenu({ x, y, items = [], ariaLabel = t('contextMenu.defaultAria') }) {
   closeContextMenu({ restoreFocus: false });
   if (!Array.isArray(items) || items.length === 0) return;
 

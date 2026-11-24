@@ -3,6 +3,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import { detectInstallKind, normalizeArch, resolveDataDir } from '../shared/app-update-logic.js';
 import { DEFAULT_BACKGROUND_SETTINGS, normalizeBackgroundSettings } from '../shared/background-update-logic.js';
+import { normalizeConfiguredLanguage } from '../shared/i18n.js';
 import {
   getArchiveRootLabel,
   isNormalizedPathInsideDir,
@@ -45,6 +46,7 @@ const DEFAULT_CONFIG = {
   // Sitzungsbasierter Admin-Ausfuehrungsmodus & Policy-Datei
   autoRequestAdminForBatch: false,
   authFilePath: '',
+  language: 'en',
   ...DEFAULT_BACKGROUND_SETTINGS,
 };
 
@@ -271,6 +273,7 @@ export function getConfig() {
   const validSaveModes = new Set(['ask', 'auto-id', 'none']);
   const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
   const startTab = normalizeStartTab(config.startTab);
+  const language = normalizeConfiguredLanguage(config.language);
   const defaultSortModes = normalizeDefaultSortModes(config.defaultSortModes);
   const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
   const providerSettings = normalizeProviderSettings(config.providerSettings);
@@ -300,6 +303,7 @@ export function getConfig() {
     targetPath,
     archiveSaveMode,
     startTab,
+    language,
     defaultSortModes,
     enabledProviders,
     providerSettings,
@@ -313,6 +317,7 @@ export function saveConfig(newSettings) {
   const current = getConfig();
   const merged = { ...current, ...newSettings };
   Object.assign(merged, normalizeBackgroundSettings(merged));
+  merged.language = normalizeConfiguredLanguage(merged.language);
   merged.defaultSortModes = normalizeDefaultSortModes(merged.defaultSortModes);
 
   if (newSettings?.enabledProviders !== undefined) {

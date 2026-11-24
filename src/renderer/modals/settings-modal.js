@@ -28,6 +28,7 @@ import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { renderAdminSessionButton, renderAuthHeaderControls } from '../components/toolbar.js';
 import { applyAuthStatus, state } from '../state.js';
+import { applyI18nState, getAvailableLocales, getConfiguredLanguage, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -98,6 +99,7 @@ export async function renderSettingsModal(initialTab = 'general') {
     initialAuthStatus,
     initialAutostartStatus,
     initialBgStatus,
+    initialI18nState,
   ] = await Promise.all([
     window.electronAPI.getSettings(),
     window.electronAPI.getAppInfo(),
@@ -115,9 +117,23 @@ export async function renderSettingsModal(initialTab = 'general') {
     typeof window.electronAPI?.getBackgroundStatus === 'function'
       ? window.electronAPI.getBackgroundStatus()
       : Promise.resolve({ isChecking: false, isElevated: false, autoUpdatePaused: false }),
+    typeof window.electronAPI?.getI18nState === 'function' ? window.electronAPI.getI18nState() : Promise.resolve(null),
   ]);
 
   if (modalToken !== activeSettingsToken) return;
+  if (initialI18nState) {
+    applyI18nState(initialI18nState);
+  }
+  const availableLocales =
+    Array.isArray(initialI18nState?.availableLocales) && initialI18nState.availableLocales.length > 0
+      ? initialI18nState.availableLocales
+      : getAvailableLocales();
+  const userLocalesDir =
+    typeof initialI18nState?.userLocalesDir === 'string' && initialI18nState.userLocalesDir
+      ? initialI18nState.userLocalesDir
+      : info?.dataDir
+        ? `${info.dataDir}${info.dataDir.includes('\\') ? '\\' : '/'}locales`
+        : 'data/locales';
 
   let currentAuthStatus = applyAuthStatus(initialAuthStatus || state.authStatus);
   renderAuthHeaderControls();
@@ -792,7 +808,11 @@ export async function renderSettingsModal(initialTab = 'general') {
             : s.autostartMode || 'normal',
         }
       : {};
-  const effectiveInitialSettings = { ...s, ...osAutostartOverrides };
+  const effectiveInitialSettings = {
+    language: getConfiguredLanguage(),
+    ...s,
+    ...osAutostartOverrides,
+  };
   const initialDraft = createSettingsDraft(effectiveInitialSettings);
   let draftSettings = createSettingsDraft(effectiveInitialSettings);
   const availabilityById = new Map();
@@ -916,13 +936,25 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   const hiddenCheckboxes =
     state.availableHiddenCats.length === 0
-      ? '<span class="muted">Keine versteckten Kategorien im Katalog vorhanden.</span>'
+      ? `<span class="muted">${escapeHTML(t('settings.general.hiddenCatsEmpty'))}</span>`
       : state.availableHiddenCats
           .map((cat) => {
             const checked = draftSettings.visibleHiddenCats.includes(cat) ? 'checked' : '';
             return `<label class="check-row"><input type="checkbox" name="hiddenCatCheck" value="${escapeHTML(cat)}" ${checked}><span>${escapeHTML(cat)}</span></label>`;
           })
           .join('');
+
+  const languageOptionsHtml = [
+    `<option value="auto" ${draftSettings.language === 'auto' ? 'selected' : ''}>${escapeHTML(t('settings.general.languageAuto'))}</option>`,
+    ...availableLocales.map((loc) => {
+      const code = String(loc.code || '').trim();
+      const nativeName = String(loc.nativeName || loc.name || code).trim();
+      const englishName = String(loc.name || '').trim();
+      const namePart = englishName && englishName !== nativeName ? `${nativeName} (${englishName})` : nativeName;
+      const customPart = loc.source === 'custom' ? ` [${t('settings.general.languageCustomTag')}]` : '';
+      return `<option value="${escapeHTML(code)}" ${draftSettings.language === code ? 'selected' : ''}>${escapeHTML(`${namePart}${customPart} - ${code}`)}</option>`;
+    }),
+  ].join('');
 
   const tabsNavHtml = SETTINGS_TABS.map(
     (tab) => `
@@ -932,7 +964,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         role="tab"
         aria-selected="${tab.id === activeTab ? 'true' : 'false'}"
         data-settings-tab="${tab.id}"
-      >${escapeHTML(tab.label)}</button>
+      >${escapeHTML(tab.icon ? `${tab.icon} ${t(tab.labelKey)}` : tab.label)}</button>
     `
   ).join('');
 
@@ -1289,11 +1321,11 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   modal.innerHTML = `
     <div class="modal-header">
-      <h2>Einstellungen</h2>
-      <button type="button" class="icon-btn" data-settings-action="close" title="Schließen" aria-label="Schließen">✕</button>
+      <h2>${escapeHTML(t('settings.title'))}</h2>
+      <button type="button" class="icon-btn" data-settings-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
     </div>
 
-    <nav class="modal-tabs settings-tabs" role="tablist" aria-label="Einstellungs-Bereiche">
+    <nav class="modal-tabs settings-tabs" role="tablist" aria-label="${escapeHTML(t('settings.tabsAria'))}">
       ${tabsNavHtml}
     </nav>
 
@@ -1301,63 +1333,74 @@ export async function renderSettingsModal(initialTab = 'general') {
       <!-- TAB 1: ALLGEMEIN -->
       <section class="tab-panel" role="tabpanel" data-settings-panel="general" ${activeTab === 'general' ? '' : 'hidden'}>
         <section class="settings-section">
-          <h3>⚙️ Startverhalten & Darstellung</h3>
+          <h3>⚙️ ${escapeHTML(t('settings.general.sectionTitle'))}</h3>
           <div class="form-grid-2">
             <label class="form-field">
-              <span>Start-Tab beim Öffnen der App</span>
-              <select id="cfgStartTab">
-                <option value="updates" ${draftSettings.startTab === 'updates' ? 'selected' : ''}>⬆️ Updates (Standard)</option>
-                <option value="installed" ${draftSettings.startTab === 'installed' ? 'selected' : ''}>💻 Installiert</option>
-                <option value="archive" ${draftSettings.startTab === 'archive' ? 'selected' : ''}>🗄️ Archiv</option>
-                <option value="bundles" ${draftSettings.startTab === 'bundles' ? 'selected' : ''}>📦 Bündel</option>
-                <option value="discover" ${draftSettings.startTab === 'discover' ? 'selected' : ''}>🛍️ Neu installieren</option>
+              <span>${escapeHTML(t('settings.general.languageLabel'))}</span>
+              <select id="cfgLanguage">
+                ${languageOptionsHtml}
               </select>
             </label>
             <label class="form-field">
-              <span>"NEU"-Hinweis anzeigen für (Tage, 0 = aus)</span>
+              <span>${escapeHTML(t('settings.general.startTabLabel'))}</span>
+              <select id="cfgStartTab">
+                <option value="updates" ${draftSettings.startTab === 'updates' ? 'selected' : ''}>⬆️ ${escapeHTML(`${t('tabs.updates')}${t('settings.general.startTabDefaultSuffix')}`)}</option>
+                <option value="installed" ${draftSettings.startTab === 'installed' ? 'selected' : ''}>💻 ${escapeHTML(t('tabs.installed'))}</option>
+                <option value="archive" ${draftSettings.startTab === 'archive' ? 'selected' : ''}>🗄️ ${escapeHTML(t('tabs.archive'))}</option>
+                <option value="bundles" ${draftSettings.startTab === 'bundles' ? 'selected' : ''}>📦 ${escapeHTML(t('tabs.bundles'))}</option>
+                <option value="discover" ${draftSettings.startTab === 'discover' ? 'selected' : ''}>🛍️ ${escapeHTML(t('tabs.discover'))}</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>${escapeHTML(t('settings.general.newBadgeDaysLabel'))}</span>
               <input type="number" id="cfgNewBadgeDays" value="${draftSettings.newBadgeDays}" min="0" max="365">
             </label>
             <label class="form-field">
-              <span>Versionsvergleich-Genauigkeit (Stellen, z. B. 3 = X.X.X)</span>
+              <span>${escapeHTML(t('settings.general.versionDepthLabel'))}</span>
               <input type="number" id="cfgVersionDepth" value="${draftSettings.versionCompareDepth}" min="1" max="10">
             </label>
             <label class="form-field">
-              <span>Standard-Sortierung: Updates</span>
+              <span>${escapeHTML(t('settings.general.defaultSortUpdates'))}</span>
               <select id="cfgDefaultSortUpdates">
-                <option value="az" ${draftSettings.defaultSortModes.updates === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
-                <option value="updates" ${draftSettings.defaultSortModes.updates === 'updates' ? 'selected' : ''}>Updates zuerst</option>
-                <option value="webarchive" ${draftSettings.defaultSortModes.updates === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
-                <option value="update" ${draftSettings.defaultSortModes.updates === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
+                <option value="az" ${draftSettings.defaultSortModes.updates === 'az' ? 'selected' : ''}>${escapeHTML(`${t('settings.general.sortOptionAz')}${t('settings.general.sortDefaultSuffix')}`)}</option>
+                <option value="updates" ${draftSettings.defaultSortModes.updates === 'updates' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdates'))}</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.updates === 'webarchive' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionWebArchive'))}</option>
+                <option value="update" ${draftSettings.defaultSortModes.updates === 'update' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdate'))}</option>
               </select>
             </label>
             <label class="form-field">
-              <span>Standard-Sortierung: Installiert</span>
+              <span>${escapeHTML(t('settings.general.defaultSortInstalled'))}</span>
               <select id="cfgDefaultSortInstalled">
-                <option value="az" ${draftSettings.defaultSortModes.installed === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
-                <option value="updates" ${draftSettings.defaultSortModes.installed === 'updates' ? 'selected' : ''}>Updates zuerst</option>
-                <option value="webarchive" ${draftSettings.defaultSortModes.installed === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
-                <option value="update" ${draftSettings.defaultSortModes.installed === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
+                <option value="az" ${draftSettings.defaultSortModes.installed === 'az' ? 'selected' : ''}>${escapeHTML(`${t('settings.general.sortOptionAz')}${t('settings.general.sortDefaultSuffix')}`)}</option>
+                <option value="updates" ${draftSettings.defaultSortModes.installed === 'updates' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdates'))}</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.installed === 'webarchive' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionWebArchive'))}</option>
+                <option value="update" ${draftSettings.defaultSortModes.installed === 'update' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdate'))}</option>
               </select>
             </label>
             <label class="form-field">
-              <span>Standard-Sortierung: Archiv</span>
+              <span>${escapeHTML(t('settings.general.defaultSortArchive'))}</span>
               <select id="cfgDefaultSortArchive">
-                <option value="az" ${draftSettings.defaultSortModes.archive === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
-                <option value="updates" ${draftSettings.defaultSortModes.archive === 'updates' ? 'selected' : ''}>Updates zuerst</option>
-                <option value="webarchive" ${draftSettings.defaultSortModes.archive === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
-                <option value="update" ${draftSettings.defaultSortModes.archive === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
-                <option value="installed" ${draftSettings.defaultSortModes.archive === 'installed' ? 'selected' : ''}>Auf PC installiert</option>
-                <option value="newest" ${draftSettings.defaultSortModes.archive === 'newest' ? 'selected' : ''}>Zuletzt hinzugefügt</option>
-                <option value="updated" ${draftSettings.defaultSortModes.archive === 'updated' ? 'selected' : ''}>Zuletzt aktualisiert</option>
+                <option value="az" ${draftSettings.defaultSortModes.archive === 'az' ? 'selected' : ''}>${escapeHTML(`${t('settings.general.sortOptionAz')}${t('settings.general.sortDefaultSuffix')}`)}</option>
+                <option value="updates" ${draftSettings.defaultSortModes.archive === 'updates' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdates'))}</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.archive === 'webarchive' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionWebArchive'))}</option>
+                <option value="update" ${draftSettings.defaultSortModes.archive === 'update' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdate'))}</option>
+                <option value="installed" ${draftSettings.defaultSortModes.archive === 'installed' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionInstalled'))}</option>
+                <option value="newest" ${draftSettings.defaultSortModes.archive === 'newest' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionNewest'))}</option>
+                <option value="updated" ${draftSettings.defaultSortModes.archive === 'updated' ? 'selected' : ''}>${escapeHTML(t('settings.general.sortOptionUpdated'))}</option>
               </select>
             </label>
           </div>
+          <p class="panel-hint">
+            ${escapeHTML(t('settings.general.languageHintPrefix'))}<code>fr.json</code>${escapeHTML(t('settings.general.languageHintSuffix'))}
+            <code>${escapeHTML(userLocalesDir)}</code>
+            ${userLocalesDir ? `<button type="button" class="btn btn-ghost btn-xs" data-settings-action="open-locales-dir">📁 data/locales/</button>` : ''}
+          </p>
         </section>
 
         <section class="settings-section">
-          <h3>👁️ Versteckte Kategorien</h3>
+          <h3>👁️ ${escapeHTML(t('settings.general.hiddenCatsTitle'))}</h3>
           <div class="form-field">
-            <span>Versteckte Kategorien im Katalog einblenden</span>
+            <span>${escapeHTML(t('settings.general.hiddenCatsLabel'))}</span>
             <div class="hidden-cats-wrap">${hiddenCheckboxes}</div>
           </div>
         </section>
@@ -1576,12 +1619,12 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     <div class="modal-footer settings-footer">
       <div class="settings-footer-status">
-        <span class="muted">Software Katalog by © Felix Maywald</span>
-        <span id="settingsDirtyBadge" class="settings-dirty-badge" hidden>● Ungespeicherte Änderungen</span>
+        <span class="muted">${escapeHTML(t('app.title'))} ${escapeHTML(t('app.byAuthor'))}</span>
+        <span id="settingsDirtyBadge" class="settings-dirty-badge" hidden>● ${escapeHTML(t('settings.unsavedChanges'))}</span>
       </div>
       <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-settings-action="close">Abbrechen</button>
-        <button type="button" class="btn btn-primary" id="btnSettingsSave" data-settings-action="save">💾 Speichern & Anwenden</button>
+        <button type="button" class="btn btn-ghost" data-settings-action="close">${escapeHTML(t('settings.cancel'))}</button>
+        <button type="button" class="btn btn-primary" id="btnSettingsSave" data-settings-action="save">💾 ${escapeHTML(t('settings.saveAndApply'))}</button>
       </div>
     </div>
   `;
@@ -1628,6 +1671,7 @@ export async function renderSettingsModal(initialTab = 'general') {
     const vcpkgInput = getInputEl(modal, '#cfgVcpkgRoot');
 
     draftSettings = createSettingsDraft({
+      language: getSelectEl(modal, '#cfgLanguage')?.value || draftSettings.language,
       startTab: getSelectEl(modal, '#cfgStartTab')?.value || draftSettings.startTab,
       defaultSortModes: {
         updates: getSelectEl(modal, '#cfgDefaultSortUpdates')?.value || draftSettings.defaultSortModes.updates,
@@ -2649,6 +2693,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       await runAppUpdateCheck({ manual: true });
     } else if (act === 'open-github') window.electronAPI.openUrl('https://github.com/RaptorXilef/SoftwareKatalogApp');
     else if (act === 'open-data-dir') window.electronAPI.openPath(s.dataDir);
+    else if (act === 'open-locales-dir' && userLocalesDir) window.electronAPI.openPath(userLocalesDir);
     else if (act === 'open-state') window.electronAPI.openPath(s.statePath);
     else if (act === 'add-archive-path') {
       const dir = await window.electronAPI.selectDir({ title: 'Archiv-Pfad hinzufügen' });
@@ -2810,6 +2855,11 @@ export async function renderSettingsModal(initialTab = 'general') {
           if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
           showToast(`Speicherfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error' });
           return;
+        }
+        if (plan.languageChanged && typeof window.electronAPI?.getI18nState === 'function') {
+          const freshI18n = await window.electronAPI.getI18nState();
+          if (modalToken !== activeSettingsToken) return;
+          applyI18nState(freshI18n);
         }
       }
 

@@ -132,32 +132,60 @@ export function markScanFinished(state) {
   };
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
- * Formatiert eine natuerliche deutsche Aufzaehlung aktiver Quellen.
+ * Formatiert eine natuerliche Aufzaehlung aktiver Quellen.
  * @param {string[]} labels
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {string}
  */
-export function formatSourceNameList(labels) {
+export function formatSourceNameList(labels, { t = undefined } = {}) {
   const clean = (Array.isArray(labels) ? labels : []).map((l) => String(l || '').trim()).filter(Boolean);
   if (clean.length === 0) return '';
   if (clean.length === 1) return clean[0];
-  if (clean.length === 2) return `${clean[0]} und ${clean[1]}`;
-  if (clean.length === 3) return `${clean[0]}, ${clean[1]} und ${clean[2]}`;
-  return `${clean[0]}, ${clean[1]} und ${clean.length - 2} weitere Quellen`;
+  if (clean.length === 2) {
+    return tr(t, 'scanBanner.listPair', { first: clean[0], second: clean[1] }, `${clean[0]} und ${clean[1]}`);
+  }
+  if (clean.length === 3) {
+    return tr(
+      t,
+      'scanBanner.listTriple',
+      { first: clean[0], second: clean[1], third: clean[2] },
+      `${clean[0]}, ${clean[1]} und ${clean[2]}`
+    );
+  }
+  return tr(
+    t,
+    'scanBanner.listMore',
+    { first: clean[0], second: clean[1], rest: clean.length - 2 },
+    `${clean[0]}, ${clean[1]} und ${clean.length - 2} weitere Quellen`
+  );
 }
 
 /**
  * Berechnet die UI-Anzeige (Headline, Untertitel, Fortschritt, Chips) fuer den Live-Scan-Banner.
  * @param {ScanProgressState | null | undefined} progressState
- * @param {{ tab?: string, isCheckingProviders?: boolean }} [options]
+ * @param {{ tab?: string, isCheckingProviders?: boolean, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {ScanProgressBannerModel}
  */
-export function formatScanProgressBanner(progressState, { tab = 'updates', isCheckingProviders = false } = {}) {
+export function formatScanProgressBanner(
+  progressState,
+  { tab = 'updates', isCheckingProviders = false, t = undefined } = {}
+) {
   if (isCheckingProviders && !progressState?.active) {
     return {
       visible: true,
-      headline: 'Prüfe aktive Paketmanager...',
-      subtext: 'Ermittle verfügbare Update-Quellen',
+      headline: tr(t, 'scanBanner.checkingProvidersHeadline', {}, 'Prüfe aktive Paketmanager...'),
+      subtext: tr(t, 'scanBanner.checkingProvidersSubtext', {}, 'Ermittle verfügbare Update-Quellen'),
       percent: null,
       indeterminate: true,
       completed: 0,
@@ -187,10 +215,17 @@ export function formatScanProgressBanner(progressState, { tab = 'updates', isChe
   if (progressState.phase === 'merging') {
     const headline =
       tab === 'installed'
-        ? 'Verknüpfe installierte Programme mit dem Archiv...'
-        : 'Vergleiche gefundene Updates mit dem Archiv...';
+        ? tr(t, 'scanBanner.mergingInstalledHeadline', {}, 'Verknüpfe installierte Programme mit dem Archiv...')
+        : tr(t, 'scanBanner.mergingUpdatesHeadline', {}, 'Vergleiche gefundene Updates mit dem Archiv...');
     const subtext =
-      progressState.total > 0 ? `${progressState.completed} / ${progressState.total} Quellen geprüft` : 'Läuft...';
+      progressState.total > 0
+        ? tr(
+            t,
+            'scanBanner.sourcesCheckedSubtext',
+            { completed: progressState.completed, total: progressState.total },
+            `${progressState.completed} / ${progressState.total} Quellen geprüft`
+          )
+        : tr(t, 'common.running', {}, 'Läuft...');
     return {
       visible: true,
       headline,
@@ -206,26 +241,38 @@ export function formatScanProgressBanner(progressState, { tab = 'updates', isChe
   const runningProviders = providerSources.filter((s) => s.status === 'running');
   const runningSystem = systemSources.filter((s) => s.status === 'running');
 
-  let headline = 'Update-Informationen werden verarbeitet...';
+  let headline = tr(t, 'scanBanner.processingUpdatesHeadline', {}, 'Update-Informationen werden verarbeitet...');
   if (runningProviders.length === 1) {
+    const name = runningProviders[0].label;
     headline =
       tab === 'installed'
-        ? `${runningProviders[0].label} wird eingelesen...`
-        : `${runningProviders[0].label} wird auf Updates geprüft...`;
+        ? tr(t, 'scanBanner.singleInstalledHeadline', { name }, `${name} wird eingelesen...`)
+        : tr(t, 'scanBanner.singleUpdatesHeadline', { name }, `${name} wird auf Updates geprüft...`);
   } else if (runningProviders.length >= 2) {
-    const names = formatSourceNameList(runningProviders.map((s) => s.label));
-    headline = tab === 'installed' ? `${names} werden eingelesen...` : `${names} werden auf Updates geprüft...`;
+    const names = formatSourceNameList(
+      runningProviders.map((s) => s.label),
+      { t }
+    );
+    headline =
+      tab === 'installed'
+        ? tr(t, 'scanBanner.multiInstalledHeadline', { names }, `${names} werden eingelesen...`)
+        : tr(t, 'scanBanner.multiUpdatesHeadline', { names }, `${names} werden auf Updates geprüft...`);
   } else if (runningSystem.length > 0) {
     headline =
       tab === 'installed'
-        ? 'Installierte PC-Programme werden eingelesen...'
-        : 'Installierte PC-Programme werden auf Updates geprüft...';
+        ? tr(t, 'scanBanner.systemInstalledHeadline', {}, 'Installierte PC-Programme werden eingelesen...')
+        : tr(t, 'scanBanner.systemUpdatesHeadline', {}, 'Installierte PC-Programme werden auf Updates geprüft...');
   }
 
   const subtext =
     progressState.total > 0
-      ? `${progressState.completed} von ${progressState.total} Quellen abgeschlossen`
-      : 'Läuft...';
+      ? tr(
+          t,
+          'scanBanner.sourcesCompletedSubtext',
+          { completed: progressState.completed, total: progressState.total },
+          `${progressState.completed} von ${progressState.total} Quellen abgeschlossen`
+        )
+      : tr(t, 'common.running', {}, 'Läuft...');
   const percent = typeof progressState.percent === 'number' ? progressState.percent : null;
 
   return {

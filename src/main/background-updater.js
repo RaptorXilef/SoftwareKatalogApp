@@ -1,4 +1,5 @@
 import { Notification } from 'electron';
+import { t } from '../shared/i18n.js';
 import { getAccessPolicy } from './auth-service.js';
 import { createBackgroundUpdater } from './background-updater-core.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
@@ -24,6 +25,7 @@ const defaultBackgroundUpdater = createBackgroundUpdater({
   waitForQueueIdleFn: waitForQueueIdle,
   resolveIconPathFn: resolveTrayIconPath,
   NotificationClass: Notification,
+  tFn: t,
 });
 
 export const configureBackgroundUpdater = (options) => defaultBackgroundUpdater.configure(options);

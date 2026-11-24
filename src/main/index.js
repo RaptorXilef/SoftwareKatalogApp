@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { hasTrayStartupArg } from '../shared/background-update-logic.js';
 import { buildExportPolicyPayload, validateImportPolicyPayload } from '../shared/policy-logic.js';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
@@ -71,6 +71,7 @@ import {
   startAdminSession,
   stopAdminSession,
 } from './elevated-helper.js';
+import { configureI18nService, getI18nState, initI18nService, setLanguage } from './i18n-service.js';
 import {
   addIgnoredUpdate,
   clearIgnoredUpdates,
@@ -143,8 +144,10 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-direct-composition');
 
+const APP_USER_MODEL_ID = 'io.github.raptorxilef.softwarekatalogapp';
+
 if (process.platform === 'win32') {
-  app.setAppUserModelId('io.github.raptorxilef.softwarekatalogapp');
+  app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
 // Muss VOR app.whenReady() registriert werden
@@ -177,11 +180,25 @@ function createWindow({ showOnReady = true } = {}) {
   };
 
   const iconPath = resolveTrayIconPath();
-  if (iconPath) {
-    windowOptions.icon = iconPath;
+  const windowIcon = iconPath ? nativeImage.createFromPath(iconPath) : null;
+  const effectiveIcon = windowIcon && !windowIcon.isEmpty() ? windowIcon : iconPath;
+  if (effectiveIcon) {
+    windowOptions.icon = effectiveIcon;
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  if (effectiveIcon) {
+    mainWindow.setIcon(effectiveIcon);
+  }
+  if (process.platform === 'win32' && iconPath && typeof mainWindow.setAppDetails === 'function') {
+    mainWindow.setAppDetails({
+      appId: APP_USER_MODEL_ID,
+      appIconPath: iconPath,
+      appIconIndex: 0,
+      relaunchDisplayName: 'Software Katalog',
+    });
+  }
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -191,6 +208,9 @@ function createWindow({ showOnReady = true } = {}) {
 
   mainWindow.once('ready-to-show', () => {
     if (showOnReady && mainWindow && !mainWindow.isDestroyed()) {
+      if (process.platform === 'win32' && effectiveIcon) {
+        mainWindow.setIcon(effectiveIcon);
+      }
       mainWindow.show();
     }
   });
@@ -445,7 +465,15 @@ function registerIpcHandlers() {
   handleIpc('check-archive-path', (_e, rawPath, index = 0) => inspectArchiveRootPath(rawPath, index));
   handleIpc('save-settings', (_e, settings) => {
     try {
+      const prevLanguage = getConfig().language;
       saveConfig(settings);
+      const nextLanguage = getConfig().language;
+      if (settings?.language !== undefined) {
+        const currentI18n = getI18nState();
+        if (nextLanguage !== prevLanguage || currentI18n.configuredLanguage !== nextLanguage) {
+          setLanguage(nextLanguage);
+        }
+      }
       reloadBackgroundUpdaterSchedule();
       const bgStatus = getBackgroundUpdaterStatus();
       updateTrayState({
@@ -460,6 +488,10 @@ function registerIpcHandlers() {
       return { success: false, error: e.message };
     }
   });
+
+  // Mehrsprachigkeit (i18n)
+  handleIpc('i18n-get-state', () => getI18nState({ reload: true }));
+  handleIpc('i18n-set-language', (_e, code) => setLanguage(code));
 
   // Autostart & Hintergrund-Updater
   handleIpc('autostart-get-status', () => getAutostartStatus());
@@ -612,6 +644,17 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     },
   });
 
+  configureI18nService({
+    onLanguageChanged: (i18nState) => {
+      updateTrayState({});
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('language-changed', i18nState);
+        }
+      }
+    },
+  });
+
   registerIpcHandlers();
 
   app.on('second-instance', () => {
@@ -619,6 +662,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    try {
+      initI18nService();
+    } catch (err) {
+      console.error('Fehler beim Initialisieren des i18n-Service:', err);
+    }
     const elevated = await isProcessElevated();
     try {
       await initAuthService();

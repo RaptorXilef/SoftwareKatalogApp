@@ -11,7 +11,7 @@ import {
 } from './components/cards.js';
 import { closeContextMenu, openContextMenu } from './components/context-menu.js';
 import { initDiscoverView, renderDiscoverView } from './components/discover.js';
-import { initJobsBar } from './components/jobs-bar.js';
+import { initJobsBar, rerenderJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
 import {
@@ -54,7 +54,16 @@ import {
   state,
   toggleFavorite,
 } from './state.js';
+import { initRendererI18n, t } from './utils/i18n.js';
 import { escapeHTML } from './utils/sanitize.js';
+
+function handleLanguageChanged() {
+  renderAuthHeaderControls();
+  renderAdminSessionButton();
+  renderTagChips();
+  rerenderJobsBar();
+  renderActiveView();
+}
 
 function renderActiveView() {
   syncToolbarForTab();
@@ -94,7 +103,7 @@ async function runInstalledScan({ silent = false } = {}) {
     state.isScanningInstalled = false;
     state.installedScanProgress = null;
     if (!silent && res?.error && !res.canceled) {
-      showToast(`PC-Scan fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+      showToast(t('toasts.pcScanFailed', { error: res.error }), { type: 'error', duration: 6000 });
     }
     renderActiveView();
     return res;
@@ -102,7 +111,7 @@ async function runInstalledScan({ silent = false } = {}) {
     state.isScanningInstalled = false;
     state.installedScanProgress = null;
     if (!silent) {
-      showToast(`PC-Scan fehlgeschlagen: ${err.message}`, { type: 'error', duration: 6000 });
+      showToast(t('toasts.pcScanFailed', { error: err.message }), { type: 'error', duration: 6000 });
     }
     renderActiveView();
     return { success: false, error: err.message };
@@ -153,7 +162,7 @@ async function checkAppUpdateInBackground() {
   if (res && !res.error && res.updateAvailable) {
     const notice = document.getElementById('headerUpdateNotice');
     if (notice) {
-      notice.innerHTML = `<button type="button" class="update-pill" id="btnHeaderAppUpdate">🎁 App-Update v${escapeHTML(res.latestVersion)}</button>`;
+      notice.innerHTML = `<button type="button" class="update-pill" id="btnHeaderAppUpdate">🎁 ${escapeHTML(t('app.updatePill', { version: res.latestVersion }))}</button>`;
       document.getElementById('btnHeaderAppUpdate')?.addEventListener('click', () => openSettingsModal('updates'));
     }
   }
@@ -248,7 +257,7 @@ async function ignorePackageUpdate(item, { mode, targetVersion }) {
   });
   const res = await window.electronAPI.addIgnoredUpdate(entry);
   if (!res?.success) {
-    showToast(res?.error || 'Update konnte nicht ignoriert werden.', { type: 'error' });
+    showToast(res?.error || t('toasts.ignoreFailed'), { type: 'error' });
     return;
   }
 
@@ -259,21 +268,21 @@ async function ignorePackageUpdate(item, { mode, targetVersion }) {
   const addedId = res.entry?.id || '';
   const msg =
     mode === 'version' && targetVersion
-      ? `${item.name} (v${targetVersion}) wird ignoriert.`
-      : `Alle Updates für ${item.name} werden ignoriert.`;
+      ? t('toasts.ignoreVersionAdded', { name: item.name, version: targetVersion })
+      : t('toasts.ignoreAllAdded', { name: item.name });
 
   showToast(msg, {
     type: 'info',
     duration: 6000,
     action: addedId
       ? {
-          label: 'Rückgängig',
+          label: t('common.undo'),
           onClick: async () => {
             const undoRes = await window.electronAPI.removeIgnoredUpdate(addedId);
             if (undoRes?.success) {
               state.ignoredUpdates = Array.isArray(undoRes.entries) ? undoRes.entries : [];
               renderActiveView();
-              showToast(`Ignorier-Regel für ${item.name} rückgängig gemacht.`, { type: 'success' });
+              showToast(t('toasts.ignoreUndone', { name: item.name }), { type: 'success' });
             }
           },
         }
@@ -292,27 +301,27 @@ function openUpdateCardContextMenu(event, item) {
   if (!policyEval.silentOnly) {
     menuItems.push({
       id: 'update-interactive',
-      label: '🖱️ Jetzt interaktiv aktualisieren',
+      label: `🖱️ ${t('contextMenu.updateInteractive')}`,
       onSelect: () => enqueueUpdateItems([item], { silent: false, forceInteractive: true }),
     });
   }
 
   menuItems.push({
     id: 'update-silent',
-    label: '⚡ Jetzt silent aktualisieren',
+    label: `⚡ ${t('contextMenu.updateSilent')}`,
     hint: policyEval.adwareConflict
-      ? '🚫 Adware-Konflikt'
+      ? `🚫 ${t('contextMenu.hintAdwareConflict')}`
       : silentLocked
-        ? '🛡️ Adware-Schutz'
+        ? `🛡️ ${t('contextMenu.hintAdwareProtection')}`
         : policyEval.silentOnly
-          ? '🔒 Nur Silent'
+          ? `🔒 ${t('contextMenu.hintSilentOnly')}`
           : '',
     disabled: adwareBlocked,
     title: policyEval.adwareConflict
       ? policyEval.error
       : silentLocked
-        ? '🛡️ Gesperrt wegen Adware-/Klick-Schutz (installMode: interactive-required)'
-        : 'Update im Hintergrund (silent) einreihen',
+        ? `🛡️ ${t('contextMenu.titleAdwareProtection')}`
+        : t('contextMenu.titleSilentQueue'),
     onSelect: () => enqueueUpdateItems([item], { silent: true }),
   });
 
@@ -320,21 +329,23 @@ function openUpdateCardContextMenu(event, item) {
     { type: 'separator' },
     {
       id: 'ignore-version',
-      label: targetVersion ? `⏭️ Diese Version ignorieren (v${targetVersion})` : '⏭️ Diese Version ignorieren',
+      label: targetVersion
+        ? `⏭️ ${t('contextMenu.ignoreVersion', { version: targetVersion })}`
+        : `⏭️ ${t('contextMenu.ignoreVersionGeneric')}`,
       disabled: !targetVersion,
-      title: !targetVersion ? 'Keine eindeutige Zielversion erkannt' : '',
+      title: !targetVersion ? t('contextMenu.ignoreVersionNoTarget') : '',
       onSelect: () => ignorePackageUpdate(item, { mode: 'version', targetVersion }),
     },
     {
       id: 'ignore-all',
-      label: '🚫 Alle Updates ignorieren',
+      label: `🚫 ${t('contextMenu.ignoreAll')}`,
       danger: true,
       onSelect: () => ignorePackageUpdate(item, { mode: 'all', targetVersion }),
     },
     { type: 'separator' },
     {
       id: 'open-details',
-      label: 'ℹ️ Details öffnen',
+      label: `ℹ️ ${t('contextMenu.openDetails')}`,
       onSelect: () => openDetailModal(item.id),
     }
   );
@@ -342,7 +353,7 @@ function openUpdateCardContextMenu(event, item) {
   openContextMenu({
     x: event.clientX,
     y: event.clientY,
-    ariaLabel: `Aktionen für ${item.name}`,
+    ariaLabel: t('contextMenu.actionsFor', { name: item.name }),
     items: menuItems,
   });
 }
@@ -416,7 +427,7 @@ async function enqueueUpdateItems(targetItems, { silent = false, forceInteractiv
 
   const res = await window.electronAPI.enqueueUpdates(queueItems, { silent, forceInteractive });
   if (res?.adminPrompt?.canceled) {
-    showToast('UAC-Abfrage abgebrochen - Updates laufen im normalen Modus weiter.', { type: 'info' });
+    showToast(t('toasts.uacCanceledQueue'), { type: 'info' });
   }
   if (res?.success) {
     for (const qItem of queueItems) {
@@ -425,20 +436,24 @@ async function enqueueUpdateItems(targetItems, { silent = false, forceInteractiv
     renderUpdatesBatchBar();
 
     if (res.added > 0) {
-      const modeHint = silent ? ' (Silent-Modus mit Adware-Schutz)' : '';
-      showToast(`${res.added} Update(s) in die Warteschlange eingereiht${modeHint}.`, { type: 'info' });
+      showToast(t(silent ? 'toasts.queueEnqueuedSilent' : 'toasts.queueEnqueued', { count: res.added }), {
+        type: 'info',
+      });
       if (res.blockedCount > 0) {
-        const firstReason = res.blockedItems?.[0]?.error || 'Durch Zugriffsrichtlinie blockiert.';
-        showToast(`${res.blockedCount} Update(s) durch Zugriffsrichtlinie blockiert: ${firstReason}`, {
+        const firstReason = res.blockedItems?.[0]?.error || t('toasts.queueBlockedDefault');
+        showToast(t('toasts.queueBlocked', { count: res.blockedCount, reason: firstReason }), {
           type: 'warn',
           duration: 6000,
         });
       }
     } else {
-      showToast('Alle ausgewählten Updates befinden sich bereits in der Warteschlange.', { type: 'info' });
+      showToast(t('toasts.queueAllAlreadyQueued'), { type: 'info' });
     }
   } else if (res?.error) {
-    showToast(res.policyBlocked ? res.error : `Warteschlangen-Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+    showToast(res.policyBlocked ? res.error : t('toasts.queueError', { error: res.error }), {
+      type: 'error',
+      duration: 6000,
+    });
   }
 }
 
@@ -479,20 +494,20 @@ function setupUpdatesBatchBar() {
 
       state.isBatchActionRunning = true;
       renderUpdatesBatchBar();
-      showToast(`Lade ${pendingItems.length} Online-Update(s) ins Archiv...`, { type: 'info' });
+      showToast(t('toasts.batchDownloading', { count: pendingItems.length }), { type: 'info' });
 
       try {
         const res = await window.electronAPI.batchDownloadArchiveUpdates(pendingItems.map((i) => i.id));
         await reloadUI();
         if (res?.canceled) {
-          showToast('Massen-Download abgebrochen.', { type: 'info' });
+          showToast(t('toasts.batchDownloadCanceled'), { type: 'info' });
         } else if (res?.success) {
           const type = res.failed > 0 ? 'warn' : 'success';
-          showToast(`${res.completed} Online-Update(s) ins Archiv geladen (${res.failed} Fehler).`, { type });
+          showToast(t('toasts.batchDownloadDone', { completed: res.completed, failed: res.failed }), { type });
         } else if (res?.alreadyRunning) {
-          showToast('Es läuft bereits ein Massen-Download.', { type: 'info' });
+          showToast(t('toasts.batchDownloadAlreadyRunning'), { type: 'info' });
         } else if (res?.error) {
-          showToast(`Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+          showToast(t('common.errorPrefix', { error: res.error }), { type: 'error', duration: 6000 });
         }
       } finally {
         state.isBatchActionRunning = false;
@@ -559,14 +574,14 @@ function setupGlobalDragAndDrop() {
     if (!droppedPath) return;
 
     const ok = await ensureAdminAuthenticated({
-      reason: 'Zum Hinzufügen von Software ins Archiv ist eine Admin-Anmeldung erforderlich.',
+      reason: t('toasts.authReasonAddArchive'),
     });
     if (!ok) return;
 
     const res = await window.electronAPI.addSoftwareFromPath(droppedPath);
     if (res.success) {
       await reloadUI();
-      showToast('Software-Ordner wurde zum Archiv hinzugefügt.', { type: 'success' });
+      showToast(t('toasts.folderAddedToArchive'), { type: 'success' });
     } else if (res.error) {
       showToast(res.error, { type: 'error', duration: 6000 });
     }
@@ -696,20 +711,20 @@ async function toggleAdminSession() {
     if (state.adminSession.mode === 'active' || state.adminSession.isSessionActive) {
       const res = await window.electronAPI.stopAdminSession();
       if (res?.status) applyAdminSessionStatus(res.status);
-      showToast('Admin-Sitzung wurde beendet.', { type: 'info' });
+      showToast(t('toasts.adminSessionEnded'), { type: 'info' });
     } else {
       const res = await window.electronAPI.startAdminSession();
       if (res?.status) applyAdminSessionStatus(res.status);
       if (res?.alreadyElevated) {
-        showToast('App läuft bereits als Administrator.', { type: 'info' });
+        showToast(t('toasts.adminAlreadyElevated'), { type: 'info' });
       } else if (res?.success) {
-        showToast('Admin-Sitzung aktiv - Updates und Installationen laufen nun ohne weitere UAC-Abfragen.', {
+        showToast(t('toasts.adminSessionStarted'), {
           type: 'success',
         });
       } else if (res?.canceled) {
-        showToast('UAC-Abfrage abgebrochen - Admin-Modus bleibt aus.', { type: 'info' });
+        showToast(t('toasts.adminSessionCanceled'), { type: 'info' });
       } else {
-        showToast(`Admin-Sitzung konnte nicht gestartet werden: ${res?.error || 'Unbekannter Fehler'}`, {
+        showToast(t('toasts.adminSessionStartFailed', { error: res?.error || t('common.unknownError') }), {
           type: 'error',
           duration: 6000,
         });
@@ -734,7 +749,7 @@ function handleAuthStatusUpdate(status) {
   if (wasAuthenticated && next.enabled && !next.isAuthenticated) {
     closeAdminModalIfOpen();
     if (!manualLogoutInFlight) {
-      showToast('Admin-Sitzung abgelaufen - bitte erneut anmelden.', { type: 'info' });
+      showToast(t('toasts.adminSessionExpired'), { type: 'info' });
     }
   }
 }
@@ -757,6 +772,9 @@ function setupScanProgressBanner() {
 }
 
 async function bootstrap() {
+  await initRendererI18n({
+    onLanguageUpdated: () => handleLanguageChanged(),
+  });
   initLightbox();
   initModals({ onReload: reloadUI });
   setupGridEvents();
@@ -772,9 +790,9 @@ async function bootstrap() {
         await window.electronAPI.dismissJob(action.jobId);
         await reloadUI({ rescanInstalled: true });
         if (res.success && res.versions?.[action.itemId]) {
-          showToast(`Erkannte Version: v${res.versions[action.itemId]}`, { type: 'success' });
+          showToast(t('toasts.recheckVersionFound', { version: res.versions[action.itemId] }), { type: 'success' });
         } else {
-          showToast('Version konnte noch nicht ausgelesen werden.', { type: 'warn' });
+          showToast(t('toasts.recheckVersionMissing'), { type: 'warn' });
         }
       }
     },
@@ -787,13 +805,13 @@ async function bootstrap() {
     onQueueDrained: async ({ completed, failed, canceled }) => {
       await reloadUI({ rescanInstalled: true });
       if (completed === 0 && failed === 0 && canceled > 0) {
-        showToast('Update-Warteschlange wurde abgebrochen.', { type: 'info' });
+        showToast(t('toasts.queueCanceled'), { type: 'info' });
       } else if (completed > 0 || failed > 0) {
         const type = failed > 0 ? 'warn' : 'success';
-        const parts = [`${completed} aktualisiert`];
-        if (canceled > 0) parts.push(`${canceled} abgebrochen`);
-        if (failed > 0) parts.push(`${failed} fehlgeschlagen`);
-        showToast(`Warteschlange abgeschlossen: ${parts.join(' · ')}`, { type, duration: 5500 });
+        const parts = [t('toasts.queuePartUpdated', { count: completed })];
+        if (canceled > 0) parts.push(t('toasts.queuePartCanceled', { count: canceled }));
+        if (failed > 0) parts.push(t('toasts.queuePartFailed', { count: failed }));
+        showToast(t('toasts.queueFinished', { summary: parts.join(' · ') }), { type, duration: 5500 });
       }
     },
   });
@@ -809,12 +827,12 @@ async function bootstrap() {
     onNewBundle: () => openBundleEditorModal(),
     onSnapshotFromPc: async () => {
       if (!state.hasScannedInstalled) {
-        showToast('Scanne installierte PC-Programme für den Snapshot...', { type: 'info' });
+        showToast(t('toasts.bundleSnapshotScanning'), { type: 'info' });
         await runInstalledScan({ silent: false });
       }
       const snapshot = buildBundleDraftFromInstalled(state.packages);
       if (snapshot.includedCount === 0) {
-        showToast('Keine übernehmbaren Archiv- oder Paketmanager-Programme auf diesem PC erkannt.', { type: 'warn' });
+        showToast(t('toasts.bundleSnapshotEmpty'), { type: 'warn' });
         return;
       }
       openBundleEditorModal({
@@ -829,34 +847,36 @@ async function bootstrap() {
       }),
     onDuplicateBundle: async (bundleId) => {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum Duplizieren von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+        reason: t('toasts.authReasonDuplicateBundle'),
       });
       if (!ok) return;
       const res = await window.electronAPI.duplicateBundle(bundleId);
       if (res?.success) {
         await reloadUI();
-        showToast(`Bündel "${res.bundle?.name || 'Kopie'}" erstellt.`, { type: 'success' });
+        showToast(t('toasts.bundleCreated', { name: res.bundle?.name || t('toasts.bundleCopyDefault') }), {
+          type: 'success',
+        });
       } else {
-        showToast(res?.error || 'Bündel konnte nicht dupliziert werden.', { type: 'error' });
+        showToast(res?.error || t('toasts.bundleDuplicateFailed'), { type: 'error' });
       }
     },
     onDeleteBundle: async (bundle) => {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum Löschen von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+        reason: t('toasts.authReasonDeleteBundle'),
       });
       if (!ok) return;
       const decision = await openNestedDialog({
         defaultAction: 'cancel',
         html: `
           <div class="modal-header">
-            <h2>🗑️ Bündel löschen</h2>
-            <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+            <h2>🗑️ ${escapeHTML(t('toasts.bundleDeleteTitle'))}</h2>
+            <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
           </div>
           <div class="modal-body collision-warning-body">
-            <p>Möchtest du das Bündel <strong>${escapeHTML(bundle.name)}</strong> (${bundle.items?.length || 0} Pakete) wirklich löschen?</p>
+            <p>${escapeHTML(t('toasts.bundleDeleteConfirm', { name: bundle.name, count: bundle.items?.length || 0 }))}</p>
             <div class="collision-actions-grid">
-              <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
-              <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ Endgültig löschen</button>
+              <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+              <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ ${escapeHTML(t('toasts.bundleDeleteAction'))}</button>
             </div>
           </div>
         `,
@@ -867,30 +887,30 @@ async function bootstrap() {
       const res = await window.electronAPI.deleteBundle(bundle.id);
       if (res?.success) {
         await reloadUI();
-        showToast(`Bündel "${bundle.name}" gelöscht.`, { type: 'success' });
+        showToast(t('toasts.bundleDeleted', { name: bundle.name }), { type: 'success' });
       } else {
-        showToast(res?.error || 'Bündel konnte nicht gelöscht werden.', { type: 'error' });
+        showToast(res?.error || t('toasts.bundleDeleteFailed'), { type: 'error' });
       }
     },
     onExportBundle: async (bundleId) => {
       const res = await window.electronAPI.exportBundle(bundleId);
       if (res?.success) {
-        showToast('Bündel erfolgreich als JSON exportiert.', { type: 'success' });
+        showToast(t('toasts.bundleExported'), { type: 'success' });
       } else if (res?.error && !res.canceled) {
-        showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error' });
+        showToast(t('toasts.bundleExportFailed', { error: res.error }), { type: 'error' });
       }
     },
     onExportAllBundles: async () => {
       const res = await window.electronAPI.exportAllBundles();
       if (res?.success) {
-        showToast(`${res.count || 0} Bündel erfolgreich als JSON exportiert.`, { type: 'success' });
+        showToast(t('toasts.bundlesExported', { count: res.count || 0 }), { type: 'success' });
       } else if (res?.error && !res.canceled) {
-        showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error' });
+        showToast(t('toasts.bundleExportFailed', { error: res.error }), { type: 'error' });
       }
     },
     onImportBundle: async () => {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum Importieren von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+        reason: t('toasts.authReasonImportBundle'),
       });
       if (!ok) return;
       const res = await window.electronAPI.importBundle();
@@ -898,11 +918,11 @@ async function bootstrap() {
         await reloadUI();
         const msg =
           res.importedCount > 1
-            ? `${res.importedCount} Bündel erfolgreich importiert.`
-            : `Bündel "${res.bundle?.name || 'Import'}" importiert.`;
+            ? t('toasts.bundlesImported', { count: res.importedCount })
+            : t('toasts.bundleImported', { name: res.bundle?.name || t('toasts.bundleImportDefault') });
         showToast(msg, { type: 'success' });
       } else if (res?.error && !res.canceled) {
-        showToast(`Import fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+        showToast(t('toasts.bundleImportFailed', { error: res.error }), { type: 'error', duration: 6000 });
       }
     },
   });
@@ -918,10 +938,10 @@ async function bootstrap() {
     onToggleAdminSession: () => toggleAdminSession(),
     onAuthLogin: async () => {
       const res = await openLoginModal({
-        reason: 'Als Administrator anmelden, um Einstellungen und Katalog zu bearbeiten.',
+        reason: t('toasts.authReasonLogin'),
       });
       if (res?.authenticated) {
-        showToast('Als Administrator angemeldet.', { type: 'success' });
+        showToast(t('toasts.authLoggedIn'), { type: 'success' });
       }
     },
     onAuthLogout: async () => {
@@ -935,7 +955,7 @@ async function bootstrap() {
         renderAuthHeaderControls();
         renderTagChips();
         renderActiveView();
-        showToast('Admin-Sitzung abgemeldet.', { type: 'info' });
+        showToast(t('toasts.authLoggedOut'), { type: 'info' });
       } finally {
         manualLogoutInFlight = false;
       }
@@ -943,14 +963,14 @@ async function bootstrap() {
     onScanArchive: async (mode) => {
       const res = await window.electronAPI.runScan(mode);
       if (res.alreadyRunning) {
-        showToast('Ein Archiv-Scan läuft bereits.', { type: 'info' });
+        showToast(t('toasts.archiveScanAlreadyRunning'), { type: 'info' });
         return;
       }
       if (res.success) {
         await reloadUI();
-        showToast('Archiv wurde aktualisiert.', { type: 'success' });
+        showToast(t('toasts.archiveUpdated'), { type: 'success' });
       } else if (res.error && !res.canceled) {
-        const msg = res.error === 'LOCKED' ? 'Archiv wird gerade von einem anderen PC gescannt.' : res.error;
+        const msg = res.error === 'LOCKED' ? t('toasts.archiveScanLocked') : res.error;
         showToast(msg, { type: 'error', duration: 6000 });
       }
     },
@@ -960,7 +980,7 @@ async function bootstrap() {
         runInstalledScan({ silent: true }),
       ]);
       if (res.alreadyRunning) {
-        showToast('Online-Prüfung läuft bereits.', { type: 'info' });
+        showToast(t('toasts.onlineCheckRunning'), { type: 'info' });
         return;
       }
       const providerUpd = pcRes?.success ? (pcRes.stats?.updatesAvailable ?? 0) : 0;
@@ -968,16 +988,18 @@ async function bootstrap() {
         await reloadUI();
         const archiveUpd = res.count || 0;
         if (archiveUpd > 0 && providerUpd > 0) {
-          showToast(`${archiveUpd} Archiv- und ${providerUpd} Paketmanager-Updates gefunden!`, { type: 'success' });
+          showToast(t('toasts.onlineFoundBoth', { archiveCount: archiveUpd, providerCount: providerUpd }), {
+            type: 'success',
+          });
         } else if (archiveUpd > 0) {
-          showToast(`${archiveUpd} neue Online-Versionen gefunden!`, { type: 'success' });
+          showToast(t('toasts.onlineFoundArchive', { count: archiveUpd }), { type: 'success' });
         } else if (providerUpd > 0) {
-          showToast(`${providerUpd} Paketmanager-Updates auf diesem PC verfügbar.`, { type: 'success' });
+          showToast(t('toasts.onlineFoundProvider', { count: providerUpd }), { type: 'success' });
         } else {
-          showToast('Alle Online-Quellen sind aktuell.', { type: 'info' });
+          showToast(t('toasts.onlineUpToDate'), { type: 'info' });
         }
       } else if (res.error && !res.canceled) {
-        showToast(`Online-Prüfung fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+        showToast(t('toasts.onlineCheckFailed', { error: res.error }), { type: 'error', duration: 6000 });
       }
     },
     onCheckLocal: async () => {
@@ -987,48 +1009,48 @@ async function bootstrap() {
       ]);
 
       if (pcRes?.alreadyRunning) {
-        showToast('PC-Prüfung läuft bereits.', { type: 'info' });
+        showToast(t('toasts.localCheckRunning'), { type: 'info' });
         return;
       }
       if (pcRes?.success) {
         await reloadUI();
         const total = pcRes.stats?.total ?? pcRes.programs?.length ?? 0;
         const upd = pcRes.stats?.updatesAvailable ?? 0;
-        showToast(`${total} PC-Programme geprüft (${upd} Updates verfügbar).`, { type: 'success' });
+        showToast(t('toasts.localCheckDone', { total, updates: upd }), { type: 'success' });
       } else if (localRes?.success) {
         await reloadUI();
-        showToast(`${localRes.count} lokale Programme geprüft.`, { type: 'success' });
+        showToast(t('toasts.localVersionsDone', { count: localRes.count }), { type: 'success' });
       }
     },
     onAddSoftware: async () => {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum Hinzufügen eines Software-Ordners ist eine Admin-Anmeldung erforderlich.',
+        reason: t('toasts.authReasonAddFolder'),
       });
       if (!ok) return;
       const res = await window.electronAPI.addSoftware();
       if (res.success) {
         await reloadUI();
-        showToast('Neue Software wurde hinzugefügt.', { type: 'success' });
+        showToast(t('toasts.softwareAdded'), { type: 'success' });
       } else if (res.error) {
         showToast(res.error, { type: 'error', duration: 6000 });
       }
     },
     onAutoDetectAll: async () => {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum automatischen Speichern fehlender PC-Pfade ist eine Admin-Anmeldung erforderlich.',
+        reason: t('toasts.authReasonAutoDetect'),
       });
       if (!ok) return;
       const res = await window.electronAPI.autoDetectAll();
       if (res.alreadyRunning) {
-        showToast('Pfadsuche läuft bereits.', { type: 'info' });
+        showToast(t('toasts.autoDetectRunning'), { type: 'info' });
         return;
       }
       if (res.success) {
         await reloadUI();
         showToast(
           res.total === 0
-            ? 'Alle Programme haben bereits einen Pfad.'
-            : `${res.found} von ${res.total} Installationspfaden gefunden.`,
+            ? t('toasts.autoDetectAllSet')
+            : t('toasts.autoDetectFound', { found: res.found, total: res.total }),
           { type: 'success' }
         );
       }
@@ -1101,7 +1123,7 @@ async function bootstrap() {
     })();
   } catch (err) {
     console.error('Fehler beim Starten:', err);
-    showToast(`Katalog konnte nicht geladen werden: ${err.message}`, { type: 'error', duration: 0 });
+    showToast(t('app.loadFailed', { error: err.message }), { type: 'error', duration: 0 });
   }
 }
 

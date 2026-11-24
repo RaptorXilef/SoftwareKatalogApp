@@ -1,3 +1,4 @@
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 const container = () => document.getElementById('toastContainer');
@@ -24,7 +25,7 @@ export function showToast(message, { type = 'info', duration = 4000, action = nu
     <span class="toast-icon">${icons[type] || icons.info}</span>
     <span class="toast-msg">${escapeHTML(message)}</span>
     ${action ? `<button type="button" class="toast-action">${escapeHTML(action.label)}</button>` : ''}
-    <button type="button" class="toast-close" aria-label="Schließen">✕</button>
+    <button type="button" class="toast-close" aria-label="${escapeHTML(t('common.close'))}">✕</button>
   `;
 
   const remove = () => {

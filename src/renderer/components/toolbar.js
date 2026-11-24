@@ -9,14 +9,15 @@ import {
   state,
 } from '../state.js';
 import { closestEl, qsa, qsInput, qsSelect } from '../utils/dom.js';
+import { getI18nLocale, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 function getOriginFilterOptionsForTab(tab) {
   if (tab === 'updates') {
     const options = [
-      { id: 'all', label: 'Alle' },
-      { id: 'in-archive', label: 'Im Archiv' },
-      { id: 'not-in-archive', label: 'Nicht im Archiv' },
+      { id: 'all', label: t('toolbar.originAll') },
+      { id: 'in-archive', label: t('toolbar.originInArchive') },
+      { id: 'not-in-archive', label: t('toolbar.originNotInArchive') },
     ];
     for (const provider of getUsableProviders({ capability: 'listUpgrades', excludeIds: ['archive'] })) {
       options.push({ id: provider.id, label: provider.name });
@@ -25,9 +26,9 @@ function getOriginFilterOptionsForTab(tab) {
   }
   if (tab === 'installed') {
     const options = [
-      { id: 'all', label: 'Alle' },
-      { id: 'in-archive', label: 'Im Archiv' },
-      { id: 'not-in-archive', label: 'Nicht im Archiv' },
+      { id: 'all', label: t('toolbar.originAll') },
+      { id: 'in-archive', label: t('toolbar.originInArchive') },
+      { id: 'not-in-archive', label: t('toolbar.originNotInArchive') },
     ];
     for (const provider of getUsableProviders({ capability: 'listInstalled', excludeIds: ['archive'] })) {
       options.push({ id: provider.id, label: provider.name });
@@ -52,14 +53,14 @@ export function renderAuthHeaderControls() {
   if (auth.isAuthenticated) {
     const displayUser = String(auth.authenticatedUser || auth.username || 'Admin').trim() || 'Admin';
     container.innerHTML = `
-      <span class="auth-user-badge" title="Angemeldet als Administrator: ${escapeHTML(displayUser)}">🔓 ${escapeHTML(displayUser)}</span>
-      <button type="button" class="auth-header-btn is-logout" data-auth-header-action="logout" title="Admin-Sitzung abmelden">Abmelden</button>
+      <span class="auth-user-badge" title="${escapeHTML(t('header.authLoggedInTitle', { user: displayUser }))}">🔓 ${escapeHTML(displayUser)}</span>
+      <button type="button" class="auth-header-btn is-logout" data-auth-header-action="logout" title="${escapeHTML(t('header.authLogoutTitle'))}">${escapeHTML(t('header.authLogout'))}</button>
     `;
     return;
   }
 
   container.innerHTML = `
-    <button type="button" class="auth-header-btn is-locked" data-auth-header-action="login" title="Als Administrator anmelden, um Einstellungen und Katalog zu bearbeiten">🔒 Admin-Login</button>
+    <button type="button" class="auth-header-btn is-locked" data-auth-header-action="login" title="${escapeHTML(t('header.authLoginTitle'))}">🔒 ${escapeHTML(t('header.authLogin'))}</button>
   `;
 }
 
@@ -79,32 +80,31 @@ export function renderAdminSessionButton() {
   if (state.adminSessionBusy) {
     btn.disabled = true;
     btn.classList.add('is-busy');
-    btn.textContent = '⏳ Admin-Sitzung...';
-    btn.title = 'Admin-Sitzung wird umgeschaltet...';
+    btn.textContent = `⏳ ${t('header.adminModeBusy')}`;
+    btn.title = t('header.adminModeBusyTitle');
     return;
   }
 
   if (status.mode === 'elevated' || status.isProcessElevated) {
     btn.disabled = true;
     btn.classList.add('is-elevated');
-    btn.textContent = '🛡️ Läuft als Administrator';
-    btn.title = 'Die App läuft bereits als Administrator - Befehle werden direkt erhöht ausgeführt.';
+    btn.textContent = `🛡️ ${t('header.adminModeElevated')}`;
+    btn.title = t('header.adminModeElevatedTitle');
     return;
   }
 
   if (status.mode === 'active' || status.isSessionActive) {
     btn.disabled = false;
     btn.classList.add('is-active');
-    btn.textContent = '🛡️ Admin-Sitzung aktiv';
-    btn.title = 'Admin-Sitzung aktiv - klicken zum Beenden des Hintergrund-Helpers.';
+    btn.textContent = `🛡️ ${t('header.adminModeActive')}`;
+    btn.title = t('header.adminModeActiveTitle');
     return;
   }
 
   btn.disabled = false;
   btn.classList.add('is-off');
-  btn.textContent = '🛡️ Admin-Modus: Aus';
-  btn.title =
-    'Admin-Sitzung aktivieren (Einmalig UAC) - verhindert mehrfache UAC-Abfragen bei Updates und Installationen.';
+  btn.textContent = `🛡️ ${t('header.adminModeOff')}`;
+  btn.title = t('header.adminModeOffTitle');
 }
 
 export function updateNavCounts() {
@@ -211,10 +211,11 @@ export function renderTagChips() {
     for (const t of item.tags) allTags.add(t);
   }
 
+  const locale = getI18nLocale() || 'en';
   const chips = [
-    `<button type="button" class="tag-chip ${!state.activeTag ? 'active' : ''}" data-tag="all">Alle</button>`,
+    `<button type="button" class="tag-chip ${!state.activeTag ? 'active' : ''}" data-tag="all">${escapeHTML(t('common.all'))}</button>`,
     ...Array.from(allTags)
-      .sort((a, b) => a.localeCompare(b, 'de'))
+      .sort((a, b) => a.localeCompare(b, locale))
       .map(
         (tag) =>
           `<button type="button" class="tag-chip ${state.activeTag === tag ? 'active' : ''}" data-tag="${escapeHTML(tag)}">${escapeHTML(tag)}</button>`

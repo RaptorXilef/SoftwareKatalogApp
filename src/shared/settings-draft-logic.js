@@ -1,15 +1,16 @@
 import { normalizeBackgroundSettings } from './background-update-logic.js';
+import { normalizeConfiguredLanguage } from './i18n.js';
 import { normalizeArchivePaths } from './multi-archive-logic.js';
 import { normalizeEnabledProviders, normalizeProviderSettings } from './provider-lifecycle-logic.js';
 import { normalizeDefaultSortModes, normalizeStartTab } from './unified-packages.js';
 
 export const SETTINGS_TABS = Object.freeze([
-  { id: 'general', label: '⚙️ Allgemein' },
-  { id: 'archive', label: '🗄️ Archiv & Downloads' },
-  { id: 'providers', label: '📦 Paketmanager' },
-  { id: 'updates', label: '🔔 Hintergrund & Updates' },
-  { id: 'security', label: '🛡️ Sicherheit & Richtlinien' },
-  { id: 'maintenance', label: '🛠️ Wartung & Über' },
+  { id: 'general', label: '⚙️ Allgemein', icon: '⚙️', labelKey: 'settings.tabs.general' },
+  { id: 'archive', label: '🗄️ Archiv & Downloads', icon: '🗄️', labelKey: 'settings.tabs.archive' },
+  { id: 'providers', label: '📦 Paketmanager', icon: '📦', labelKey: 'settings.tabs.providers' },
+  { id: 'updates', label: '🔔 Hintergrund & Updates', icon: '🔔', labelKey: 'settings.tabs.updates' },
+  { id: 'security', label: '🛡️ Sicherheit & Richtlinien', icon: '🛡️', labelKey: 'settings.tabs.security' },
+  { id: 'maintenance', label: '🛠️ Wartung & Über', icon: '🛠️', labelKey: 'settings.tabs.maintenance' },
 ]);
 
 const VALID_SETTINGS_TAB_IDS = new Set(SETTINGS_TABS.map((t) => t.id));
@@ -96,6 +97,7 @@ function normalizeVisibleHiddenCats(raw) {
  * Erstellt einen kanonischen lokalen Einstellungs-Entwurf ohne geteilte Array-Referenzen.
  * @param {Record<string, any> | null | undefined} [rawSettings]
  * @returns {{
+ *   language: string,
  *   startTab: string,
  *   newBadgeDays: number,
  *   versionCompareDepth: number,
@@ -138,6 +140,7 @@ export function createSettingsDraft(rawSettings = {}) {
   const bg = normalizeBackgroundSettings(src);
 
   return {
+    language: normalizeConfiguredLanguage(src.language),
     startTab: normalizeStartTab(src.startTab),
     defaultSortModes: normalizeDefaultSortModes(src.defaultSortModes),
     newBadgeDays: normalizeBoundedInt(src.newBadgeDays, 0, 365, 14),
@@ -212,6 +215,7 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   const initial = createSettingsDraft(initialDraft);
   const current = createSettingsDraft(currentDraft);
 
+  if (initial.language !== current.language) return true;
   if (initial.startTab !== current.startTab) return true;
   if (initial.newBadgeDays !== current.newBadgeDays) return true;
   if (initial.versionCompareDepth !== current.versionCompareDepth) return true;
@@ -265,6 +269,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
   });
 
   const payload = {
+    language: current.language,
     enabledProviders: current.enabledProviders,
     providerSettings,
     archiveSaveMode: current.archiveSaveMode,
@@ -320,8 +325,11 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     initial.autoUpdateListType !== current.autoUpdateListType ||
     JSON.stringify(initial.autoUpdateEntries) !== JSON.stringify(current.autoUpdateEntries);
 
+  const languageChanged = initial.language !== current.language;
+
   return {
     payload,
+    languageChanged,
     needsRescan,
     newlyEnabledProvider,
     providersChanged,

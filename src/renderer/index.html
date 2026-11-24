@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Software Katalog</title>
+  <title>Software Catalog</title>
   <meta
     http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' catalog-media: data:; media-src 'self' catalog-media:; connect-src 'self' ws:;"
@@ -13,15 +13,15 @@
 <body>
   <div id="dropOverlay" class="drop-overlay" hidden>
     <div class="drop-overlay-box">
-      <h2>Ordner hier ablegen zum Hinzufügen</h2>
-      <p>Legt automatisch einen neuen Archiv-Eintrag im Software-Verzeichnis an</p>
+      <h2 data-i18n="dropOverlay.title">Drop folder here to add</h2>
+      <p data-i18n="dropOverlay.subtitle">Automatically creates a new Archive entry in the software directory</p>
     </div>
   </div>
 
   <header class="app-header">
     <div class="header-title">
-      <h1>Software Katalog</h1>
-      <span class="header-meta">by © Felix Maywald <span id="appVersion"></span></span>
+      <h1 data-i18n="app.title">Software Catalog</h1>
+      <span class="header-meta"><span data-i18n="app.byAuthor">by (c) Felix Maywald</span> <span id="appVersion"></span></span>
       <span id="headerUpdateNotice" class="header-update-notice"></span>
     </div>
     <div class="header-actions">
@@ -30,110 +30,128 @@
         type="button"
         class="admin-status-btn is-off"
         id="btnAdminSessionToggle"
-        title="Admin-Sitzung aktivieren (Einmalig UAC)"
-        aria-label="Admin-Modus"
+        title="Activate admin session (one-time UAC)"
+        aria-label="Admin mode"
+        data-i18n-title="header.adminModeOffTitle"
+        data-i18n-aria-label="header.adminModeAria"
       >
-        🛡️ Admin-Modus: Aus
+        🛡️ <span data-i18n="header.adminModeOff">Admin Mode: Off</span>
       </button>
-      <button type="button" class="icon-btn" id="btnLegendToggle" title="Farben & Symbole erklären" aria-label="Legende">ⓘ</button>
-      <button type="button" class="icon-btn" id="btnSettingsToggle" title="Einstellungen" aria-label="Einstellungen">⚙️</button>
+      <button
+        type="button"
+        class="icon-btn"
+        id="btnLegendToggle"
+        title="Explain colors &amp; symbols"
+        aria-label="Legend"
+        data-i18n-title="header.legendTitle"
+        data-i18n-aria-label="header.legendAria"
+      >ⓘ</button>
+      <button
+        type="button"
+        class="icon-btn"
+        id="btnSettingsToggle"
+        title="Settings"
+        aria-label="Settings"
+        data-i18n-title="header.settingsTitle"
+        data-i18n-aria-label="header.settingsAria"
+      >⚙️</button>
     </div>
   </header>
 
   <!-- Kompaktes Popover statt riesiger Dauer-Legende -->
   <div id="legendPopover" class="popover legend-popover" hidden>
-    <h4>Farben & Status (Priorität von oben nach unten)</h4>
+    <h4 data-i18n="legend.title">Colors &amp; Status (priority from top to bottom)</h4>
     <div class="legend-list">
-      <div class="legend-row"><span class="status-swatch is-webupdate"></span><div><strong>Web-Update</strong> - Neuere Version online verfügbar (höchste Priorität)</div></div>
-      <div class="legend-row"><span class="status-swatch is-update"></span><div><strong>Archiv-Update</strong> - Neuere Version im Archiv als auf diesem PC</div></div>
-      <div class="legend-row"><span class="status-swatch is-newer"></span><div><strong>PC neuer</strong> - Lokale Version ist neuer als im Archiv</div></div>
-      <div class="legend-row"><span class="status-swatch is-installed"></span><div><strong>Aktuell / Installiert</strong> - Auf diesem PC installiert</div></div>
+      <div class="legend-row"><span class="status-swatch is-webupdate"></span><div><strong data-i18n="legend.webUpdateTitle">Web Update</strong> - <span data-i18n="legend.webUpdateDesc">Newer version available online (highest priority)</span></div></div>
+      <div class="legend-row"><span class="status-swatch is-update"></span><div><strong data-i18n="legend.archiveUpdateTitle">Archive Update</strong> - <span data-i18n="legend.archiveUpdateDesc">Newer version in the Archive than on this PC</span></div></div>
+      <div class="legend-row"><span class="status-swatch is-newer"></span><div><strong data-i18n="legend.pcNewerTitle">PC Newer</strong> - <span data-i18n="legend.pcNewerDesc">Local version is newer than in the Archive</span></div></div>
+      <div class="legend-row"><span class="status-swatch is-installed"></span><div><strong data-i18n="legend.installedTitle">Up to Date / Installed</strong> - <span data-i18n="legend.installedDesc">Installed on this PC</span></div></div>
     </div>
   </div>
 
   <!-- Hauptnavigation mit 5 Tabs & Live-Zählern -->
-  <div class="main-nav" id="mainNav" role="tablist" aria-label="Hauptnavigation">
+  <div class="main-nav" id="mainNav" role="tablist" aria-label="Main navigation" data-i18n-aria-label="tabs.navAria">
     <button type="button" class="nav-tab" role="tab" data-main-tab="updates" aria-selected="false">
-      <span class="nav-tab-label">⬆️ Updates</span>
+      <span class="nav-tab-label">⬆️ <span data-i18n="tabs.updates">Updates</span></span>
       <span class="nav-count" id="navCountUpdates">0</span>
     </button>
     <button type="button" class="nav-tab" role="tab" data-main-tab="installed" aria-selected="false">
-      <span class="nav-tab-label">💻 Installiert</span>
+      <span class="nav-tab-label">💻 <span data-i18n="tabs.installed">Installed</span></span>
       <span class="nav-count" id="navCountInstalled">0</span>
     </button>
     <button type="button" class="nav-tab active" role="tab" data-main-tab="archive" aria-selected="true">
-      <span class="nav-tab-label">🗄️ Archiv</span>
+      <span class="nav-tab-label">🗄️ <span data-i18n="tabs.archive">Archive</span></span>
       <span class="nav-count" id="navCountArchive">0</span>
     </button>
     <button type="button" class="nav-tab" role="tab" data-main-tab="bundles" aria-selected="false">
-      <span class="nav-tab-label">📦 Bündel</span>
+      <span class="nav-tab-label">📦 <span data-i18n="tabs.bundles">Bundles</span></span>
       <span class="nav-count" id="navCountBundles">0</span>
     </button>
     <button type="button" class="nav-tab" role="tab" data-main-tab="discover" aria-selected="false">
-      <span class="nav-tab-label">🛍️ Neu installieren</span>
+      <span class="nav-tab-label">🛍️ <span data-i18n="tabs.discover">Install New</span></span>
     </button>
   </div>
 
   <section class="toolbar" id="mainToolbar">
     <div class="toolbar-primary">
       <div class="search-box">
-        <input type="text" id="searchInput" placeholder="Software suchen (Strg+F)..." autocomplete="off">
-        <button type="button" id="clearSearchBtn" class="clear-btn" title="Suche leeren" hidden>✕</button>
+        <input type="text" id="searchInput" placeholder="Search software (Ctrl+F)..." data-i18n-placeholder="toolbar.searchPlaceholder" autocomplete="off">
+        <button type="button" id="clearSearchBtn" class="clear-btn" title="Clear search" data-i18n-title="toolbar.clearSearch" hidden>✕</button>
       </div>
 
-      <select id="sortSelect" class="toolbar-select" title="Sortierung">
-        <option value="az">Sortieren: A - Z</option>
-        <option value="updates">Sortieren: Updates zuerst</option>
-        <option value="webarchive">Sortieren: Web neuer als Archiv</option>
-        <option value="update">Sortieren: Archiv neuer als PC</option>
-        <option value="installed" data-archive-only="true">Sortieren: Auf PC installiert</option>
-        <option value="newest" data-archive-only="true">Sortieren: Zuletzt hinzugefügt</option>
-        <option value="updated" data-archive-only="true">Sortieren: Zuletzt aktualisiert</option>
+      <select id="sortSelect" class="toolbar-select" title="Sort order" data-i18n-title="toolbar.sortTitle">
+        <option value="az" data-i18n="toolbar.sortAz">Sort: A - Z</option>
+        <option value="updates" data-i18n="toolbar.sortUpdates">Sort: Updates first</option>
+        <option value="webarchive" data-i18n="toolbar.sortWebArchive">Sort: Web newer than Archive</option>
+        <option value="update" data-i18n="toolbar.sortUpdate">Sort: Archive newer than PC</option>
+        <option value="installed" data-archive-only="true" data-i18n="toolbar.sortInstalled">Sort: Installed on PC</option>
+        <option value="newest" data-archive-only="true" data-i18n="toolbar.sortNewest">Sort: Recently added</option>
+        <option value="updated" data-archive-only="true" data-i18n="toolbar.sortUpdated">Sort: Recently updated</option>
       </select>
 
-      <select id="filterSelect" class="toolbar-select" title="Status & Wartungsfilter">
-        <option value="all">Filter: Alle Programme</option>
-        <option value="any-update">Nur mit Updates (Online & Archiv)</option>
-        <option value="webupdate">Nur Online-Updates</option>
-        <option value="archiveupdate">Nur Archiv-Updates</option>
-        <option value="installed">Nur installierte Programme</option>
-        <optgroup label="Wartung & Einrichtung">
-          <option value="missing-path">Ohne PC-Pfad</option>
-          <option value="missing-web">Ohne Online-Prüfung</option>
+      <select id="filterSelect" class="toolbar-select" title="Status &amp; maintenance filter" data-i18n-title="toolbar.filterTitle">
+        <option value="all" data-i18n="toolbar.filterAll">Filter: All programs</option>
+        <option value="any-update" data-i18n="toolbar.filterAnyUpdate">Updates only (Online &amp; Archive)</option>
+        <option value="webupdate" data-i18n="toolbar.filterWebUpdate">Online updates only</option>
+        <option value="archiveupdate" data-i18n="toolbar.filterArchiveUpdate">Archive updates only</option>
+        <option value="installed" data-i18n="toolbar.filterInstalled">Installed programs only</option>
+        <optgroup label="Maintenance &amp; Setup" data-i18n-label="toolbar.filterMaintenanceGroup">
+          <option value="missing-path" data-i18n="toolbar.filterMissingPath">Missing PC path</option>
+          <option value="missing-web" data-i18n="toolbar.filterMissingWeb">No online check</option>
         </optgroup>
       </select>
 
       <!-- Die 3 klaren Hauptaktionen (können parallel laufen!) -->
       <div class="toolbar-checks">
-        <button type="button" id="btnCheckArchive" class="btn btn-archive" title="Prüft das Archiv auf neue Ordner und geänderte Setup-Dateien">
-          🔄 Archiv prüfen
+        <button type="button" id="btnCheckArchive" class="btn btn-archive" title="Checks the Archive for new folders and changed setup files" data-i18n-title="toolbar.checkArchiveTitle">
+          🔄 <span data-i18n="toolbar.checkArchive">Check Archive</span>
         </button>
-        <button type="button" id="btnCheckOnline" class="btn btn-online" title="Prüft im Internet (GitHub, Winget, Web) nach neueren Versionen">
-          🌐 Online-Updates
+        <button type="button" id="btnCheckOnline" class="btn btn-online" title="Checks online (GitHub, Winget, Web) for newer versions" data-i18n-title="toolbar.checkOnlineTitle">
+          🌐 <span data-i18n="toolbar.checkOnline">Online Updates</span>
         </button>
-        <button type="button" id="btnCheckLocal" class="btn btn-local" title="Scant installierte PC-Programme (Winget & Registry) und lokale Versionen">
-          💻 PC prüfen
+        <button type="button" id="btnCheckLocal" class="btn btn-local" title="Scans installed PC programs (Winget &amp; Registry) and local versions" data-i18n-title="toolbar.checkLocalTitle">
+          💻 <span data-i18n="toolbar.checkLocal">Check PC</span>
         </button>
 
         <!-- Kompaktes Admin-Menü für seltene Aktionen -->
         <div class="menu-anchor">
-          <button type="button" id="btnMoreActions" class="btn btn-ghost btn-icon-only" title="Weitere Aktionen" aria-label="Weitere Aktionen">⋯</button>
+          <button type="button" id="btnMoreActions" class="btn btn-ghost btn-icon-only" title="More actions" aria-label="More actions" data-i18n-title="toolbar.moreActionsTitle" data-i18n-aria-label="toolbar.moreActionsAria">⋯</button>
           <div id="moreActionsMenu" class="popover menu-popover" hidden>
-            <button type="button" class="menu-item" data-toolbar-action="add-software">➕ Software-Ordner hinzufügen</button>
-            <button type="button" class="menu-item" data-toolbar-action="auto-detect-all">🔎 Fehlende PC-Pfade suchen</button>
+            <button type="button" class="menu-item" data-toolbar-action="add-software">➕ <span data-i18n="toolbar.menuAddSoftware">Add software folder</span></button>
+            <button type="button" class="menu-item" data-toolbar-action="auto-detect-all">🔎 <span data-i18n="toolbar.menuAutoDetectAll">Find missing PC paths</span></button>
             <hr class="menu-divider">
-            <button type="button" class="menu-item" data-toolbar-action="winget-matcher">🪄 Winget-IDs zuordnen</button>
-            <button type="button" class="menu-item" data-toolbar-action="archive-cleaner">🧹 Archiv aufräumen</button>
+            <button type="button" class="menu-item" data-toolbar-action="winget-matcher">🪄 <span data-i18n="toolbar.menuWingetMatcher">Match Winget IDs</span></button>
+            <button type="button" class="menu-item" data-toolbar-action="archive-cleaner">🧹 <span data-i18n="toolbar.menuArchiveCleaner">Clean up Archive</span></button>
             <hr class="menu-divider">
-            <button type="button" class="menu-item" data-toolbar-action="scan-update">📋 Alle Metadaten neu einlesen</button>
-            <button type="button" class="menu-item" data-toolbar-action="scan-full">♻️ Vollständiger Archiv-Rescan</button>
+            <button type="button" class="menu-item" data-toolbar-action="scan-update">📋 <span data-i18n="toolbar.menuScanUpdate">Re-read all metadata</span></button>
+            <button type="button" class="menu-item" data-toolbar-action="scan-full">♻️ <span data-i18n="toolbar.menuScanFull">Full Archive rescan</span></button>
           </div>
         </div>
       </div>
 
       <div class="catalog-counter">
         <strong id="catalogCountDisplay">0</strong>
-        <span id="catalogCountSub">Programme</span>
+        <span id="catalogCountSub" data-i18n="toolbar.programs">Programs</span>
       </div>
     </div>
 
@@ -145,7 +163,7 @@
 
     <!-- Einklappbare Kategorien (nur im Archiv-Tab) -->
     <details id="tagsDetails" class="tags-drawer">
-      <summary>Kategorien & Tags</summary>
+      <summary data-i18n="toolbar.categoriesAndTags">Categories &amp; Tags</summary>
       <div class="tags-list" id="tagContainer"></div>
     </details>
   </section>
@@ -169,13 +187,13 @@
     <div class="discover-search-panel">
       <div class="discover-search-row">
         <div class="discover-search-box">
-          <input type="text" id="discoverSearchInput" placeholder="Neue Software in aktiven Quellen & Archiv suchen (Strg+F)..." autocomplete="off">
-          <button type="button" id="clearDiscoverSearchBtn" class="clear-btn" title="Suche leeren" hidden>✕</button>
+          <input type="text" id="discoverSearchInput" placeholder="Search new software in active sources &amp; Archive (Ctrl+F)..." data-i18n-placeholder="discover.searchPlaceholder" autocomplete="off">
+          <button type="button" id="clearDiscoverSearchBtn" class="clear-btn" title="Clear search" data-i18n-title="toolbar.clearSearch" hidden>✕</button>
         </div>
-        <button type="button" id="btnDiscoverSearch" class="btn btn-primary">🔎 Suchen</button>
+        <button type="button" id="btnDiscoverSearch" class="btn btn-primary">🔎 <span data-i18n="discover.searchButton">Search</span></button>
       </div>
       <div class="discover-sources-row">
-        <span class="discover-sources-label">Quellen:</span>
+        <span class="discover-sources-label" data-i18n="discover.sourcesLabel">Sources:</span>
         <div id="discoverSourceChips" class="discover-source-chips"></div>
       </div>
       <div id="discoverLocalActions" class="discover-local-actions" hidden></div>
@@ -196,13 +214,13 @@
 
   <!-- Lightbox -->
   <div class="lightbox-overlay" id="lightboxOverlay" role="dialog" aria-modal="true" hidden>
-    <button type="button" class="lightbox-close" id="lightboxBtnClose" aria-label="Schließen">✕</button>
-    <button type="button" class="lightbox-arrow left" id="lightboxBtnLeft" aria-label="Zurück">&#10094;</button>
-    <img id="lightboxImg" src="" alt="Vollbildansicht" hidden>
+    <button type="button" class="lightbox-close" id="lightboxBtnClose" aria-label="Close" data-i18n-aria-label="lightbox.close">✕</button>
+    <button type="button" class="lightbox-arrow left" id="lightboxBtnLeft" aria-label="Previous" data-i18n-aria-label="lightbox.prev">&#10094;</button>
+    <img id="lightboxImg" src="" alt="Fullscreen view" data-i18n-alt="lightbox.alt">
     <video id="lightboxVid" src="" controls hidden>
-      <track kind="captions" src="" label="Keine Untertitel" default>
+      <track kind="captions" src="" label="No captions" data-i18n-label="lightbox.noCaptions" default>
     </video>
-    <button type="button" class="lightbox-arrow right" id="lightboxBtnRight" aria-label="Vor">&#10095;</button>
+    <button type="button" class="lightbox-arrow right" id="lightboxBtnRight" aria-label="Next" data-i18n-aria-label="lightbox.next">&#10095;</button>
   </div>
 
   <!-- Nicht-blockierende Toast-Benachrichtigungen -->

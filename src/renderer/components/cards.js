@@ -20,15 +20,25 @@ import {
   isProviderUsable,
   state,
 } from '../state.js';
+import { getI18nLocale, t } from '../utils/i18n.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { updateNavCounts } from './toolbar.js';
 
-const STATUS_META = {
-  webupdate: { label: 'Web-Update', title: 'Neuere Version im Internet verfügbar' },
-  update: { label: 'Archiv-Update', title: 'Neuere Version im Archiv verfügbar' },
-  installed: { label: 'Installiert', title: 'Auf diesem PC installiert' },
-  newer: { label: 'PC neuer', title: 'Installierte Version ist neuer als im Archiv' },
-};
+function getStatusMeta(status) {
+  if (status === 'webupdate') {
+    return { label: t('cards.statusWebUpdate'), title: t('cards.statusWebUpdateTitle') };
+  }
+  if (status === 'update') {
+    return { label: t('cards.statusArchiveUpdate'), title: t('cards.statusArchiveUpdateTitle') };
+  }
+  if (status === 'installed') {
+    return { label: t('cards.statusInstalled'), title: t('cards.statusInstalledTitle') };
+  }
+  if (status === 'newer') {
+    return { label: t('cards.statusNewer'), title: t('cards.statusNewerTitle') };
+  }
+  return null;
+}
 
 const iconQueue = [];
 const queuedIconIds = new Set();
@@ -320,7 +330,7 @@ function getFilteredAndSortedEntries() {
       const cmp = compareVersions(b.st.webVersion, a.st.webVersion, depth);
       if (cmp !== 0) return cmp;
     }
-    return a.item.name.localeCompare(b.item.name, 'de', { sensitivity: 'base' });
+    return a.item.name.localeCompare(b.item.name, getI18nLocale() || 'en', { sensitivity: 'base' });
   });
 
   return { entries, hasSearch };
@@ -339,16 +349,16 @@ function renderVersionStrip(item, st) {
 
   return `
     <div class="card-versions">
-      <div class="ver-slot ${pcClass}" title="Installiert auf diesem PC">
-        <span class="ver-lbl">PC</span>
+      <div class="ver-slot ${pcClass}" title="${escapeHTML(t('cards.slotPcTitle'))}">
+        <span class="ver-lbl">${escapeHTML(t('cards.slotPc'))}</span>
         <span class="ver-val">${st.localVersion ? escapeHTML(st.localVersion) : '-'}</span>
       </div>
-      <div class="ver-slot ${archiveClass}" title="Version im Archiv">
-        <span class="ver-lbl">Archiv</span>
+      <div class="ver-slot ${archiveClass}" title="${escapeHTML(t('cards.slotArchiveTitle'))}">
+        <span class="ver-lbl">${escapeHTML(t('cards.slotArchive'))}</span>
         <span class="ver-val">${st.archiveVersion ? escapeHTML(st.archiveVersion) : '-'}</span>
       </div>
-      <div class="ver-slot ${webClass}" title="Aktuellste Version im Web">
-        <span class="ver-lbl">Web</span>
+      <div class="ver-slot ${webClass}" title="${escapeHTML(t('cards.slotWebTitle'))}">
+        <span class="ver-lbl">${escapeHTML(t('cards.slotWeb'))}</span>
         <span class="ver-val">${st.webVersion ? escapeHTML(st.webVersion) : '-'}</span>
       </div>
     </div>
@@ -357,23 +367,27 @@ function renderVersionStrip(item, st) {
 
 function renderCardHtml(item, st) {
   const isFav = item.inArchive && state.favorites.includes(item.id);
-  const statusCfg = STATUS_META[st.status];
+  const statusCfg = getStatusMeta(st.status);
   const isUpdatesTab = state.activeTab === 'updates';
   const isSelected = isUpdatesTab && state.selectedUpdateIds.has(item.id);
 
   let secondaryTag = '';
   if (item.packageManager === 'nvm' && item.isActive) {
-    secondaryTag = '<span class="card-chip chip-install-silent" title="Aktuell aktive Node.js-Version">⚡ Aktiv</span>';
-  } else if (item.inArchive && isItemNew(item)) secondaryTag = '<span class="card-chip chip-new">NEU</span>';
-  else if (item.softwareType === 'portable') secondaryTag = '<span class="card-chip">Portabel</span>';
-  else if (item.softwareType === 'driver') secondaryTag = '<span class="card-chip">Treiber</span>';
+    secondaryTag = `<span class="card-chip chip-install-silent" title="${escapeHTML(t('cards.chipActiveTitle'))}">⚡ ${escapeHTML(t('cards.chipActive'))}</span>`;
+  } else if (item.inArchive && isItemNew(item)) {
+    secondaryTag = `<span class="card-chip chip-new">${escapeHTML(t('cards.chipNew'))}</span>`;
+  } else if (item.softwareType === 'portable') {
+    secondaryTag = `<span class="card-chip">${escapeHTML(t('cards.chipPortable'))}</span>`;
+  } else if (item.softwareType === 'driver') {
+    secondaryTag = `<span class="card-chip">${escapeHTML(t('cards.chipDriver'))}</span>`;
+  }
 
   let originTag = '';
   let providerTag = '';
   if (state.activeTab !== 'archive') {
     originTag = item.inArchive
-      ? '<span class="card-chip chip-origin-archive" title="Im Archiv hinterlegt">Archiv</span>'
-      : '<span class="card-chip chip-origin-pc" title="Nur lokal auf diesem PC installiert">Nur PC</span>';
+      ? `<span class="card-chip chip-origin-archive" title="${escapeHTML(t('cards.chipOriginArchiveTitle'))}">${escapeHTML(t('cards.chipOriginArchive'))}</span>`
+      : `<span class="card-chip chip-origin-pc" title="${escapeHTML(t('cards.chipOriginPcTitle'))}">${escapeHTML(t('cards.chipOriginPc'))}</span>`;
 
     const providerBadge = getProviderBadgeInfo(item.packageManager, state.providers);
     if (providerBadge) {
@@ -386,7 +400,13 @@ function renderCardHtml(item, st) {
     const badge = getInstallModeBadge(item);
     if (badge) {
       const cls = badge.type === 'protected' ? 'chip-install-protected' : 'chip-install-silent';
-      installModeTag = `<span class="card-chip ${cls}" title="${escapeHTML(badge.title)}">${escapeHTML(badge.label)}</span>`;
+      const label =
+        badge.type === 'protected' ? `🛡️ ${t('cards.chipInstallProtected')}` : `⚡ ${t('cards.chipInstallSilent')}`;
+      const title =
+        badge.type === 'protected'
+          ? t('cards.chipInstallProtectedTitle')
+          : t('cards.chipInstallSilentTitle', { args: String(item.silentArgs || '').trim() });
+      installModeTag = `<span class="card-chip ${cls}" title="${escapeHTML(title)}">${escapeHTML(label)}</span>`;
     }
   }
 
@@ -395,18 +415,18 @@ function renderCardHtml(item, st) {
     : `<div class="card-icon-fallback">${item.origin === 'pc' ? '💻' : '📦'}</div>`;
 
   const favBtnHtml = item.inArchive
-    ? `<button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="Favorit umschalten" aria-label="Favorit">★</button>`
+    ? `<button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="${escapeHTML(t('cards.favToggleTitle'))}" aria-label="${escapeHTML(t('cards.favAria'))}">★</button>`
     : item.origin === 'pc'
-      ? `<button type="button" class="card-archive-btn" data-card-archive-id="${escapeHTML(item.id)}" title="Ins Archiv aufnehmen" aria-label="Ins Archiv aufnehmen">📥</button>`
+      ? `<button type="button" class="card-archive-btn" data-card-archive-id="${escapeHTML(item.id)}" title="${escapeHTML(t('cards.addToArchiveTitle'))}" aria-label="${escapeHTML(t('cards.addToArchiveAria'))}">📥</button>`
       : '';
 
   const selectHtml = isUpdatesTab
-    ? `<label class="card-select-wrap" title="Für Massenaktion auswählen"><input type="checkbox" class="card-select-checkbox" data-select-update-id="${escapeHTML(item.id)}" ${isSelected ? 'checked' : ''}></label>`
+    ? `<label class="card-select-wrap" title="${escapeHTML(t('cards.selectForBatchTitle'))}"><input type="checkbox" class="card-select-checkbox" data-select-update-id="${escapeHTML(item.id)}" ${isSelected ? 'checked' : ''}></label>`
     : '';
 
   const subtitle = item.inArchive
     ? item.tags.slice(0, 3).join(' · ')
-    : [item.publisher, item.packageId].filter(Boolean).join(' · ') || 'Windows-Installation';
+    : [item.publisher, item.packageId].filter(Boolean).join(' · ') || t('cards.windowsInstallation');
 
   return `
     <article class="card status-${st.status} ${isSelected ? 'is-selected' : ''}" data-id="${escapeHTML(item.id)}">
@@ -438,19 +458,20 @@ function renderEmptyState() {
     if ((state.isScanningInstalled || state.isCheckingProviders) && !state.hasScannedInstalled) {
       return `
         <div class="empty-state">
-          <h3>Suche nach PC- & Archiv-Updates...</h3>
-          <p>Installierte Programme und Paketmanager-Upgrades werden gerade ermittelt.</p>
+          <h3>${escapeHTML(t('empty.updatesScanningTitle'))}</h3>
+          <p>${escapeHTML(t('empty.updatesScanningDesc'))}</p>
         </div>
       `;
     }
+    const ignoredCount = state.ignoredUpdates.length;
     const ignoredNote =
-      state.ignoredUpdates.length > 0
-        ? `<p class="muted">Hinweis: ${state.ignoredUpdates.length} Update(s) befinden sich auf der Ignorierliste (oben ueber <strong>🙈 Ignoriert (${state.ignoredUpdates.length})</strong> verwaltbar).</p>`
+      ignoredCount > 0
+        ? `<p class="muted">${escapeHTML(t('empty.updatesIgnoredNotePrefix', { count: ignoredCount }))}<strong>🙈 ${escapeHTML(t('empty.updatesIgnoredNoteButton', { count: ignoredCount }))}</strong>${escapeHTML(t('empty.updatesIgnoredNoteSuffix'))}</p>`
         : '';
     return `
       <div class="empty-state">
-        <h3>Keine offenen Updates gefunden</h3>
-        <p>Alle erkannten Programme sind aktuell - oder starte oben <strong>🌐 Online-Updates</strong> bzw. <strong>💻 PC prüfen</strong>.</p>
+        <h3>${escapeHTML(t('empty.updatesNoneTitle'))}</h3>
+        <p>${escapeHTML(t('empty.updatesNoneDescPrefix'))}<strong>🌐 ${escapeHTML(t('toolbar.checkOnline'))}</strong>${escapeHTML(t('empty.updatesNoneDescMid'))}<strong>💻 ${escapeHTML(t('toolbar.checkLocal'))}</strong>${escapeHTML(t('empty.updatesNoneDescSuffix'))}</p>
         ${ignoredNote}
       </div>
     `;
@@ -460,15 +481,15 @@ function renderEmptyState() {
     if ((state.isScanningInstalled || state.isCheckingProviders) && !state.hasScannedInstalled) {
       return `
         <div class="empty-state">
-          <h3>Scanne installierte PC-Programme...</h3>
-          <p>Paketmanager und Windows-Registry werden eingelesen.</p>
+          <h3>${escapeHTML(t('empty.installedScanningTitle'))}</h3>
+          <p>${escapeHTML(t('empty.installedScanningDesc'))}</p>
         </div>
       `;
     }
     return `
       <div class="empty-state">
-        <h3>Keine installierten Programme angezeigt</h3>
-        <p>Klicke auf <strong>💻 PC prüfen</strong> oder passe Suche und Herkunfts-Filter an.</p>
+        <h3>${escapeHTML(t('empty.installedNoneTitle'))}</h3>
+        <p>${escapeHTML(t('empty.installedNoneDescPrefix'))}<strong>💻 ${escapeHTML(t('toolbar.checkLocal'))}</strong>${escapeHTML(t('empty.installedNoneDescSuffix'))}</p>
       </div>
     `;
   }
@@ -476,16 +497,16 @@ function renderEmptyState() {
   if (state.catalog.length === 0) {
     return `
       <div class="empty-state">
-        <h3>Noch keine Programme im Archiv</h3>
-        <p>Klicke oben auf <strong>🔄 Archiv prüfen</strong>, um deinen Software-Ordner einzulesen.</p>
+        <h3>${escapeHTML(t('empty.archiveEmptyTitle'))}</h3>
+        <p>${escapeHTML(t('empty.archiveEmptyDescPrefix'))}<strong>🔄 ${escapeHTML(t('toolbar.checkArchive'))}</strong>${escapeHTML(t('empty.archiveEmptyDescSuffix'))}</p>
       </div>
     `;
   }
 
   return `
     <div class="empty-state">
-      <h3>Keine Treffer</h3>
-      <p>Passe Suche, Kategorie oder Filter an.</p>
+      <h3>${escapeHTML(t('empty.noMatchesTitle'))}</h3>
+      <p>${escapeHTML(t('empty.noMatchesDesc'))}</p>
     </div>
   `;
 }
@@ -558,22 +579,22 @@ export function renderUpdatesBatchBar(entries = null) {
   const modePills = [];
   if (anySilentOnly) {
     modePills.push(
-      '<span class="batch-mode-pill is-silent" title="Zugriffsrichtlinie erzwingt stille Updates">🔒 Richtlinie: Nur Silent</span>'
+      `<span class="batch-mode-pill is-silent" title="${escapeHTML(t('batch.policySilentOnlyTitle'))}">🔒 ${escapeHTML(t('batch.policySilentOnly'))}</span>`
     );
   }
   if (silentCount > 0) {
     modePills.push(
-      `<span class="batch-mode-pill is-silent" title="Wird bei Massenaktualisierung still installiert">⚡ ${silentCount} Silent</span>`
+      `<span class="batch-mode-pill is-silent" title="${escapeHTML(t('batch.pillSilentTitle'))}">⚡ ${escapeHTML(t('batch.pillSilent', { count: silentCount }))}</span>`
     );
   }
   if (protectedCount > 0) {
     modePills.push(
-      `<span class="batch-mode-pill is-protected" title="Silent-Parameter werden wegen Adware-Schutz immer ignoriert">🛡️ ${protectedCount} Interaktiv-Schutz</span>`
+      `<span class="batch-mode-pill is-protected" title="${escapeHTML(t('batch.pillProtectedTitle'))}">🛡️ ${escapeHTML(t('batch.pillProtected', { count: protectedCount }))}</span>`
     );
   }
   if (adwareConflictCount > 0) {
     modePills.push(
-      `<span class="batch-mode-pill is-protected" title="Adware-Schutz blockiert stille Installation unter Richtlinie Nur Silent">🚫 ${adwareConflictCount} Adware-Konflikt</span>`
+      `<span class="batch-mode-pill is-protected" title="${escapeHTML(t('batch.pillAdwareConflictTitle'))}">🚫 ${escapeHTML(t('batch.pillAdwareConflict', { count: adwareConflictCount }))}</span>`
     );
   }
   const modePillsHtml = modePills.length > 0 ? `<div class="batch-mode-pills">${modePills.join('')}</div>` : '';
@@ -581,34 +602,34 @@ export function renderUpdatesBatchBar(entries = null) {
   const standardAllBtnHtml = anySilentOnly
     ? ''
     : `<button type="button" class="btn btn-primary" id="btnUpdateAllStandard" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
-        ⬆️ Alle Updaten <span class="btn-count-badge">${totalCount}</span>
+        ⬆️ ${escapeHTML(t('batch.updateAll'))} <span class="btn-count-badge">${totalCount}</span>
       </button>`;
   const silentAllBtnCls = anySilentOnly ? 'btn-primary' : 'btn-local';
-  const selectedBtnLabel = allSilentOnly ? '⚡ Ausgewählte silent aktualisieren' : '⬆️ Ausgewählte aktualisieren';
+  const selectedBtnLabel = allSilentOnly ? `⚡ ${t('batch.updateSelectedSilent')}` : `⬆️ ${t('batch.updateSelected')}`;
 
   bar.hidden = false;
   bar.innerHTML = `
     <div class="batch-bar-left">
       <label class="batch-select-all">
         <input type="checkbox" id="chkSelectAllUpdates" ${allSelected ? 'checked' : ''} ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
-        <span>Alle auswählen</span>
+        <span>${escapeHTML(t('batch.selectAll'))}</span>
       </label>
-      <span class="batch-selected-count">${selectedCount} von ${totalCount} ausgewählt</span>
+      <span class="batch-selected-count">${escapeHTML(t('batch.selectedOfTotal', { selected: selectedCount, total: totalCount }))}</span>
       ${modePillsHtml}
     </div>
     <div class="batch-bar-right">
-      <button type="button" class="btn btn-ghost btn-ignored-list" id="btnOpenIgnoreList" title="Ignorierte Updates verwalten">
-        🙈 Ignoriert (${ignoredCount})
+      <button type="button" class="btn btn-ghost btn-ignored-list" id="btnOpenIgnoreList" title="${escapeHTML(t('batch.ignoredButtonTitle'))}">
+        🙈 ${escapeHTML(t('batch.ignoredButton', { count: ignoredCount }))}
       </button>
       <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
-        ⬇️ Alle Online-Updates ins Archiv laden <span class="btn-count-badge">${pendingArchiveDownloads}</span>
+        ⬇️ ${escapeHTML(t('batch.downloadOnlineToArchive'))} <span class="btn-count-badge">${pendingArchiveDownloads}</span>
       </button>
       ${standardAllBtnHtml}
       <button type="button" class="btn ${silentAllBtnCls}" id="btnUpdateAllSilent" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
-        ⚡ Alle Updaten (silent) <span class="btn-count-badge">${totalCount}</span>
+        ⚡ ${escapeHTML(t('batch.updateAllSilent'))} <span class="btn-count-badge">${totalCount}</span>
       </button>
       <button type="button" class="btn btn-ghost" id="btnBatchUpdateSelected" ${selectedCount === 0 ? 'disabled' : disabledAttr}>
-        ${selectedBtnLabel} <span class="btn-count-badge">${selectedCount}</span>
+        ${escapeHTML(selectedBtnLabel)} <span class="btn-count-badge">${selectedCount}</span>
       </button>
     </div>
   `;
@@ -632,6 +653,7 @@ export function renderScanProgressBanner() {
   let banner = formatScanProgressBanner(state.installedScanProgress, {
     tab: state.activeTab,
     isCheckingProviders: state.isCheckingProviders,
+    t,
   });
 
   if (state.isScanningInstalled && !banner.visible) {
@@ -639,9 +661,9 @@ export function renderScanProgressBanner() {
       visible: true,
       headline:
         state.activeTab === 'installed'
-          ? 'Installierte PC-Programme werden eingelesen...'
-          : 'Web- & Paketmanager-Updates werden geprüft...',
-      subtext: 'Ermittle installierte Pakete und Updates',
+          ? t('scanBanner.fallbackInstalledHeadline')
+          : t('scanBanner.fallbackUpdatesHeadline'),
+      subtext: t('scanBanner.fallbackSubtext'),
       percent: null,
       indeterminate: true,
       completed: 0,
@@ -700,18 +722,21 @@ export function renderScanProgressBanner() {
     Array.isArray(state.lastScanFailedProviders) &&
     state.lastScanFailedProviders.length > 0
   ) {
-    const names = formatSourceNameList(state.lastScanFailedProviders.map((p) => p.name || p.id));
+    const names = formatSourceNameList(
+      state.lastScanFailedProviders.map((p) => p.name || p.id),
+      { t }
+    );
     const detailsTitle = state.lastScanFailedProviders
-      .map((p) => `${p.name || p.id}: ${p.error || 'Fehler'}`)
+      .map((p) => `${p.name || p.id}: ${p.error || t('scanBanner.defaultError')}`)
       .join('\n');
     host.hidden = false;
     host.innerHTML = `
       <div class="pc-scan-banner is-warning" role="status" title="${escapeHTML(detailsTitle)}">
         <div class="pc-scan-warning-row">
-          <span class="pc-scan-warning-text">⚠️ Update-Prüfung für <strong>${escapeHTML(names)}</strong> fehlgeschlagen - ggf. kurzzeitig nicht erreichbar.</span>
+          <span class="pc-scan-warning-text">⚠️ ${escapeHTML(t('scanBanner.warningFailedPrefix'))}<strong>${escapeHTML(names)}</strong>${escapeHTML(t('scanBanner.warningFailedSuffix'))}</span>
           <div class="pc-scan-warning-actions">
-            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="retry-scan">🔄 Erneut prüfen</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="dismiss-warning" title="Hinweis ausblenden" aria-label="Hinweis ausblenden">✕</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="retry-scan">🔄 ${escapeHTML(t('common.retry'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-scan-banner-action="dismiss-warning" title="${escapeHTML(t('scanBanner.dismissWarning'))}" aria-label="${escapeHTML(t('scanBanner.dismissWarning'))}">✕</button>
           </div>
         </div>
       </div>
@@ -738,7 +763,8 @@ export function renderCatalogGrid() {
 
   if (countEl) countEl.textContent = String(entries.length);
   if (countSub) {
-    countSub.textContent = entries.length === baseCount ? 'Programme' : `von ${baseCount}`;
+    countSub.textContent =
+      entries.length === baseCount ? t('toolbar.programs') : t('toolbar.ofCount', { total: baseCount });
   }
 
   if (state.activeTab === 'updates') {
@@ -766,7 +792,7 @@ export function renderCatalogGrid() {
   if (descMatches.length > 0) {
     if (coreMatches.length > 0) {
       htmlParts.push(
-        `<div class="grid-section-divider"><span>Auch in Beschreibungen erwähnt (${descMatches.length})</span></div>`
+        `<div class="grid-section-divider"><span>${escapeHTML(t('cards.alsoInDescriptions', { count: descMatches.length }))}</span></div>`
       );
     }
     htmlParts.push(descMatches.map((e) => renderCardHtml(e.item, e.st)).join(''));

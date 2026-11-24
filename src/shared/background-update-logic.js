@@ -208,14 +208,25 @@ export function hasTrayStartupArg(argv = []) {
   });
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
- * Formatiert den dynamischen Tooltip fuer das Windows-Tray-Icon (ausschliesslich ASCII-Bindestriche).
+ * Formats the dynamic tooltip for the Windows tray icon (ASCII hyphens only).
  * @param {{
  *   updateCount?: number,
  *   isChecking?: boolean,
  *   autoUpdateEnabled?: boolean,
  *   autoUpdatePaused?: boolean,
  *   isElevated?: boolean,
+ *   t?: (key: string, params?: Record<string, unknown>) => string,
  * }} [options]
  * @returns {string}
  */
@@ -224,33 +235,36 @@ export function formatTrayTooltip({
   isChecking = false,
   autoUpdateEnabled = false,
   autoUpdatePaused = false,
+  t = undefined,
 } = {}) {
   const count = Number.isFinite(updateCount) && updateCount > 0 ? Math.trunc(updateCount) : 0;
   let base;
   if (isChecking) {
-    base = 'Software Katalog - Pruefe auf Updates...';
+    base = tr(t, 'tray.tooltipChecking', {}, 'Software Catalog - Checking for updates...');
   } else if (count === 1) {
-    base = 'Software Katalog - 1 Update verfuegbar';
+    base = tr(t, 'tray.tooltipOneUpdate', {}, 'Software Catalog - 1 update available');
   } else if (count > 1) {
-    base = `Software Katalog - ${count} Updates verfuegbar`;
+    base = tr(t, 'tray.tooltipManyUpdates', { count }, `Software Catalog - ${count} updates available`);
   } else {
-    base = 'Software Katalog - Alle Programme aktuell';
+    base = tr(t, 'tray.tooltipUpToDate', {}, 'Software Catalog - All programs up to date');
   }
 
   if (autoUpdateEnabled && autoUpdatePaused) {
-    return `${base} (Auto-Update pausiert)`;
+    const pausedSuffix = tr(t, 'tray.tooltipAutoUpdatePausedSuffix', {}, ' (Auto-Update paused)');
+    return `${base}${pausedSuffix}`;
   }
   return base;
 }
 
 /**
- * Erzeugt die Menue-Eintraege fuer das System-Tray-Kontextmenue.
+ * Builds the menu entries for the system tray context menu.
  * @param {{
  *   appVersion?: string,
  *   isChecking?: boolean,
  *   autoUpdateEnabled?: boolean,
  *   autoUpdatePaused?: boolean,
  *   settingsLocked?: boolean,
+ *   t?: (key: string, params?: Record<string, unknown>) => string,
  * }} [options]
  * @returns {Array<{ type: 'separator' } | { type: 'item', actionId: string, label: string, enabled: boolean }>}
  */
@@ -260,18 +274,27 @@ export function buildTrayMenuDescriptors({
   autoUpdateEnabled = false,
   autoUpdatePaused = false,
   settingsLocked = false,
+  t = undefined,
 } = {}) {
   const cleanVer = String(appVersion || '').trim();
-  const versionLabel = cleanVer ? `Software Katalog v${cleanVer}` : 'Software Katalog';
+  const appTitle = tr(t, 'app.title', {}, 'Software Catalog');
+  const versionLabel = cleanVer ? `${appTitle} v${cleanVer}` : appTitle;
   /** @type {Array<{ type: 'separator' } | { type: 'item', actionId: string, label: string, enabled: boolean }>} */
   const items = [
     { type: 'item', actionId: 'version', label: versionLabel, enabled: false },
     { type: 'separator' },
-    { type: 'item', actionId: 'open-window', label: '📂 Software Katalog öffnen', enabled: true },
+    {
+      type: 'item',
+      actionId: 'open-window',
+      label: `📂 ${tr(t, 'tray.menuOpen', {}, 'Open Software Catalog')}`,
+      enabled: true,
+    },
     {
       type: 'item',
       actionId: 'check-updates',
-      label: isChecking ? '⏳ Prüfe auf Updates...' : '🔄 Jetzt auf Updates prüfen',
+      label: isChecking
+        ? `⏳ ${tr(t, 'tray.menuChecking', {}, 'Checking for updates...')}`
+        : `🔄 ${tr(t, 'tray.menuCheckNow', {}, 'Check for updates now')}`,
       enabled: !isChecking,
     },
   ];
@@ -280,7 +303,9 @@ export function buildTrayMenuDescriptors({
     items.push({
       type: 'item',
       actionId: 'toggle-auto-update',
-      label: autoUpdatePaused ? '⚡ Auto-Update fortsetzen' : '⚡ Auto-Update pausieren',
+      label: autoUpdatePaused
+        ? `⚡ ${tr(t, 'tray.menuResumeAutoUpdate', {}, 'Resume Auto-Update')}`
+        : `⚡ ${tr(t, 'tray.menuPauseAutoUpdate', {}, 'Pause Auto-Update')}`,
       enabled: true,
     });
   }
@@ -289,12 +314,20 @@ export function buildTrayMenuDescriptors({
     items.push({
       type: 'item',
       actionId: 'open-settings',
-      label: '⚙️ Einstellungen öffnen',
+      label: `⚙️ ${tr(t, 'tray.menuSettings', {}, 'Open Settings')}`,
       enabled: true,
     });
   }
 
-  items.push({ type: 'separator' }, { type: 'item', actionId: 'quit', label: '🚪 Vollständig beenden', enabled: true });
+  items.push(
+    { type: 'separator' },
+    {
+      type: 'item',
+      actionId: 'quit',
+      label: `🚪 ${tr(t, 'tray.menuQuit', {}, 'Quit completely')}`,
+      enabled: true,
+    }
+  );
   return items;
 }
 

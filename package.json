@@ -79,6 +79,13 @@
       {
         "from": "build/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "src/locales",
+        "to": "locales",
+        "filter": [
+          "*.json"
+        ]
       }
     ],
     "win": {
