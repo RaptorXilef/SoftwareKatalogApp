@@ -522,6 +522,41 @@
     background: color-mix(in srgb, #885630 24%, transparent);
     color: #f2cdcd;
   }
+
+  &.is-pip {
+    background: color-mix(in srgb, #3776ab 22%, transparent);
+    color: #89b4fa;
+  }
+
+  &.is-uv {
+    background: color-mix(in srgb, #de5fe9 20%, transparent);
+    color: #f5c2e7;
+  }
+
+  &.is-cargo {
+    background: color-mix(in srgb, #dea584 22%, transparent);
+    color: #fab387;
+  }
+
+  &.is-vcpkg {
+    background: color-mix(in srgb, #0078d4 22%, transparent);
+    color: #74c7ec;
+  }
+
+  &.is-dotnet {
+    background: color-mix(in srgb, #512bd4 24%, transparent);
+    color: #cba6f7;
+  }
+
+  &.is-pwsh7 {
+    background: color-mix(in srgb, #2671be 24%, transparent);
+    color: #89dceb;
+  }
+
+  &.is-pwsh5 {
+    background: color-mix(in srgb, #012456 32%, transparent);
+    color: #94e2d5;
+  }
 }
 
 .discover-local-actions {

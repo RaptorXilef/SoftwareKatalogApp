@@ -21,6 +21,7 @@ import {
   sanitizeInnoInfFileName,
   sanitizeSilentArgs,
 } from '../shared/installer-logic.js';
+import { normalizePythonPackageName } from '../shared/python-parser.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
@@ -1582,7 +1583,11 @@ export async function extractCachedAppIcon({
         const cleanPidLower = String(packageId).trim().toLowerCase();
         const cacheKey = ['npm', 'bun', 'pnpm'].includes(cleanPm)
           ? `npm-registry:show:${cleanPidLower}`
-          : `${cleanPm}:show:${cleanPidLower}`;
+          : ['pip', 'uv'].includes(cleanPm)
+            ? `pypi:show:${normalizePythonPackageName(cleanPidLower)}`
+            : ['pwsh7', 'pwsh5'].includes(cleanPm)
+              ? `psgallery:show:${cleanPidLower}`
+              : `${cleanPm}:show:${cleanPidLower}`;
         cachedPkg = getWingetCache().get(cacheKey)?.data || null;
       }
 

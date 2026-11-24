@@ -2,14 +2,21 @@ import { normalizeProviderCategory, normalizeProviderVersion } from '../../share
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
 import { bunProvider } from './bun-provider.js';
+import { cargoProvider } from './cargo-provider.js';
 import { chocoProvider } from './choco-provider.js';
 import { composerProvider } from './composer-provider.js';
+import { dotnetToolProvider } from './dotnet-tool-provider.js';
 import { msiProvider } from './msi-provider.js';
 import { msstoreProvider } from './msstore-provider.js';
 import { npmProvider } from './npm-provider.js';
 import { nvmProvider } from './nvm-provider.js';
+import { pipProvider } from './pip-provider.js';
 import { pnpmProvider } from './pnpm-provider.js';
+import { pwsh5Provider } from './pwsh5-provider.js';
+import { pwsh7Provider } from './pwsh7-provider.js';
 import { scoopProvider } from './scoop-provider.js';
+import { uvProvider } from './uv-provider.js';
+import { vcpkgProvider } from './vcpkg-provider.js';
 import { getWingetCache, wingetProvider } from './winget-provider.js';
 
 const CAPABILITY_KEYS = [
@@ -23,15 +30,9 @@ const CAPABILITY_KEYS = [
 ];
 
 /**
- * Strukturell vorbereitete Liste künftiger Paketquellen (noch nicht registriert/implementiert).
+ * Strukturell vorbereitete Liste kuenftiger Paketquellen (derzeit alle geplanten Quellen implementiert).
  */
-export const PLANNED_PROVIDERS = [
-  { id: 'pip', name: 'pip', status: 'planned' },
-  { id: 'cargo', name: 'Cargo', status: 'planned' },
-  { id: 'vcpkg', name: 'vcpkg', status: 'planned' },
-  { id: 'dotnet', name: '.NET Tools', status: 'planned' },
-  { id: 'powershell', name: 'PowerShell Gallery', status: 'planned' },
-];
+export const PLANNED_PROVIDERS = [];
 
 const registry = new Map();
 const availabilityCache = new Map();
@@ -124,6 +125,13 @@ export function initDefaultProviders() {
   registerProvider(nvmProvider);
   registerProvider(pnpmProvider);
   registerProvider(composerProvider);
+  registerProvider(pipProvider);
+  registerProvider(uvProvider);
+  registerProvider(cargoProvider);
+  registerProvider(vcpkgProvider);
+  registerProvider(dotnetToolProvider);
+  registerProvider(pwsh7Provider);
+  registerProvider(pwsh5Provider);
 }
 
 export function getProvider(id) {

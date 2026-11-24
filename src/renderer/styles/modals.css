@@ -1735,6 +1735,31 @@
   flex-shrink: 0;
 }
 
+.provider-extra-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.provider-extra-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.provider-extra-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  & input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+}
+
 .planned-providers-hint {
   margin: 2px 0 0;
   font-size: 12px;

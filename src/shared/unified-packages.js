@@ -25,6 +25,13 @@ export const PROVIDER_DISPLAY_META = Object.freeze({
   nvm: { id: 'nvm', label: 'NVM', badgeClass: 'is-nvm' },
   pnpm: { id: 'pnpm', label: 'pnpm', badgeClass: 'is-pnpm' },
   composer: { id: 'composer', label: 'Composer', badgeClass: 'is-composer' },
+  pip: { id: 'pip', label: 'pip', badgeClass: 'is-pip' },
+  uv: { id: 'uv', label: 'uv tool', badgeClass: 'is-uv' },
+  cargo: { id: 'cargo', label: 'Cargo', badgeClass: 'is-cargo' },
+  vcpkg: { id: 'vcpkg', label: 'vcpkg', badgeClass: 'is-vcpkg' },
+  dotnet: { id: 'dotnet', label: '.NET Tools', badgeClass: 'is-dotnet' },
+  pwsh7: { id: 'pwsh7', label: 'PowerShell 7', badgeClass: 'is-pwsh7' },
+  pwsh5: { id: 'pwsh5', label: 'PowerShell 5.1', badgeClass: 'is-pwsh5' },
 });
 
 /**

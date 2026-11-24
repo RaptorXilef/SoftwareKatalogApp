@@ -82,6 +82,7 @@ export async function renderSettingsModal() {
     if (p.availability) availabilityById.set(p.id, p.availability);
   }
   const busyProviderIds = new Set();
+  let vcpkgRootDraft = String(s.providerSettings?.vcpkgRoot || '').trim();
   const saveMode = s.archiveSaveMode || 'ask';
   const startTab = normalizeStartTab(s.startTab);
   const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
@@ -129,6 +130,19 @@ export async function renderSettingsModal() {
               actionHtml = `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="Paketmanager deinstallieren (2x klicken)">🗑️ Deinstallieren</button>`;
             }
 
+            const extraSettingHtml =
+              p.id === 'vcpkg'
+                ? `
+                  <div class="provider-extra-setting">
+                    <span class="provider-extra-label"><code>VCPKG_ROOT</code> Ordner:</span>
+                    <div class="provider-extra-input-row">
+                      <input type="text" id="cfgVcpkgRoot" data-vcpkg-root-input value="${escapeHTML(vcpkgRootDraft)}" placeholder="Pfad zum vcpkg-Ordner (leer = %VCPKG_ROOT% / PATH)">
+                      <button type="button" class="btn btn-ghost btn-xs" data-settings-action="browse-vcpkg-root">📂 Ordner...</button>
+                    </div>
+                  </div>
+                `
+                : '';
+
             return `
               <div class="provider-setting-row ${checked ? '' : 'is-disabled'}" data-provider-row="${escapeHTML(p.id)}">
                 <label class="provider-toggle-switch" title="${checked ? 'Quelle deaktivieren' : 'Quelle aktivieren'}">
@@ -142,6 +156,7 @@ export async function renderSettingsModal() {
                     ${showAdminPill ? '<span class="provider-admin-pill" title="Erfordert Administratorrechte (UAC)">🛡️ Admin</span>' : ''}
                   </div>
                   ${p.description ? `<span class="muted">${escapeHTML(p.description)}</span>` : ''}
+                  ${extraSettingHtml}
                 </div>
                 ${actionHtml ? `<div class="provider-setting-actions">${actionHtml}</div>` : ''}
               </div>
@@ -485,6 +500,13 @@ export async function renderSettingsModal() {
     }
   });
 
+  modal.oninput = (e) => {
+    if (!(e.target instanceof HTMLInputElement)) return;
+    if (e.target.matches('[data-vcpkg-root-input]')) {
+      vcpkgRootDraft = e.target.value;
+    }
+  };
+
   modal.onchange = async (e) => {
     if (!(e.target instanceof Element)) return;
     const toggle = e.target.closest('[data-provider-toggle]');
@@ -530,6 +552,12 @@ export async function renderSettingsModal() {
       const res = await window.electronAPI.installProviderManager(providerId);
       if (modalToken !== activeSettingsToken) return;
       busyProviderIds.delete(providerId);
+      if (providerId === 'vcpkg') {
+        const refreshedSettings = await window.electronAPI.getSettings();
+        if (modalToken !== activeSettingsToken) return;
+        vcpkgRootDraft = String(refreshedSettings?.providerSettings?.vcpkgRoot || '').trim();
+        s.providerSettings = { ...(s.providerSettings || {}), vcpkgRoot: vcpkgRootDraft };
+      }
       if (res?.availability) {
         availabilityById.set(providerId, res.availability);
       }
@@ -597,6 +625,12 @@ export async function renderSettingsModal() {
       const res = await window.electronAPI.uninstallProviderManager(providerId);
       if (modalToken !== activeSettingsToken) return;
       busyProviderIds.delete(providerId);
+      if (providerId === 'vcpkg') {
+        const refreshedSettings = await window.electronAPI.getSettings();
+        if (modalToken !== activeSettingsToken) return;
+        vcpkgRootDraft = String(refreshedSettings?.providerSettings?.vcpkgRoot || '').trim();
+        s.providerSettings = { ...(s.providerSettings || {}), vcpkgRoot: vcpkgRootDraft };
+      }
       if (res?.availability) {
         availabilityById.set(providerId, res.availability);
       }
@@ -704,7 +738,22 @@ export async function renderSettingsModal() {
     const act = btn.dataset.settingsAction;
 
     if (act === 'close') closeModal();
-    else if (act === 'recheck-providers') {
+    else if (act === 'browse-vcpkg-root') {
+      const dir = await window.electronAPI.selectDir({
+        title: 'VCPKG_ROOT Ordner auswählen',
+        defaultPath: vcpkgRootDraft || undefined,
+      });
+      if (!dir || modalToken !== activeSettingsToken) return;
+      vcpkgRootDraft = dir.trim();
+      await window.electronAPI.saveSettings({ providerSettings: { vcpkgRoot: vcpkgRootDraft } });
+      s.providerSettings = { ...(s.providerSettings || {}), vcpkgRoot: vcpkgRootDraft };
+      const avail = await window.electronAPI.checkProviderAvailability('vcpkg');
+      if (modalToken !== activeSettingsToken) return;
+      if (avail) availabilityById.set('vcpkg', avail);
+      refreshProvidersSectionUi();
+      await triggerCatalogReload({ rescanInstalled: enabledSet.has('vcpkg') });
+      showToast('VCPKG_ROOT gespeichert und Status geprüft.', { type: 'success' });
+    } else if (act === 'recheck-providers') {
       await runProvidersAvailabilityCheck();
       await triggerCatalogReload();
       showToast('Paketmanager-Status aktualisiert.', { type: 'info' });
@@ -770,6 +819,10 @@ export async function renderSettingsModal() {
 
       const newSettings = {
         enabledProviders: checkedProviders,
+        providerSettings: {
+          ...(s.providerSettings || {}),
+          vcpkgRoot: vcpkgRootDraft.trim(),
+        },
         archiveSaveMode: saveModeEl?.value || 'ask',
         archivePaths: nextArchivePaths,
         targetPath: nextArchivePaths[0] || '../software',
@@ -800,6 +853,7 @@ export async function renderSettingsModal() {
         (Array.isArray(s.enabledProviders) ? s.enabledProviders : []).map((p) => p.toLowerCase())
       );
       const newlyEnabledProvider = checkedProviders.some((p) => !oldProviders.has(p.toLowerCase()));
+      const vcpkgRootChanged = (s.providerSettings?.vcpkgRoot || '') !== vcpkgRootDraft.trim();
 
       const res = await window.electronAPI.saveSettings(newSettings);
       if (res.success) {
@@ -810,7 +864,9 @@ export async function renderSettingsModal() {
         } else {
           showToast('Einstellungen gespeichert.', { type: 'success' });
         }
-        await triggerCatalogReload({ rescanInstalled: newlyEnabledProvider });
+        await triggerCatalogReload({
+          rescanInstalled: newlyEnabledProvider || (vcpkgRootChanged && checkedProviders.includes('vcpkg')),
+        });
       } else {
         showToast(`Speicherfehler: ${res.error}`, { type: 'error' });
       }

@@ -417,6 +417,9 @@ function setupKeyboardShortcuts() {
   });
 }
 
+const PC_ONLY_ID_RE =
+  /^(?:winget|scoop|chocolatey|msstore|msi|npm|bun|nvm|pnpm|composer|pip|uv|cargo|vcpkg|dotnet|pwsh7|pwsh5|registry):/;
+
 // Fehlende/defekte Bilder sauber durch passenden Platzhalter ersetzen
 document.addEventListener(
   'error',
@@ -426,9 +429,7 @@ document.addEventListener(
     if (target.classList.contains('card-icon')) {
       const card = target.closest('.card');
       const id = card instanceof HTMLElement ? card.dataset.id : '';
-      const isPcOnly = Boolean(
-        id && /^(?:winget|scoop|chocolatey|msstore|msi|npm|bun|nvm|pnpm|composer|registry):/.test(id)
-      );
+      const isPcOnly = Boolean(id && PC_ONLY_ID_RE.test(id));
       const fallback = document.createElement('div');
       fallback.className = 'card-icon-fallback';
       fallback.textContent = isPcOnly ? '💻' : '📦';
@@ -437,7 +438,7 @@ document.addEventListener(
     }
     if (target.classList.contains('detail-icon')) {
       const id = state.currentModalId || '';
-      const isPcOnly = /^(?:winget|scoop|chocolatey|msstore|msi|npm|bun|nvm|pnpm|composer|registry):/.test(id);
+      const isPcOnly = PC_ONLY_ID_RE.test(id);
       const fallback = document.createElement('div');
       fallback.className = 'detail-icon-fallback';
       fallback.textContent = id.startsWith('remote:') ? '🛍️' : isPcOnly ? '💻' : '📦';

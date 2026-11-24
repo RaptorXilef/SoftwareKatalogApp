@@ -87,20 +87,28 @@ describe('provider-registry', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('enthält geplante zukünftige Paketmanager in PLANNED_PROVIDERS und registriert neue Provider deaktiviert', () => {
+  it('registriert alle implementierten Zusatz-Provider standardmaessig deaktiviert und fuehrt keine offenen Platzhalter mehr in PLANNED_PROVIDERS', () => {
     assert.ok(Array.isArray(PLANNED_PROVIDERS));
-    const ids = PLANNED_PROVIDERS.map((p) => p.id);
-    assert.ok(ids.includes('pip'));
-    assert.ok(ids.includes('cargo'));
-    assert.equal(ids.includes('npm'), false);
-    assert.equal(ids.includes('bun'), false);
-    for (const entry of PLANNED_PROVIDERS) {
-      assert.equal(typeof entry.id, 'string');
-      assert.equal(typeof entry.name, 'string');
-      assert.equal(entry.status, 'planned');
-    }
+    assert.equal(PLANNED_PROVIDERS.length, 0);
 
-    for (const defaultOffId of ['scoop', 'chocolatey', 'msstore', 'msi', 'npm', 'bun', 'nvm', 'pnpm', 'composer']) {
+    for (const defaultOffId of [
+      'scoop',
+      'chocolatey',
+      'msstore',
+      'msi',
+      'npm',
+      'bun',
+      'nvm',
+      'pnpm',
+      'composer',
+      'pip',
+      'uv',
+      'cargo',
+      'vcpkg',
+      'dotnet',
+      'pwsh7',
+      'pwsh5',
+    ]) {
       const prov = getProvider(defaultOffId);
       assert.ok(prov, `Provider ${defaultOffId} muss registriert sein`);
       assert.equal(isProviderEnabled(defaultOffId), false);

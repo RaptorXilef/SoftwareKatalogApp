@@ -15,6 +15,13 @@ const BUNDLE_SOURCES = Object.freeze([
   'nvm',
   'pnpm',
   'composer',
+  'pip',
+  'uv',
+  'cargo',
+  'vcpkg',
+  'dotnet',
+  'pwsh7',
+  'pwsh5',
 ]);
 const BUNDLE_REMOTE_SOURCES = Object.freeze([
   'winget',
@@ -26,6 +33,13 @@ const BUNDLE_REMOTE_SOURCES = Object.freeze([
   'nvm',
   'pnpm',
   'composer',
+  'pip',
+  'uv',
+  'cargo',
+  'vcpkg',
+  'dotnet',
+  'pwsh7',
+  'pwsh5',
 ]);
 export const DEFAULT_BUNDLE_ICON = '📦';
 export const BUNDLE_ICON_PRESETS = Object.freeze(['📦', '💻', '🛠️', '🎮', '🎬', '🚀', '🏢', '🧰', '🎨', '🔒']);
