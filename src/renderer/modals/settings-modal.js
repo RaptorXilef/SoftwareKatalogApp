@@ -1,4 +1,9 @@
 import { formatInstallModeInfo } from '../../shared/app-update-logic.js';
+import {
+  AUTOSTART_TASK_NAME,
+  removeAutoUpdateEntry,
+  upsertAutoUpdateEntry,
+} from '../../shared/background-update-logic.js';
 import { getArchiveRootLabel, normalizePathKey } from '../../shared/multi-archive-logic.js';
 import {
   getPolicyEntryKey,
@@ -84,7 +89,16 @@ export async function renderSettingsModal(initialTab = 'general') {
   const modalToken = ++activeSettingsToken;
   let activeTab = normalizeSettingsTab(initialTab);
 
-  const [s, info, providersInfo, cacheStats, initialAdminStatus, initialAuthStatus] = await Promise.all([
+  const [
+    s,
+    info,
+    providersInfo,
+    cacheStats,
+    initialAdminStatus,
+    initialAuthStatus,
+    initialAutostartStatus,
+    initialBgStatus,
+  ] = await Promise.all([
     window.electronAPI.getSettings(),
     window.electronAPI.getAppInfo(),
     window.electronAPI.listProviders(),
@@ -95,12 +109,26 @@ export async function renderSettingsModal(initialTab = 'general') {
     typeof window.electronAPI?.getAuthStatus === 'function'
       ? window.electronAPI.getAuthStatus()
       : Promise.resolve(state.authStatus),
+    typeof window.electronAPI?.getAutostartStatus === 'function'
+      ? window.electronAPI.getAutostartStatus()
+      : Promise.resolve({ supported: false, enabled: false, mode: 'normal' }),
+    typeof window.electronAPI?.getBackgroundStatus === 'function'
+      ? window.electronAPI.getBackgroundStatus()
+      : Promise.resolve({ isChecking: false, isElevated: false, autoUpdatePaused: false }),
   ]);
 
   if (modalToken !== activeSettingsToken) return;
 
   let currentAuthStatus = applyAuthStatus(initialAuthStatus || state.authStatus);
   renderAuthHeaderControls();
+
+  let currentAutostartStatus = initialAutostartStatus || { supported: false, enabled: false, mode: 'normal' };
+  let currentBgStatus = initialBgStatus || { isChecking: false, isElevated: false, autoUpdatePaused: false };
+  let autoUpdateSearchSource = 'all';
+  let autoUpdateSearchQuery = '';
+  let autoUpdateManualMatchType = 'packageId';
+  let autoUpdateManualValue = '';
+  let autoUpdateManualLabel = '';
 
   let savedPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
   let draftPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
@@ -753,8 +781,20 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   let providers = Array.isArray(providersInfo?.providers) ? providersInfo.providers : [];
   const plannedProviders = Array.isArray(providersInfo?.planned) ? providersInfo.planned : [];
-  const initialDraft = createSettingsDraft(s);
-  let draftSettings = createSettingsDraft(s);
+  const osAutostartOverrides =
+    currentAutostartStatus?.supported === true
+      ? {
+          autostartEnabled: Boolean(currentAutostartStatus.enabled),
+          autostartMode: currentAutostartStatus.enabled
+            ? currentAutostartStatus.mode === 'admin'
+              ? 'admin'
+              : 'normal'
+            : s.autostartMode || 'normal',
+        }
+      : {};
+  const effectiveInitialSettings = { ...s, ...osAutostartOverrides };
+  const initialDraft = createSettingsDraft(effectiveInitialSettings);
+  let draftSettings = createSettingsDraft(effectiveInitialSettings);
   const availabilityById = new Map();
   for (const p of providers) {
     if (p.availability) availabilityById.set(p.id, p.availability);
@@ -900,6 +940,352 @@ export async function renderSettingsModal(initialTab = 'general') {
     isPackaged: info.isPackaged,
     isAllUsersInstall: info.isAllUsersInstall,
   });
+
+  const getAutoUpdateCandidateRows = () => {
+    const queryWords = autoUpdateSearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchesQuery = (text) => {
+      if (queryWords.length === 0) return true;
+      const hay = String(text || '').toLowerCase();
+      return queryWords.every((w) => hay.includes(w));
+    };
+
+    if (autoUpdateSearchSource === 'provider') {
+      const list = [
+        { id: 'archive', name: 'Archiv (lokal)', description: 'Programme aus dem lokalen Archiv' },
+        ...providers.filter((p) => p.id !== 'archive'),
+      ];
+      return list
+        .filter((p) => matchesQuery(`${p.name} ${p.id} ${p.description || ''}`))
+        .map((p) => ({
+          matchType: 'provider',
+          value: p.id,
+          label: p.name,
+          meta: `Provider · ${p.id}`,
+          badge: 'Paketmanager',
+        }));
+    }
+
+    const seen = new Set();
+    const candidates = [];
+    for (const pkg of state.packages || []) {
+      if (!pkg) continue;
+      if (autoUpdateSearchSource === 'archive' && !pkg.inArchive) continue;
+      if (autoUpdateSearchSource === 'installed' && !pkg.isInstalled) continue;
+      const cand = buildCandidateFromPackage(pkg);
+      if (!cand.value) continue;
+      if (!matchesQuery(`${cand.label} ${cand.value} ${cand.meta} ${pkg.publisher || ''}`)) continue;
+      const key = getPolicyEntryKey(cand);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(cand);
+    }
+    candidates.sort((a, b) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' }));
+    return candidates.slice(0, 40);
+  };
+
+  const renderAutoUpdateCandidatesHtml = () => {
+    if (autoUpdateSearchSource === 'manual') {
+      return `
+        <div class="policy-manual-form">
+          <div class="policy-manual-grid">
+            <label class="form-field">
+              <span>Regel-Typ</span>
+              <select id="cfgAutoUpdateManualType">
+                <option value="packageId" ${autoUpdateManualMatchType === 'packageId' ? 'selected' : ''}>Paket-ID (z. B. VideoLAN.VLC)</option>
+                <option value="archiveId" ${autoUpdateManualMatchType === 'archiveId' ? 'selected' : ''}>Archiv-ID</option>
+                <option value="name" ${autoUpdateManualMatchType === 'name' ? 'selected' : ''}>Programmname (Wildcard * moeglich)</option>
+                <option value="provider" ${autoUpdateManualMatchType === 'provider' ? 'selected' : ''}>Paketmanager (winget, scoop, archive...)</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Wert / Muster</span>
+              <input type="text" id="cfgAutoUpdateManualValue" value="${escapeHTML(autoUpdateManualValue)}" placeholder="z. B. VideoLAN.VLC oder *Adobe*">
+            </label>
+            <label class="form-field">
+              <span>Anzeigename (optional)</span>
+              <input type="text" id="cfgAutoUpdateManualLabel" value="${escapeHTML(autoUpdateManualLabel)}" placeholder="z. B. VLC Media Player">
+            </label>
+          </div>
+          <div class="policy-manual-actions">
+            <button type="button" class="btn btn-primary btn-xs" data-autoupdate-action="add-manual">➕ Zur Liste hinzufügen</button>
+          </div>
+        </div>
+      `;
+    }
+
+    const candidates = getAutoUpdateCandidateRows();
+    if (candidates.length === 0) {
+      return '<div class="policy-candidate-empty">Keine passenden Programme gefunden.</div>';
+    }
+
+    const existingKeys = new Set((draftSettings.autoUpdateEntries || []).map((e) => getPolicyEntryKey(e)));
+    return candidates
+      .map((cand) => {
+        const key = getPolicyEntryKey(cand);
+        const inList = existingKeys.has(key);
+        const badgeInfo = cand.matchType === 'provider' ? getProviderBadgeInfo(cand.value, providers) : null;
+        return `
+          <div class="policy-candidate-row">
+            <div class="policy-candidate-main">
+              <div class="policy-candidate-title">
+                <strong>${escapeHTML(cand.label)}</strong>
+                <span class="policy-match-badge">${escapeHTML(badgeInfo?.label || cand.badge)}</span>
+              </div>
+              <span class="policy-candidate-meta"><code>${escapeHTML(cand.meta)}</code></span>
+            </div>
+            <button
+              type="button"
+              class="btn btn-xs ${inList ? 'btn-danger' : 'btn-primary'}"
+              data-autoupdate-toggle-candidate
+              data-match-type="${escapeHTML(cand.matchType)}"
+              data-match-value="${escapeHTML(cand.value)}"
+              data-match-label="${escapeHTML(cand.label)}"
+            >
+              ${inList ? '✓ Entfernen' : '+ Hinzufügen'}
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const renderAutoUpdateEntriesHtml = () => {
+    const entries = draftSettings.autoUpdateEntries || [];
+    if (entries.length === 0) {
+      const emptyHint =
+        draftSettings.autoUpdateListType === 'whitelist'
+          ? 'Auto-Update-Whitelist ist leer - es werden aktuell keine Programme automatisch aktualisiert.'
+          : 'Auto-Update-Blacklist ist leer - es wird kein erlaubtes Paket ausgeschlossen.';
+      return `<div class="policy-candidate-empty">${escapeHTML(emptyHint)}</div>`;
+    }
+
+    const isBlacklist = draftSettings.autoUpdateListType === 'blacklist';
+    return entries
+      .map(
+        (entry) => `
+          <div class="policy-entry-row">
+            <div class="policy-entry-main">
+              <div class="policy-entry-head">
+                <span class="policy-match-badge">${escapeHTML(getPolicyMatchTypeBadge(entry.matchType))}</span>
+                <strong>${escapeHTML(entry.label)}</strong>
+              </div>
+              <code>${escapeHTML(entry.value)}</code>
+            </div>
+            <div class="policy-entry-controls">
+              <span class="policy-match-badge ${isBlacklist ? 'is-blacklist' : ''}">${isBlacklist ? '🚫 Ausgeschlossen' : '⚡ Auto-Update'}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs"
+                data-autoupdate-remove-entry
+                data-match-type="${escapeHTML(entry.matchType)}"
+                data-match-value="${escapeHTML(entry.value)}"
+                title="Eintrag entfernen"
+              >🗑️</button>
+            </div>
+          </div>
+        `
+      )
+      .join('');
+  };
+
+  const renderBackgroundSectionHtml = () => {
+    const isPortableMode = info.installKind !== 'installed';
+    const autostartSupported = currentAutostartStatus?.supported !== false;
+    const isElevatedNow = Boolean(
+      currentAdminStatus?.isProcessElevated || currentAdminStatus?.mode === 'elevated' || currentBgStatus?.isElevated
+    );
+    const hasAdminTask = Boolean(currentAutostartStatus?.adminTaskExists);
+    const hasNormalAutostart = Boolean(currentAutostartStatus?.normalEnabled);
+
+    const autostartBadge = !autostartSupported
+      ? '<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">Nicht unterstützt</span>'
+      : hasAdminTask
+        ? '<span class="admin-session-status-badge is-elevated" id="settingsAutostartBadge">🛡️ Aktiv (Als Admin - Aufgabenplanung)</span>'
+        : hasNormalAutostart
+          ? '<span class="admin-session-status-badge is-active" id="settingsAutostartBadge">🟢 Aktiv (Normal)</span>'
+          : '<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">⚪ Aus</span>';
+
+    const lastCheckText = currentBgStatus?.lastCheckAt
+      ? `Letzte Prüfung: ${new Date(currentBgStatus.lastCheckAt).toLocaleString('de-DE')}`
+      : 'Noch keine Hintergrund-Prüfung in dieser Sitzung';
+    const updateCountText = Number.isFinite(currentBgStatus?.availableUpdateCount)
+      ? `${currentBgStatus.availableUpdateCount} Update(s) erkannt`
+      : '';
+
+    const autoUpdateSources = [
+      { id: 'all', label: '📦 Archiv & PC' },
+      { id: 'archive', label: '🗄️ Archiv' },
+      { id: 'installed', label: '💻 Installiert' },
+      { id: 'provider', label: '🧩 Paketmanager' },
+      { id: 'manual', label: '✏️ Manuell' },
+    ];
+
+    const listEditorHtml =
+      draftSettings.autoUpdateListType !== 'all'
+        ? `
+          <div class="bg-autoupdate-list-box">
+            <div class="policy-picker-box">
+              <div class="policy-source-chips">
+                ${autoUpdateSources
+                  .map(
+                    (src) =>
+                      `<button type="button" class="origin-chip ${autoUpdateSearchSource === src.id ? 'active' : ''}" data-autoupdate-source="${src.id}">${escapeHTML(src.label)}</button>`
+                  )
+                  .join('')}
+              </div>
+              ${
+                autoUpdateSearchSource !== 'manual'
+                  ? `
+                    <div class="policy-search-row">
+                      <input type="text" id="cfgAutoUpdateCandidateSearch" value="${escapeHTML(autoUpdateSearchQuery)}" placeholder="Programme für die Auto-Update-Liste filtern...">
+                    </div>
+                  `
+                  : ''
+              }
+              <div id="autoUpdateCandidateList" class="policy-candidate-list">
+                ${renderAutoUpdateCandidatesHtml()}
+              </div>
+            </div>
+            <div class="policy-entries-box">
+              <div class="policy-entries-head">
+                <strong>${draftSettings.autoUpdateListType === 'whitelist' ? 'Auto-Update-Whitelist' : 'Auto-Update-Blacklist'} (${draftSettings.autoUpdateEntries.length})</strong>
+                ${
+                  draftSettings.autoUpdateEntries.length > 0
+                    ? '<button type="button" class="btn btn-ghost btn-xs" data-autoupdate-action="clear-list">🗑️ Liste leeren</button>'
+                    : ''
+                }
+              </div>
+              <div id="autoUpdateEntriesList" class="policy-entries-list">
+                ${renderAutoUpdateEntriesHtml()}
+              </div>
+            </div>
+          </div>
+        `
+        : '';
+
+    const elevationNoticeHtml = isElevatedNow
+      ? '<div class="auth-integrity-banner is-ok bg-elevation-banner" role="status">🛡️ Die App läuft aktuell erhöht als Administrator - Silent-Auto-Update ist einsatzbereit.</div>'
+      : `
+          <div class="auth-integrity-banner is-warn bg-elevation-banner" role="status">
+            <div class="bg-elevation-text">
+              <strong>⚠️ App läuft aktuell ohne Administratorrechte</strong>
+              <span>Automatische Silent-Updates laufen NUR, wenn Software Katalog als Admin gestartet wurde (z. B. über Admin-Autostart).</span>
+            </div>
+            ${
+              autostartSupported && !hasAdminTask
+                ? '<button type="button" class="btn btn-primary btn-xs" data-settings-action="enable-admin-autostart">🛡️ Auf Admin-Autostart umstellen</button>'
+                : hasAdminTask
+                  ? '<span class="muted">Admin-Autostart ist aktiv (greift ab nächstem Windows-Start).</span>'
+                  : ''
+            }
+          </div>
+        `;
+
+    return `
+      <h3>🔔 Hintergrundbetrieb, System-Tray &amp; Auto-Update</h3>
+
+      ${
+        isPortableMode
+          ? `<div class="auth-integrity-banner is-warn bg-portable-hint" role="status">ℹ️ Hinweis: System-Tray und Autostart sind primär für die installierte Version gedacht (aktuell: ${escapeHTML(installModeInfo.label)}).</div>`
+          : ''
+      }
+
+      <div class="auth-policy-box bg-settings-group">
+        <h4>🖥️ System-Tray &amp; Fensterverhalten</h4>
+        <label class="check-row">
+          <input type="checkbox" id="cfgMinimizeToTrayOnClose" ${draftSettings.minimizeToTrayOnClose ? 'checked' : ''}>
+          <span>Beim Klick auf Schließen (✕) ins System-Tray minimieren statt zu beenden</span>
+        </label>
+        <p class="panel-hint">
+          Mit dem Start-Parameter <code>--tray</code> oder <code>--minimized</code> startet die App direkt im Infobereich.
+        </p>
+      </div>
+
+      <div class="auth-policy-box bg-settings-group">
+        <div class="auth-status-top">
+          <h4>🚀 Windows-Autostart</h4>
+          ${autostartBadge}
+        </div>
+        <label class="check-row">
+          <input type="checkbox" id="cfgAutostartEnabled" ${draftSettings.autostartEnabled ? 'checked' : ''} ${autostartSupported ? '' : 'disabled'}>
+          <span>Software Katalog beim Windows-Login automatisch im System-Tray starten (<code>--tray</code>)</span>
+        </label>
+        <label class="form-field">
+          <span>Autostart-Modus</span>
+          <select id="cfgAutostartMode" ${autostartSupported ? '' : 'disabled'}>
+            <option value="normal" ${draftSettings.autostartMode === 'normal' ? 'selected' : ''}>Normal (Standard-Autostart - UAC bei Bedarf)</option>
+            <option value="admin" ${draftSettings.autostartMode === 'admin' ? 'selected' : ''}>Als Admin starten (Windows-Aufgabenplanung ${escapeHTML(AUTOSTART_TASK_NAME)})</option>
+          </select>
+        </label>
+        <p class="panel-hint">
+          Im Admin-Modus legt Software Katalog einmalig per UAC eine geplante Aufgabe (<code>AtLogOn</code>, höchste Rechte) an, damit Silent-Auto-Updates ohne weitere UAC-Dialoge laufen können.
+        </p>
+      </div>
+
+      <div class="auth-policy-box bg-settings-group">
+        <h4>🔄 Periodische Hintergrund-Prüfung &amp; Benachrichtigungen</h4>
+        <label class="check-row">
+          <input type="checkbox" id="cfgBackgroundCheckEnabled" ${draftSettings.backgroundCheckEnabled ? 'checked' : ''}>
+          <span>Regelmäßig im Hintergrund nach Programm-Updates suchen</span>
+        </label>
+        <div class="form-grid-2">
+          <label class="form-field">
+            <span>Prüfintervall</span>
+            <select id="cfgBackgroundCheckIntervalMinutes">
+              <option value="60" ${draftSettings.backgroundCheckIntervalMinutes === 60 ? 'selected' : ''}>Stündlich (60 Min.)</option>
+              <option value="180" ${draftSettings.backgroundCheckIntervalMinutes === 180 ? 'selected' : ''}>Alle 3 Stunden</option>
+              <option value="360" ${draftSettings.backgroundCheckIntervalMinutes === 360 ? 'selected' : ''}>Alle 6 Stunden (Standard)</option>
+              <option value="720" ${draftSettings.backgroundCheckIntervalMinutes === 720 ? 'selected' : ''}>Alle 12 Stunden</option>
+              <option value="1440" ${draftSettings.backgroundCheckIntervalMinutes === 1440 ? 'selected' : ''}>Täglich (24 Stunden)</option>
+            </select>
+          </label>
+          <div class="form-field">
+            <span>Status</span>
+            <div class="bg-status-bar">
+              <div class="bg-status-info">
+                <span class="muted">${escapeHTML(lastCheckText)}${updateCountText ? ` - ${escapeHTML(updateCountText)}` : ''}</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-xs" data-settings-action="run-background-check" ${currentBgStatus?.isChecking ? 'disabled' : ''}>
+                ${currentBgStatus?.isChecking ? '⏳ Prüft...' : '🔄 Jetzt prüfen'}
+              </button>
+            </div>
+          </div>
+        </div>
+        <label class="check-row">
+          <input type="checkbox" id="cfgNotifyOnUpdates" ${draftSettings.notifyOnUpdates ? 'checked' : ''}>
+          <span>Windows-Benachrichtigung senden, wenn neue Updates gefunden wurden (mit Anti-Spam-Schutz)</span>
+        </label>
+      </div>
+
+      <div class="auth-policy-box bg-settings-group">
+        <div class="auth-status-top">
+          <h4>⚡ Automatischer Silent-Auto-Update-Modus</h4>
+          ${
+            draftSettings.autoUpdateEnabled && currentBgStatus?.autoUpdatePaused
+              ? '<button type="button" class="btn btn-ghost btn-xs" data-settings-action="toggle-auto-update-pause">▶️ Auto-Update fortsetzen</button>'
+              : ''
+          }
+        </div>
+        ${elevationNoticeHtml}
+        <label class="check-row">
+          <input type="checkbox" id="cfgAutoUpdateEnabled" ${draftSettings.autoUpdateEnabled ? 'checked' : ''}>
+          <span>Erlaubte Updates nach Hintergrund-Prüfung automatisch und still (<code>silent</code>) installieren</span>
+        </label>
+        <p class="panel-hint">
+          🛡️ Programme mit Adware-Schutz (<code>interactive-required</code>), Einträge auf der Ignorierliste und durch Nutzer-Richtlinien gesperrte Pakete werden immer ausgeschlossen.
+        </p>
+        <label class="form-field">
+          <span>Auto-Update-Paketfilter (unabhängig von Nutzer-Richtlinien)</span>
+          <select id="cfgAutoUpdateListType">
+            <option value="all" ${draftSettings.autoUpdateListType === 'all' ? 'selected' : ''}>Alle erlaubten Programme automatisch aktualisieren</option>
+            <option value="whitelist" ${draftSettings.autoUpdateListType === 'whitelist' ? 'selected' : ''}>Eigene Whitelist (nur ausgewählte Programme)</option>
+            <option value="blacklist" ${draftSettings.autoUpdateListType === 'blacklist' ? 'selected' : ''}>Eigene Blacklist (ausgewählte Programme ausschließen)</option>
+          </select>
+        </label>
+        ${listEditorHtml}
+      </div>
+    `;
+  };
 
   modal.innerHTML = `
     <div class="modal-header">
@@ -1080,21 +1466,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         </section>
 
         <section class="settings-section" id="settingsBackgroundSection">
-          <h3>🔔 Hintergrundbetrieb & Automatisierung</h3>
-          <div class="settings-placeholder-card">
-            <div class="settings-placeholder-head">
-              <strong>System-Tray, Autostart & Hintergrund-Updates</strong>
-              <span class="settings-placeholder-badge">Vorbereitet (P9)</span>
-            </div>
-            <p class="panel-hint">
-              Dieser Bereich ist für die kommenden Hintergrund-Funktionen reserviert:
-            </p>
-            <ul class="settings-placeholder-list">
-              <li>Minimieren in den Windows-Infobereich (System-Tray) statt vollständigem Beenden</li>
-              <li>Automatischer Start mit Windows inklusive stillem Hintergrund-Check</li>
-              <li>Automatische Hintergrund-Suche nach App- und Paket-Updates mit Benachrichtigungen</li>
-            </ul>
-          </div>
+          ${renderBackgroundSectionHtml()}
         </section>
       </section>
 
@@ -1220,6 +1592,8 @@ export async function renderSettingsModal(initialTab = 'general') {
     const parsedNestedDepth = Number.parseInt(rawNestedDepth, 10);
     const rawUpdateInterval = getSelectEl(modal, '#cfgUpdateInterval')?.value ?? '';
     const parsedUpdateInterval = Number.parseInt(rawUpdateInterval, 10);
+    const rawBgInterval = getSelectEl(modal, '#cfgBackgroundCheckIntervalMinutes')?.value ?? '';
+    const parsedBgInterval = Number.parseInt(rawBgInterval, 10);
     const rawAutoExt = getInputEl(modal, '#cfgAutoExt')?.value ?? '';
     const vcpkgInput = getInputEl(modal, '#cfgVcpkgRoot');
 
@@ -1240,8 +1614,39 @@ export async function renderSettingsModal(initialTab = 'general') {
       vcpkgRoot: vcpkgInput ? vcpkgInput.value.trim() : draftSettings.vcpkgRoot,
       updateInterval: Number.isFinite(parsedUpdateInterval) ? parsedUpdateInterval : draftSettings.updateInterval,
       autoRequestAdminForBatch: Boolean(getInputEl(modal, '#cfgAutoRequestAdminForBatch')?.checked),
+      minimizeToTrayOnClose: Boolean(getInputEl(modal, '#cfgMinimizeToTrayOnClose')?.checked),
+      autostartEnabled: Boolean(getInputEl(modal, '#cfgAutostartEnabled')?.checked),
+      autostartMode: getSelectEl(modal, '#cfgAutostartMode')?.value || draftSettings.autostartMode,
+      backgroundCheckEnabled: Boolean(getInputEl(modal, '#cfgBackgroundCheckEnabled')?.checked),
+      backgroundCheckIntervalMinutes: Number.isFinite(parsedBgInterval)
+        ? parsedBgInterval
+        : draftSettings.backgroundCheckIntervalMinutes,
+      notifyOnUpdates: Boolean(getInputEl(modal, '#cfgNotifyOnUpdates')?.checked),
+      autoUpdateEnabled: Boolean(getInputEl(modal, '#cfgAutoUpdateEnabled')?.checked),
+      autoUpdateListType: getSelectEl(modal, '#cfgAutoUpdateListType')?.value || draftSettings.autoUpdateListType,
+      autoUpdateEntries: draftSettings.autoUpdateEntries,
     });
     updateDirtyUi();
+  };
+
+  const refreshBackgroundSectionUi = () => {
+    if (modalToken !== activeSettingsToken || overlay.hidden) return;
+    const sec = modal.querySelector('#settingsBackgroundSection');
+    if (sec instanceof HTMLElement) {
+      sec.innerHTML = renderBackgroundSectionHtml();
+    }
+    updateDirtyUi();
+  };
+
+  const refreshAutoUpdateListsInPlace = () => {
+    const candList = modal.querySelector('#autoUpdateCandidateList');
+    if (candList instanceof HTMLElement) {
+      candList.innerHTML = renderAutoUpdateCandidatesHtml();
+    }
+    const entriesList = modal.querySelector('#autoUpdateEntriesList');
+    if (entriesList instanceof HTMLElement) {
+      entriesList.innerHTML = renderAutoUpdateEntriesHtml();
+    }
   };
 
   const refreshPolicySectionUi = () => {
@@ -1461,6 +1866,19 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   modal.oninput = (e) => {
     if (!(e.target instanceof Element)) return;
+    if (e.target.id === 'cfgAutoUpdateCandidateSearch' && e.target instanceof HTMLInputElement) {
+      autoUpdateSearchQuery = e.target.value;
+      refreshAutoUpdateListsInPlace();
+      return;
+    }
+    if (e.target.id === 'cfgAutoUpdateManualValue' && e.target instanceof HTMLInputElement) {
+      autoUpdateManualValue = e.target.value;
+      return;
+    }
+    if (e.target.id === 'cfgAutoUpdateManualLabel' && e.target instanceof HTMLInputElement) {
+      autoUpdateManualLabel = e.target.value;
+      return;
+    }
     if (e.target.id === 'cfgPolicyCandidateSearch' && e.target instanceof HTMLInputElement) {
       policySearchQuery = e.target.value;
       refreshPolicyListsInPlace();
@@ -1497,6 +1915,15 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   modal.onchange = (e) => {
     if (!(e.target instanceof Element)) return;
+    if (e.target.id === 'cfgAutoUpdateManualType' && e.target instanceof HTMLSelectElement) {
+      autoUpdateManualMatchType = e.target.value;
+      return;
+    }
+    if (e.target.id === 'cfgAutoUpdateListType' && e.target instanceof HTMLSelectElement) {
+      syncDraftFromDom();
+      refreshBackgroundSectionUi();
+      return;
+    }
     if (e.target.id === 'cfgPolicyEnabled' && e.target instanceof HTMLInputElement) {
       draftPolicy = normalizeAccessPolicy({ ...draftPolicy, enabled: e.target.checked });
       refreshPolicySectionUi();
@@ -1560,6 +1987,72 @@ export async function renderSettingsModal(initialTab = 'general') {
     const tabBtn = e.target.closest('[data-settings-tab]');
     if (tabBtn instanceof HTMLElement) {
       switchTab(tabBtn.dataset.settingsTab);
+      return;
+    }
+
+    const autoUpdSourceBtn = e.target.closest('[data-autoupdate-source]');
+    if (autoUpdSourceBtn instanceof HTMLElement) {
+      autoUpdateSearchSource = autoUpdSourceBtn.dataset.autoupdateSource || 'all';
+      refreshBackgroundSectionUi();
+      return;
+    }
+
+    const autoUpdToggleCandBtn = e.target.closest('[data-autoupdate-toggle-candidate]');
+    if (autoUpdToggleCandBtn instanceof HTMLElement) {
+      const matchType = autoUpdToggleCandBtn.dataset.matchType || '';
+      const value = autoUpdToggleCandBtn.dataset.matchValue || '';
+      const label = autoUpdToggleCandBtn.dataset.matchLabel || value;
+      const targetKey = getPolicyEntryKey({ matchType, value });
+      const exists = draftSettings.autoUpdateEntries.some((entry) => getPolicyEntryKey(entry) === targetKey);
+      draftSettings = {
+        ...draftSettings,
+        autoUpdateEntries: exists
+          ? removeAutoUpdateEntry(draftSettings.autoUpdateEntries, matchType, value)
+          : upsertAutoUpdateEntry(draftSettings.autoUpdateEntries, { matchType, value, label }),
+      };
+      refreshBackgroundSectionUi();
+      return;
+    }
+
+    const autoUpdRemoveBtn = e.target.closest('[data-autoupdate-remove-entry]');
+    if (autoUpdRemoveBtn instanceof HTMLElement) {
+      const matchType = autoUpdRemoveBtn.dataset.matchType || '';
+      const value = autoUpdRemoveBtn.dataset.matchValue || '';
+      draftSettings = {
+        ...draftSettings,
+        autoUpdateEntries: removeAutoUpdateEntry(draftSettings.autoUpdateEntries, matchType, value),
+      };
+      refreshBackgroundSectionUi();
+      return;
+    }
+
+    const autoUpdActBtn = e.target.closest('[data-autoupdate-action]');
+    if (autoUpdActBtn instanceof HTMLElement) {
+      const auAct = autoUpdActBtn.dataset.autoupdateAction;
+      if (auAct === 'add-manual') {
+        const cleanVal = autoUpdateManualValue.trim();
+        if (!cleanVal) {
+          showToast('Bitte einen Wert oder ein Muster eingeben.', { type: 'warn' });
+          return;
+        }
+        draftSettings = {
+          ...draftSettings,
+          autoUpdateEntries: upsertAutoUpdateEntry(draftSettings.autoUpdateEntries, {
+            matchType: autoUpdateManualMatchType,
+            value: cleanVal,
+            label: autoUpdateManualLabel.trim() || cleanVal,
+          }),
+        };
+        autoUpdateManualValue = '';
+        autoUpdateManualLabel = '';
+        refreshBackgroundSectionUi();
+      } else if (auAct === 'clear-list') {
+        draftSettings = {
+          ...draftSettings,
+          autoUpdateEntries: [],
+        };
+        refreshBackgroundSectionUi();
+      }
       return;
     }
 
@@ -2166,6 +2659,72 @@ export async function renderSettingsModal(initialTab = 'general') {
       } else if (res.error) {
         showToast(res.error, { type: 'error' });
       }
+    } else if (act === 'run-background-check') {
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      currentBgStatus = { ...currentBgStatus, isChecking: true };
+      refreshBackgroundSectionUi();
+      try {
+        const res = await window.electronAPI.runBackgroundCheckNow();
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.status) currentBgStatus = res.status;
+        if (res?.alreadyRunning) {
+          showToast('Hintergrund-Prüfung läuft bereits.', { type: 'info' });
+        } else if (res?.success) {
+          await triggerCatalogReload();
+          showToast(`Hintergrund-Prüfung abgeschlossen (${res.updateCount || 0} Updates erkannt).`, {
+            type: 'success',
+          });
+        } else if (res?.error) {
+          showToast(`Hintergrund-Prüfung fehlgeschlagen: ${res.error}`, { type: 'error' });
+        }
+      } finally {
+        if (modalToken === activeSettingsToken) {
+          const latestBg = await window.electronAPI.getBackgroundStatus?.();
+          if (latestBg) currentBgStatus = latestBg;
+          refreshBackgroundSectionUi();
+        }
+      }
+    } else if (act === 'toggle-auto-update-pause') {
+      const nextStatus = await window.electronAPI.setAutoUpdatePaused(!currentBgStatus?.autoUpdatePaused);
+      if (modalToken !== activeSettingsToken) return;
+      if (nextStatus) currentBgStatus = nextStatus;
+      refreshBackgroundSectionUi();
+      showToast(currentBgStatus?.autoUpdatePaused ? 'Auto-Update pausiert.' : 'Auto-Update fortgesetzt.', {
+        type: 'info',
+      });
+    } else if (act === 'enable-admin-autostart') {
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      try {
+        const autoRes = await window.electronAPI.applyAutostart({ enabled: true, mode: 'admin' });
+        if (modalToken !== activeSettingsToken) return;
+        if (autoRes?.status) currentAutostartStatus = autoRes.status;
+        if (autoRes?.success) {
+          initialDraft.autostartEnabled = true;
+          initialDraft.autostartMode = 'admin';
+          draftSettings = {
+            ...draftSettings,
+            autostartEnabled: true,
+            autostartMode: 'admin',
+            autoUpdateEnabled: true,
+          };
+          await window.electronAPI.saveSettings({
+            autostartEnabled: true,
+            autostartMode: 'admin',
+            autoUpdateEnabled: true,
+          });
+          refreshBackgroundSectionUi();
+          showToast('Admin-Autostart (Aufgabenplanung) wurde aktiviert.', { type: 'success' });
+        } else if (autoRes?.canceled) {
+          showToast('UAC-Abfrage abgebrochen - Admin-Autostart wurde nicht eingerichtet.', { type: 'info' });
+        } else {
+          showToast(autoRes?.error || 'Admin-Autostart konnte nicht eingerichtet werden.', {
+            type: 'error',
+            duration: 6000,
+          });
+        }
+      } finally {
+        if (modalToken === activeSettingsToken) refreshBackgroundSectionUi();
+      }
     } else if (act === 'save') {
       syncDraftFromDom();
       const settingsChanged = hasSettingsDraftChanges(initialDraft, draftSettings);
@@ -2173,6 +2732,25 @@ export async function renderSettingsModal(initialTab = 'general') {
       const plan = buildSettingsSavePlan(initialDraft, draftSettings, s.providerSettings);
       const saveBtn = modal.querySelector('#btnSettingsSave');
       if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+
+      if (plan.autostartChanged && typeof window.electronAPI?.applyAutostart === 'function') {
+        const autoRes = await window.electronAPI.applyAutostart({
+          enabled: draftSettings.autostartEnabled,
+          mode: draftSettings.autostartMode,
+        });
+        if (modalToken !== activeSettingsToken) return;
+        if (autoRes?.status) currentAutostartStatus = autoRes.status;
+        if (!autoRes?.success) {
+          if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
+          showToast(
+            autoRes?.canceled
+              ? 'UAC-Abfrage abgebrochen - Autostart-Einstellung wurde nicht gespeichert.'
+              : autoRes?.error || 'Autostart konnte nicht konfiguriert werden.',
+            { type: autoRes?.canceled ? 'info' : 'error', duration: 6000 }
+          );
+          return;
+        }
+      }
 
       if (policyChanged) {
         const policyRes = await window.electronAPI.updateAccessPolicy(draftPolicy);

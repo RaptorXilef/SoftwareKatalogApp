@@ -1,3 +1,4 @@
+import { normalizeBackgroundSettings } from './background-update-logic.js';
 import { normalizeArchivePaths } from './multi-archive-logic.js';
 import { normalizeEnabledProviders, normalizeProviderSettings } from './provider-lifecycle-logic.js';
 import { normalizeStartTab } from './unified-packages.js';
@@ -111,6 +112,15 @@ function normalizeVisibleHiddenCats(raw) {
  *   vcpkgRoot: string,
  *   updateInterval: number,
  *   autoRequestAdminForBatch: boolean,
+ *   minimizeToTrayOnClose: boolean,
+ *   autostartEnabled: boolean,
+ *   autostartMode: 'normal' | 'admin',
+ *   backgroundCheckEnabled: boolean,
+ *   backgroundCheckIntervalMinutes: number,
+ *   notifyOnUpdates: boolean,
+ *   autoUpdateEnabled: boolean,
+ *   autoUpdateListType: 'all' | 'whitelist' | 'blacklist',
+ *   autoUpdateEntries: import('./background-update-logic.js').AutoUpdateEntry[],
  * }}
  */
 export function createSettingsDraft(rawSettings = {}) {
@@ -124,6 +134,7 @@ export function createSettingsDraft(rawSettings = {}) {
       : typeof src.vcpkgRoot === 'string'
         ? src.vcpkgRoot
         : '';
+  const bg = normalizeBackgroundSettings(src);
 
   return {
     startTab: normalizeStartTab(src.startTab),
@@ -142,6 +153,7 @@ export function createSettingsDraft(rawSettings = {}) {
     vcpkgRoot: rawVcpkgRoot.trim(),
     updateInterval: normalizeUpdateInterval(src.updateInterval),
     autoRequestAdminForBatch: Boolean(src.autoRequestAdminForBatch),
+    ...bg,
   };
 }
 
@@ -210,6 +222,15 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   if (initial.vcpkgRoot !== current.vcpkgRoot) return true;
   if (initial.updateInterval !== current.updateInterval) return true;
   if (initial.autoRequestAdminForBatch !== current.autoRequestAdminForBatch) return true;
+  if (initial.minimizeToTrayOnClose !== current.minimizeToTrayOnClose) return true;
+  if (initial.autostartEnabled !== current.autostartEnabled) return true;
+  if (initial.autostartMode !== current.autostartMode) return true;
+  if (initial.backgroundCheckEnabled !== current.backgroundCheckEnabled) return true;
+  if (initial.backgroundCheckIntervalMinutes !== current.backgroundCheckIntervalMinutes) return true;
+  if (initial.notifyOnUpdates !== current.notifyOnUpdates) return true;
+  if (initial.autoUpdateEnabled !== current.autoUpdateEnabled) return true;
+  if (initial.autoUpdateListType !== current.autoUpdateListType) return true;
+  if (JSON.stringify(initial.autoUpdateEntries) !== JSON.stringify(current.autoUpdateEntries)) return true;
 
   if (!areArraysEqual(initial.archivePaths, current.archivePaths)) return true;
   if (!areArraysEqual(initial.autoExtensions, current.autoExtensions)) return true;
@@ -257,6 +278,15 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     keepOriginalNameIfVersioned: current.keepOriginalNameIfVersioned,
     filenamePattern: current.filenamePattern,
     autoRequestAdminForBatch: current.autoRequestAdminForBatch,
+    minimizeToTrayOnClose: current.minimizeToTrayOnClose,
+    autostartEnabled: current.autostartEnabled,
+    autostartMode: current.autostartMode,
+    backgroundCheckEnabled: current.backgroundCheckEnabled,
+    backgroundCheckIntervalMinutes: current.backgroundCheckIntervalMinutes,
+    notifyOnUpdates: current.notifyOnUpdates,
+    autoUpdateEnabled: current.autoUpdateEnabled,
+    autoUpdateListType: current.autoUpdateListType,
+    autoUpdateEntries: current.autoUpdateEntries,
   };
 
   const needsRescan =
@@ -268,6 +298,17 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
   const providersChanged = !areSetsEqual(initial.enabledProviders, current.enabledProviders);
   const vcpkgRootChanged = initial.vcpkgRoot !== current.vcpkgRoot;
   const rescanInstalled = newlyEnabledProvider || (vcpkgRootChanged && current.enabledProviders.includes('vcpkg'));
+  const autostartChanged =
+    initial.autostartEnabled !== current.autostartEnabled || initial.autostartMode !== current.autostartMode;
+  const backgroundChanged =
+    autostartChanged ||
+    initial.minimizeToTrayOnClose !== current.minimizeToTrayOnClose ||
+    initial.backgroundCheckEnabled !== current.backgroundCheckEnabled ||
+    initial.backgroundCheckIntervalMinutes !== current.backgroundCheckIntervalMinutes ||
+    initial.notifyOnUpdates !== current.notifyOnUpdates ||
+    initial.autoUpdateEnabled !== current.autoUpdateEnabled ||
+    initial.autoUpdateListType !== current.autoUpdateListType ||
+    JSON.stringify(initial.autoUpdateEntries) !== JSON.stringify(current.autoUpdateEntries);
 
   return {
     payload,
@@ -276,5 +317,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     providersChanged,
     vcpkgRootChanged,
     rescanInstalled,
+    autostartChanged,
+    backgroundChanged,
   };
 }

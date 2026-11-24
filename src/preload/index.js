@@ -170,4 +170,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('auth-status-updated', listener);
     return () => ipcRenderer.off('auth-status-updated', listener);
   },
+
+  // System-Tray, Autostart & Hintergrund-Updater
+  getAutostartStatus: () => ipcRenderer.invoke('autostart-get-status'),
+  applyAutostart: (payload) => ipcRenderer.invoke('autostart-apply', payload),
+  getBackgroundStatus: () => ipcRenderer.invoke('background-get-status'),
+  runBackgroundCheckNow: () => ipcRenderer.invoke('background-check-now'),
+  setAutoUpdatePaused: (paused) => ipcRenderer.invoke('background-set-auto-update-paused', paused),
+  onNavigateTab: (cb) => {
+    const listener = (_event, tab) => cb(tab);
+    ipcRenderer.on('navigate-tab', listener);
+    return () => ipcRenderer.off('navigate-tab', listener);
+  },
+  onBackgroundStatusUpdated: (cb) => {
+    const listener = (_event, status) => cb(status);
+    ipcRenderer.on('background-status-updated', listener);
+    return () => ipcRenderer.off('background-status-updated', listener);
+  },
 });

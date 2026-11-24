@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import { detectInstallKind, normalizeArch, resolveDataDir } from '../shared/app-update-logic.js';
+import { DEFAULT_BACKGROUND_SETTINGS, normalizeBackgroundSettings } from '../shared/background-update-logic.js';
 import {
   getArchiveRootLabel,
   isNormalizedPathInsideDir,
@@ -16,7 +17,7 @@ import {
 } from '../shared/provider-lifecycle-logic.js';
 import { normalizeStartTab } from '../shared/unified-packages.js';
 
-const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions'];
+const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions', 'notifiedUpdateVersions'];
 
 const DEFAULT_CONFIG = {
   archivePaths: ['../software'],
@@ -43,12 +44,14 @@ const DEFAULT_CONFIG = {
   // Sitzungsbasierter Admin-Ausfuehrungsmodus & Policy-Datei
   autoRequestAdminForBatch: false,
   authFilePath: '',
+  ...DEFAULT_BACKGROUND_SETTINGS,
 };
 
 const DEFAULT_STATE = {
   lastUpdateCheck: 0,
   favorites: [],
   installedVersions: {},
+  notifiedUpdateVersions: {},
 };
 
 let migrationChecked = false;
@@ -269,6 +272,13 @@ export function getConfig() {
   const startTab = normalizeStartTab(config.startTab);
   const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
   const providerSettings = normalizeProviderSettings(config.providerSettings);
+  const backgroundSettings = normalizeBackgroundSettings(config);
+  const notifiedUpdateVersions =
+    state.notifiedUpdateVersions &&
+    typeof state.notifiedUpdateVersions === 'object' &&
+    !Array.isArray(state.notifiedUpdateVersions)
+      ? state.notifiedUpdateVersions
+      : {};
 
   return {
     appFolder,
@@ -282,6 +292,8 @@ export function getConfig() {
     absScriptPath,
     ...config,
     ...state,
+    ...backgroundSettings,
+    notifiedUpdateVersions,
     archivePaths,
     targetPath,
     archiveSaveMode,
@@ -297,6 +309,7 @@ export function saveConfig(newSettings) {
   const statePath = path.join(app.getPath('userData'), 'state.json');
   const current = getConfig();
   const merged = { ...current, ...newSettings };
+  Object.assign(merged, normalizeBackgroundSettings(merged));
 
   if (newSettings?.enabledProviders !== undefined) {
     merged.enabledProviders = normalizeEnabledProviders(newSettings.enabledProviders);

@@ -20,8 +20,8 @@
     "scan": "node src/scanner/scanner.mjs",
     "scan:full": "node src/scanner/scanner.mjs --full",
     "build:dir": "electron-vite build && electron-builder --dir",
-    "build:dist": "electron-vite build && electron-builder",
-    "build:portable": "electron-vite build && electron-builder --win portable",
+    "build:dist": "electron-vite build && electron-builder --publish never",
+    "build:portable": "electron-vite build && electron-builder --win portable --publish never",
     "test": "node --test tests",
     "prepare": "husky",
     "chk:biome": "biome check .",
@@ -61,6 +61,7 @@
     "directories": {
       "output": "dist"
     },
+    "publish": null,
     "files": [
       "out/**/*",
       "package.json"
@@ -73,6 +74,10 @@
       {
         "from": "src/main/elevated-worker.mjs",
         "to": "elevated-worker.mjs"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "win": {

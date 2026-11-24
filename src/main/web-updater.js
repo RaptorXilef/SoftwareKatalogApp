@@ -241,17 +241,22 @@ export async function checkSingleWebSource(
   }
 }
 
-export async function checkAllWebVersions() {
+export async function checkAllWebVersions({ silent = false } = {}) {
   const { absJsonPath, appFolder } = getConfig();
   if (!fs.existsSync(absJsonPath)) return { success: false, error: 'Katalog nicht gefunden.' };
 
-  const job = createJob({
-    type: 'web-versions',
-    title: 'Online-Updates prüfen',
-    dedupeKey: 'web-versions',
-    cancelable: true,
-  });
-  if (!job) return { success: false, alreadyRunning: true };
+  let job = null;
+  if (!silent) {
+    job = createJob({
+      type: 'web-versions',
+      title: 'Online-Updates prüfen',
+      dedupeKey: 'web-versions',
+      cancelable: true,
+    });
+    if (!job) return { success: false, alreadyRunning: true };
+  }
+
+  const signal = job?.signal || null;
 
   try {
     const catData = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
@@ -266,7 +271,7 @@ export async function checkAllWebVersions() {
     });
 
     if (itemsToCheck.length === 0) {
-      job.finish('done', 'Keine Programme mit Online-Prüfung konfiguriert.');
+      job?.finish('done', 'Keine Programme mit Online-Prüfung konfiguriert.');
       return { success: true, count: 0 };
     }
 
@@ -289,7 +294,7 @@ export async function checkAllWebVersions() {
     }
 
     const processItem = async (item) => {
-      if (job.signal.aborted) return;
+      if (signal?.aborted) return;
       const res = await checkSingleWebSource(
         {
           sourceType: item.webSourceType,
@@ -302,11 +307,11 @@ export async function checkAllWebVersions() {
           suffix: item.webVersionSuffix,
           persist: false,
         },
-        job.signal
+        signal
       );
 
       checked++;
-      job.update((checked / itemsToCheck.length) * 100, `Prüfe ${item.name} (${checked}/${itemsToCheck.length})...`);
+      job?.update((checked / itemsToCheck.length) * 100, `Prüfe ${item.name} (${checked}/${itemsToCheck.length})...`);
 
       if (res.success && res.version && item.webVersion !== res.version) {
         item.webVersion = res.version;
@@ -328,7 +333,7 @@ export async function checkAllWebVersions() {
     const runPool = async (list, concurrency) => {
       const executing = new Set();
       for (const item of list) {
-        if (job.signal.aborted) break;
+        if (signal?.aborted) break;
         const p = Promise.resolve().then(() => processItem(item));
         executing.add(p);
         p.then(() => executing.delete(p));
@@ -340,7 +345,7 @@ export async function checkAllWebVersions() {
     // HTTP/GitHub schneller (6 parallel), CLI-Provider gedrosselt (2 parallel gegen Cache-/CLI-Locks)
     await Promise.all([runPool(httpItems, 6), runPool(cliItems, 2)]);
 
-    if (job.signal.aborted) {
+    if (signal?.aborted) {
       if (updatedCount > 0) writeCatalogAtomic(catData);
       return { success: false, canceled: true };
     }
@@ -349,10 +354,10 @@ export async function checkAllWebVersions() {
       writeCatalogAtomic(catData);
     }
 
-    job.finish('done', updatedCount > 0 ? `${updatedCount} neue Online-Versionen gefunden.` : 'Alles aktuell.');
+    job?.finish('done', updatedCount > 0 ? `${updatedCount} neue Online-Versionen gefunden.` : 'Alles aktuell.');
     return { success: true, count: updatedCount };
   } catch (e) {
-    job.finish('error', e.message, { autoRemoveMs: 5000 });
+    job?.finish('error', e.message, { autoRemoveMs: 5000 });
     return { success: false, error: e.message };
   }
 }

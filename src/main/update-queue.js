@@ -361,3 +361,7 @@ export function cancelAllQueue() {
 export function getQueueState() {
   return queueManager.getQueueState();
 }
+
+export function waitForQueueIdle() {
+  return queueManager.waitUntilIdle();
+}

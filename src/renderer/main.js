@@ -1029,6 +1029,24 @@ async function bootstrap() {
   });
 
   try {
+    let lastBgCheckAt = 0;
+    if (typeof window.electronAPI?.onNavigateTab === 'function') {
+      window.electronAPI.onNavigateTab((tab) => {
+        closeContextMenu();
+        state.activeTab = normalizeStartTab(tab);
+        renderActiveView();
+      });
+    }
+    if (typeof window.electronAPI?.onBackgroundStatusUpdated === 'function') {
+      window.electronAPI.onBackgroundStatusUpdated((bgStatus) => {
+        if (!bgStatus || bgStatus.isChecking) return;
+        if (bgStatus.lastCheckAt && bgStatus.lastCheckAt !== lastBgCheckAt) {
+          lastBgCheckAt = bgStatus.lastCheckAt;
+          void reloadUI({ preserveScroll: true });
+        }
+      });
+    }
+
     if (typeof window.electronAPI?.onAuthStatusUpdated === 'function') {
       window.electronAPI.onAuthStatusUpdated((status) => handleAuthStatusUpdate(status));
     }

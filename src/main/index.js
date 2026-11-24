@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { hasTrayStartupArg } from '../shared/background-update-logic.js';
 import { buildExportPolicyPayload, validateImportPolicyPayload } from '../shared/policy-logic.js';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
 import { executeArchiveCleanup, previewArchiveCleanup, setKeepAllVersions } from './archive-cleaner.js';
@@ -20,6 +21,17 @@ import {
   updateAccessPolicy,
   updateAuthConfig,
 } from './auth-service.js';
+import { applyAutostartSettings, getAutostartStatus } from './autostart-service.js';
+import {
+  configureBackgroundUpdater,
+  getBackgroundUpdaterStatus,
+  initBackgroundUpdater,
+  reloadBackgroundUpdaterSchedule,
+  runBackgroundUpdateCheck,
+  setAutoUpdatePaused,
+  stopBackgroundUpdater,
+  toggleAutoUpdatePaused,
+} from './background-updater.js';
 import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-updater.js';
 import {
   deleteBundle,
@@ -91,6 +103,13 @@ import {
   uninstallPackage,
 } from './providers/registry.js';
 import { runArchiveScan, scanSingleFolder } from './scanner-bridge.js';
+import {
+  destroyTrayService,
+  initTrayService,
+  isTrayActive,
+  resolveTrayIconPath,
+  updateTrayState,
+} from './tray-service.js';
 import { cancelAllQueue, cancelQueueItem, enqueueUpdates, getQueueState, reorderQueue } from './update-queue.js';
 import {
   checkAllWebVersions,
@@ -124,12 +143,19 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-direct-composition');
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('io.github.raptorxilef.softwarekatalogapp');
+}
+
 // Muss VOR app.whenReady() registriert werden
 registerMediaScheme();
 
+const startedInTray = hasTrayStartupArg(process.argv);
 let mainWindow = null;
+let isQuitting = false;
+let pendingNavTab = null;
 
-function createWindow() {
+function createWindow({ showOnReady = true } = {}) {
   const windowOptions = {
     width: 1280,
     height: 860,
@@ -145,8 +171,8 @@ function createWindow() {
     },
   };
 
-  const iconPath = path.join(getAppFolder(), 'build', 'icon.ico');
-  if (fs.existsSync(iconPath)) {
+  const iconPath = resolveTrayIconPath();
+  if (iconPath) {
     windowOptions.icon = iconPath;
   }
 
@@ -158,10 +184,57 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    if (showOnReady && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
+  });
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && isTrayActive() && getConfig().minimizeToTrayOnClose === true) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+function showMainWindow({ targetTab = null } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingNavTab = targetTab || null;
+    createWindow({ showOnReady: true });
+    if (pendingNavTab && mainWindow) {
+      const targetWin = mainWindow;
+      targetWin.webContents.once('did-finish-load', () => {
+        if (pendingNavTab && !targetWin.isDestroyed()) {
+          targetWin.webContents.send('navigate-tab', pendingNavTab);
+          pendingNavTab = null;
+        }
+      });
+    }
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+  mainWindow.focus();
+  if (targetTab) {
+    mainWindow.webContents.send('navigate-tab', targetTab);
+  }
+}
+
+function quitApp() {
+  isQuitting = true;
+  stopBackgroundUpdater();
+  destroyTrayService();
+  app.quit();
 }
 
 function handleIpc(channel, handler) {
@@ -359,11 +432,27 @@ function registerIpcHandlers() {
   handleIpc('save-settings', (_e, settings) => {
     try {
       saveConfig(settings);
+      reloadBackgroundUpdaterSchedule();
+      const bgStatus = getBackgroundUpdaterStatus();
+      updateTrayState({
+        updateCount: bgStatus.availableUpdateCount,
+        isChecking: bgStatus.isChecking,
+        autoUpdateEnabled: bgStatus.autoUpdateEnabled,
+        autoUpdatePaused: bgStatus.autoUpdatePaused,
+        isElevated: bgStatus.isElevated,
+      });
       return { success: true };
     } catch (e) {
       return { success: false, error: e.message };
     }
   });
+
+  // Autostart & Hintergrund-Updater
+  handleIpc('autostart-get-status', () => getAutostartStatus());
+  handleIpc('autostart-apply', (_e, payload) => applyAutostartSettings(payload || {}));
+  handleIpc('background-get-status', () => getBackgroundUpdaterStatus());
+  handleIpc('background-check-now', () => runBackgroundUpdateCheck({ manual: true }));
+  handleIpc('background-set-auto-update-paused', (_e, paused) => setAutoUpdatePaused(Boolean(paused)));
   handleIpc('save-favorites', (_e, favorites) => {
     try {
       const cleanFavorites = Array.isArray(favorites)
@@ -511,14 +600,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   registerIpcHandlers();
 
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
 
   app.whenReady().then(async () => {
-    void isProcessElevated();
+    const elevated = await isProcessElevated();
     try {
       await initAuthService();
     } catch (err) {
@@ -534,12 +620,60 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     } catch (err) {
       console.error('Fehler beim Registrieren des catalog-media-Protokolls:', err);
     }
+
+    const initialCfg = getConfig();
+    try {
+      initTrayService(
+        {
+          onOpenWindow: () => showMainWindow(),
+          onCheckUpdatesNow: () => {
+            void runBackgroundUpdateCheck({ manual: true });
+          },
+          onToggleAutoUpdatePaused: () => {
+            toggleAutoUpdatePaused();
+          },
+          onQuitApp: () => quitApp(),
+        },
+        {
+          updateCount: 0,
+          isChecking: false,
+          autoUpdateEnabled: Boolean(initialCfg.autoUpdateEnabled),
+          autoUpdatePaused: false,
+          isElevated: elevated,
+        }
+      );
+    } catch (err) {
+      console.error('Fehler beim Initialisieren des System-Trays:', err);
+    }
+
+    configureBackgroundUpdater({
+      onStatusChange: (status) => {
+        updateTrayState({
+          updateCount: status.availableUpdateCount,
+          isChecking: status.isChecking,
+          autoUpdateEnabled: status.autoUpdateEnabled,
+          autoUpdatePaused: status.autoUpdatePaused,
+          isElevated: status.isElevated,
+        });
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('background-status-updated', status);
+          }
+        }
+      },
+      onOpenUpdatesTab: () => showMainWindow({ targetTab: 'updates' }),
+    });
+
     registerIpcHandlers();
-    createWindow();
+    createWindow({ showOnReady: !startedInTray });
+    void initBackgroundUpdater({ startedInTray });
   });
 
   let isQuittingWithHelperCleanup = false;
   app.on('before-quit', (event) => {
+    isQuitting = true;
+    stopBackgroundUpdater();
+    destroyTrayService();
     if (isQuittingWithHelperCleanup || !isAdminSessionActive()) return;
     event.preventDefault();
     isQuittingWithHelperCleanup = true;
@@ -551,6 +685,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {
+    const cfg = getConfig();
+    if (isTrayActive() && !isQuitting && (cfg.minimizeToTrayOnClose || cfg.backgroundCheckEnabled || startedInTray)) {
+      return;
+    }
     if (process.platform !== 'darwin') app.quit();
   });
 }

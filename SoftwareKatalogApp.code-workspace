@@ -10,6 +10,7 @@
     "workbench.iconTheme": "vira-icons-carbon",
     "workbench.productIconTheme": "viraUIIcons",
     "workbench.colorTheme": "Vira Carbon High Contrast",
-    "viraTheme.accent": "White"
+    "viraTheme.accent": "White",
+    "antigravity.enableInlineDiff": true
   }
 }

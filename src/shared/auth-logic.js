@@ -56,6 +56,8 @@ export const PROTECTED_ADMIN_IPC_CHANNELS = new Set([
   'policy-update',
   'policy-export',
   'policy-import',
+  'autostart-apply',
+  'background-set-auto-update-paused',
 ]);
 
 Object.freeze(PROTECTED_ADMIN_IPC_CHANNELS);

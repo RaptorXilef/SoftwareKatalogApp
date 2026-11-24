@@ -47,6 +47,15 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
     assert.equal(defaults.vcpkgRoot, '');
     assert.equal(defaults.updateInterval, 24);
     assert.equal(defaults.autoRequestAdminForBatch, false);
+    assert.equal(defaults.minimizeToTrayOnClose, false);
+    assert.equal(defaults.autostartEnabled, false);
+    assert.equal(defaults.autostartMode, 'normal');
+    assert.equal(defaults.backgroundCheckEnabled, false);
+    assert.equal(defaults.backgroundCheckIntervalMinutes, 360);
+    assert.equal(defaults.notifyOnUpdates, true);
+    assert.equal(defaults.autoUpdateEnabled, false);
+    assert.equal(defaults.autoUpdateListType, 'all');
+    assert.deepEqual(defaults.autoUpdateEntries, []);
 
     const zeroValues = createSettingsDraft({
       newBadgeDays: 0,
@@ -135,6 +144,21 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, visibleHiddenCats: ['Beta'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoExtensions: ['.msi', '.exe'] }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, minimizeToTrayOnClose: true }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, autostartEnabled: true }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, autostartMode: 'admin' }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, backgroundCheckEnabled: true }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, backgroundCheckIntervalMinutes: 60 }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, notifyOnUpdates: false }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoUpdateEnabled: true }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoUpdateListType: 'whitelist' }), true);
+    assert.equal(
+      hasSettingsDraftChanges(initial, {
+        ...initial,
+        autoUpdateEntries: [{ matchType: 'packageId', value: 'VideoLAN.VLC', label: 'VLC' }],
+      }),
+      true
+    );
   });
 });
 
@@ -174,6 +198,20 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     assert.equal(plan.newlyEnabledProvider, true);
     assert.equal(plan.vcpkgRootChanged, true);
     assert.equal(plan.rescanInstalled, true);
+    assert.equal(plan.autostartChanged, false);
+    assert.equal(plan.backgroundChanged, false);
+
+    const withBg = {
+      ...current,
+      autostartEnabled: true,
+      autostartMode: 'admin',
+      autoUpdateEnabled: true,
+    };
+    const bgPlan = buildSettingsSavePlan(initial, withBg);
+    assert.equal(bgPlan.autostartChanged, true);
+    assert.equal(bgPlan.backgroundChanged, true);
+    assert.equal(bgPlan.payload.autostartMode, 'admin');
+    assert.equal(bgPlan.payload.autoUpdateEnabled, true);
   });
 
   it('loest keinen PC-Rescan aus wenn nur ein Provider deaktiviert wurde oder vcpkg aus ist', () => {

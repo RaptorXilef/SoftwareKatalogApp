@@ -3745,3 +3745,55 @@
   background: color-mix(in srgb, var(--accent) 14%, var(--bg));
   color: var(--accent);
 }
+
+/* Hintergrundbetrieb, System-Tray & Auto-Update Einstellungen */
+.bg-settings-group {
+  margin-top: 10px;
+}
+
+.bg-portable-hint {
+  margin-bottom: 4px;
+}
+
+.bg-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.bg-status-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.bg-elevation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+
+  &.is-ok {
+    border: 1px solid color-mix(in srgb, var(--color-ok) 45%, var(--border));
+    background: color-mix(in srgb, var(--color-ok) 12%, var(--bg));
+    color: var(--color-ok);
+  }
+}
+
+.bg-elevation-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 260px;
+}
+
+.bg-autoupdate-list-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
