@@ -2,47 +2,19 @@ import {
   BUNDLE_ICON_PRESETS,
   DEFAULT_BUNDLE_ICON,
   evaluateBundleItemStatus,
+  getBundleEditorArchiveCandidates,
   getBundleItemKey,
+  getKnownProviderPackages,
+  mergeProviderEditorResults,
   moveBundleItem,
   sortBundleItems,
 } from '../../shared/bundles-logic.js';
-import { scoreCatalogItem } from '../../shared/search.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeEditorToken = 0;
-
-function toEditorItemFromCatalog(catItem) {
-  return {
-    source: 'archive',
-    refId: catItem.id,
-    packageId: catItem.packageId || catItem.wingetId || '',
-    name: catItem.name,
-    optional: false,
-  };
-}
-
-function toEditorItemFromProvider(pkg) {
-  const providerId = pkg.providerId || pkg.packageManager || 'winget';
-  if (providerId === 'archive') {
-    return {
-      source: 'archive',
-      refId: pkg.packageId || pkg.id,
-      packageId: pkg.linkedPackageId || '',
-      name: pkg.name || pkg.packageId,
-      optional: false,
-    };
-  }
-  return {
-    source: 'winget',
-    refId: '',
-    packageId: pkg.packageId || pkg.id,
-    name: pkg.name || pkg.packageId,
-    optional: false,
-  };
-}
 
 export function renderBundleEditorModal({
   bundle = null,
@@ -72,140 +44,169 @@ export function renderBundleEditorModal({
   const snapshotCheckedKeys = new Set(draftItems.map((it) => getBundleItemKey(it)));
   let snapshotFilterText = '';
 
+  const enabledRemoteProviders = (state.providers || []).filter(
+    (p) => p && p.id !== 'archive' && p.enabled && p.capabilities?.search
+  );
+  const activeRemoteProviders =
+    enabledRemoteProviders.length > 0
+      ? enabledRemoteProviders
+      : [{ id: 'winget', name: 'Winget', enabled: true, capabilities: { search: true } }];
+
+  let activeSource = 'archive';
   let searchQuery = '';
-  const searchSources = new Set(['archive', 'winget']);
-  let remoteWingetResults = [];
-  let isSearchingWinget = false;
-  let searchError = '';
+  const remoteResultsByProvider = new Map();
+  const remoteErrorsByProvider = new Map();
+  const remoteHintsByProvider = new Map();
+  let lastSearchedQuery = '';
+  let hasSearchedRemote = false;
+  let isSearchingRemote = false;
   let isSaving = false;
   let dragFromIndex = -1;
-  let wingetSearchSeq = 0;
+  let remoteSearchSeq = 0;
+  let searchDebounceTimer = null;
+  let renderedSearchEntries = [];
 
   const isStillOpen = () => token === activeEditorToken && !overlay.hidden;
 
   const getExistingKeysSet = () => new Set(draftItems.map((it) => getBundleItemKey(it)));
 
-  const buildArchiveQuickMatches = () => {
-    if (!searchSources.has('archive')) return [];
-    const q = searchQuery.trim();
-    const scored = [];
-    for (const item of state.catalog) {
-      const res = scoreCatalogItem(item, q);
-      if (res.matched) {
-        scored.push({ score: res.score, item });
-      }
+  const getVisibleArchiveCount = () =>
+    getBundleEditorArchiveCandidates(state.catalog, {
+      query: '',
+      visibleHiddenCats: state.settings.visibleHiddenCats || [],
+    }).length;
+
+  const getKnownCountForProvider = (providerId) =>
+    getKnownProviderPackages(state.packages, { providerId, query: '' }).length;
+
+  const clearPendingDebounce = () => {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
     }
-    scored.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name, 'de'));
-    return scored.slice(0, 20).map((entry) => ({
-      providerId: 'archive',
-      packageId: entry.item.id,
-      linkedPackageId: entry.item.packageId || entry.item.wingetId || '',
-      name: entry.item.name,
-      version: entry.item.webVersion || '',
-      shortDescription: entry.item.mainCategory || '',
-      editorItem: toEditorItemFromCatalog(entry.item),
-    }));
   };
 
-  const runCombinedSearch = async () => {
-    const q = searchQuery.trim();
-    searchError = '';
-
-    if (searchSources.size === 0) {
-      showToast('Bitte mindestens eine Suchquelle (Archiv oder Winget) auswählen.', { type: 'warn' });
-      return;
-    }
-
-    if (searchSources.has('winget')) {
-      if (q.length < 2) {
-        remoteWingetResults = [];
-        if (!searchSources.has('archive')) {
-          showToast('Bitte mindestens 2 Zeichen für die Winget-Suche eingeben.', { type: 'info' });
-        }
-        render();
-        return;
-      }
-
-      const seq = ++wingetSearchSeq;
-      isSearchingWinget = true;
-      render();
-
-      try {
-        const res = await window.electronAPI.searchProviders(q, {
-          providerIds: ['winget'],
-          limit: 20,
-        });
-        if (!isStillOpen() || seq !== wingetSearchSeq) return;
-        isSearchingWinget = false;
-        const wgRes = res?.byProvider?.winget;
-        if (wgRes && !wgRes.success && wgRes.error) {
-          searchError = wgRes.error;
-        }
-        remoteWingetResults = Array.isArray(wgRes?.results) ? wgRes.results : [];
-      } catch (err) {
-        if (!isStillOpen() || seq !== wingetSearchSeq) return;
-        isSearchingWinget = false;
-        remoteWingetResults = [];
-        searchError = err.message;
-      }
-      render();
-      return;
-    }
-
-    remoteWingetResults = [];
-    render();
+  const clearRemoteSearchState = () => {
+    remoteResultsByProvider.clear();
+    remoteErrorsByProvider.clear();
+    remoteHintsByProvider.clear();
+    lastSearchedQuery = '';
+    hasSearchedRemote = false;
   };
 
-  const addEditorItem = (newItem) => {
-    const key = getBundleItemKey(newItem);
-    if (!key) return;
-    if (getExistingKeysSet().has(key)) {
-      showToast(`"${newItem.name}" ist bereits im Bündel enthalten.`, { type: 'info' });
-      return;
+  const getTargetRemoteProviderIds = () => {
+    if (activeSource === 'archive') return [];
+    if (activeSource === 'all') return activeRemoteProviders.map((p) => p.id);
+    return activeRemoteProviders.some((p) => p.id === activeSource) ? [activeSource] : [];
+  };
+
+  const getProviderLabel = (providerId) => {
+    if (providerId === 'archive') return 'Archiv';
+    const found = activeRemoteProviders.find((p) => p.id === providerId);
+    return found?.name || (providerId === 'winget' ? 'Winget' : providerId);
+  };
+
+  const buildCombinedSearchView = () => {
+    const q = searchQuery.trim();
+    const visibleHiddenCats = state.settings.visibleHiddenCats || [];
+    const archiveResults =
+      activeSource === 'archive' || activeSource === 'all'
+        ? getBundleEditorArchiveCandidates(state.catalog, { query: q, visibleHiddenCats })
+        : [];
+
+    const remoteIds = getTargetRemoteProviderIds();
+    const remoteEntries = [];
+    const remoteMeta = [];
+
+    for (const providerId of remoteIds) {
+      const providerName = getProviderLabel(providerId);
+      const known = getKnownProviderPackages(state.packages, { providerId, query: q });
+      const hasFreshRemote = hasSearchedRemote && lastSearchedQuery === q && q.length >= 2;
+      const remoteList = hasFreshRemote ? remoteResultsByProvider.get(providerId) || [] : [];
+      const merged = mergeProviderEditorResults({
+        knownPackages: known,
+        remoteResults: remoteList,
+        providerId,
+      });
+
+      remoteEntries.push(...merged);
+      remoteMeta.push({
+        providerId,
+        providerName,
+        knownCount: known.length,
+        remoteCount: remoteList.length,
+        hasFreshRemote,
+        error: remoteErrorsByProvider.get(providerId) || '',
+        hint: remoteHintsByProvider.get(providerId) || '',
+      });
     }
-    draftItems = sortBundleItems([
-      ...draftItems,
-      {
-        ...newItem,
-        order: draftItems.length + 1,
-      },
-    ]);
-    snapshotCheckedKeys.add(key);
-    render();
+
+    return {
+      archiveResults,
+      remoteEntries,
+      remoteMeta,
+      combined: [...archiveResults, ...remoteEntries],
+    };
   };
 
   const renderSearchResultsHtml = () => {
     const existingKeys = getExistingKeysSet();
-    const archiveResults = buildArchiveQuickMatches();
-    const wingetResults = searchSources.has('winget')
-      ? remoteWingetResults.map((pkg) => ({
-          providerId: 'winget',
-          packageId: pkg.packageId || pkg.id,
-          name: pkg.name || pkg.packageId,
-          version: pkg.version || '',
-          shortDescription: pkg.shortDescription || '',
-          editorItem: toEditorItemFromProvider({ ...pkg, providerId: 'winget' }),
-        }))
-      : [];
+    const q = searchQuery.trim();
+    const { archiveResults, remoteMeta, combined } = buildCombinedSearchView();
+    renderedSearchEntries = combined;
 
-    const combined = [...archiveResults, ...wingetResults];
     const parts = [];
 
-    if (searchError) {
-      parts.push(`<div class="bundle-search-notice">Winget: ${escapeHTML(searchError)}</div>`);
+    // Kompakte Status-Leiste für die gewählte Quelle
+    const statusSegments = [];
+    if (activeSource === 'archive' || activeSource === 'all') {
+      statusSegments.push(`🗄️ Archiv: ${archiveResults.length} Programme`);
     }
-    if (isSearchingWinget) {
-      parts.push('<div class="bundle-search-empty">⏳ Durchsuche Winget...</div>');
+    for (const meta of remoteMeta) {
+      if (meta.hasFreshRemote) {
+        statusSegments.push(`⚡ ${meta.providerName}: ${meta.remoteCount} Suchtreffer (${meta.knownCount} bekannt)`);
+      } else {
+        statusSegments.push(
+          `⚡ ${meta.providerName}: ${meta.knownCount} bekannte/installierte Pakete · Suchbegriff eingeben für Online-Suche`
+        );
+      }
+    }
+    if (statusSegments.length > 0) {
+      parts.push(`<div class="bundle-search-group-bar">${escapeHTML(statusSegments.join(' · '))}</div>`);
     }
 
-    if (combined.length === 0 && !isSearchingWinget) {
+    for (const meta of remoteMeta) {
+      if (meta.error) {
+        parts.push(
+          `<div class="bundle-search-notice">⚠️ ${escapeHTML(meta.providerName)}: ${escapeHTML(meta.error)}</div>`
+        );
+      } else if (meta.hasFreshRemote && !isSearchingRemote && meta.remoteCount === 0) {
+        const emptyMsg = meta.hint
+          ? `${meta.providerName}: ${meta.hint}`
+          : `${meta.providerName} hat für "${q}" keine Pakete gefunden.`;
+        parts.push(`<div class="bundle-search-notice">ℹ️ ${escapeHTML(emptyMsg)}</div>`);
+      }
+    }
+
+    if (isSearchingRemote) {
+      const names = remoteMeta.map((m) => m.providerName).join(', ') || 'Winget';
       parts.push(
-        `<div class="bundle-search-empty">${
-          searchQuery.trim()
-            ? 'Keine passenden Programme gefunden. Bei Winget Enter oder „Suchen“ drücken.'
-            : 'Tippe einen Programmnamen ein (Archiv wird live gefiltert, Winget per Enter / Suchen).'
-        }</div>`
+        `<div class="bundle-search-empty">⏳ Durchsuche ${escapeHTML(names)} nach "${escapeHTML(q)}"...</div>`
       );
+    }
+
+    if (combined.length === 0 && !isSearchingRemote) {
+      let emptyText = 'Keine passenden Programme gefunden.';
+      if (activeSource === 'archive') {
+        emptyText = q ? `Keine Archiv-Programme für "${q}" gefunden.` : 'Keine Programme im Archiv vorhanden.';
+      } else if (!q) {
+        emptyText = 'Noch keine bekannten Pakete vorhanden. Tippe mindestens 2 Zeichen für die Online-Suche.';
+      } else if (q.length < 2) {
+        emptyText = 'Bitte mindestens 2 Zeichen für die Online-Suche eingeben.';
+      } else {
+        emptyText = `Keine Treffer für "${q}" gefunden.`;
+      }
+      parts.push(`<div class="bundle-search-empty">${escapeHTML(emptyText)}</div>`);
       return parts.join('');
     }
 
@@ -215,12 +216,14 @@ export function renderBundleEditorModal({
           const key = getBundleItemKey(entry.editorItem);
           const alreadyAdded = existingKeys.has(key);
           const isArchive = entry.providerId === 'archive';
+          const providerLabel = getProviderLabel(entry.providerId);
           return `
             <div class="bundle-search-row">
               <div class="bundle-search-row-main">
                 <div class="bundle-search-row-title">
                   <strong>${escapeHTML(entry.name)}</strong>
-                  <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${isArchive ? 'Archiv' : 'Winget'}</span>
+                  <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${escapeHTML(providerLabel)}</span>
+                  ${entry.isInstalled ? '<span class="card-chip">💻 Installiert</span>' : ''}
                   ${entry.version ? `<span class="card-chip">v${escapeHTML(entry.version)}</span>` : ''}
                 </div>
                 <div class="bundle-search-row-meta">
@@ -245,6 +248,118 @@ export function renderBundleEditorModal({
     );
 
     return parts.join('');
+  };
+
+  const updateSearchResultsDom = () => {
+    if (!isStillOpen()) return;
+    const resultsEl = modal.querySelector('#bundleSearchResults');
+    if (resultsEl) {
+      resultsEl.innerHTML = renderSearchResultsHtml();
+    }
+  };
+
+  const runRemoteSearch = async (rawQuery = searchQuery, { explicit = false } = {}) => {
+    clearPendingDebounce();
+    const q = String(rawQuery || '').trim();
+    const targetIds = getTargetRemoteProviderIds();
+
+    if (targetIds.length === 0) {
+      clearRemoteSearchState();
+      updateSearchResultsDom();
+      return;
+    }
+
+    if (q.length < 2) {
+      clearRemoteSearchState();
+      isSearchingRemote = false;
+      if (explicit) {
+        showToast('Bitte mindestens 2 Zeichen für die Paketmanager-Suche eingeben.', { type: 'info' });
+      }
+      updateSearchResultsDom();
+      return;
+    }
+
+    const seq = ++remoteSearchSeq;
+    isSearchingRemote = true;
+    remoteErrorsByProvider.clear();
+    remoteHintsByProvider.clear();
+    updateSearchResultsDom();
+
+    try {
+      let byProvider = {};
+      if (typeof window.electronAPI?.searchProviders === 'function') {
+        const res = await window.electronAPI.searchProviders(q, {
+          providerIds: targetIds,
+          limit: 0,
+        });
+        byProvider = res?.byProvider || {};
+      } else if (targetIds.includes('winget') && typeof window.electronAPI?.searchWinget === 'function') {
+        const wgRes = await window.electronAPI.searchWinget(q, { limit: 0 });
+        byProvider = {
+          winget: {
+            providerId: 'winget',
+            providerName: 'Winget',
+            success: Boolean(wgRes?.success),
+            results: Array.isArray(wgRes?.results) ? wgRes.results : [],
+            hint: wgRes?.hint || '',
+            error: wgRes?.error || '',
+          },
+        };
+      }
+
+      if (!isStillOpen() || seq !== remoteSearchSeq) return;
+
+      remoteResultsByProvider.clear();
+      remoteErrorsByProvider.clear();
+      remoteHintsByProvider.clear();
+
+      for (const providerId of targetIds) {
+        const provRes = byProvider[providerId];
+        if (!provRes) {
+          remoteResultsByProvider.set(providerId, []);
+          continue;
+        }
+        remoteResultsByProvider.set(providerId, Array.isArray(provRes.results) ? provRes.results : []);
+        if (!provRes.success && provRes.error) {
+          remoteErrorsByProvider.set(providerId, provRes.error);
+        } else if (provRes.hint) {
+          remoteHintsByProvider.set(providerId, provRes.hint);
+        }
+      }
+
+      isSearchingRemote = false;
+      hasSearchedRemote = true;
+      lastSearchedQuery = q;
+      updateSearchResultsDom();
+    } catch (err) {
+      if (!isStillOpen() || seq !== remoteSearchSeq) return;
+      isSearchingRemote = false;
+      hasSearchedRemote = true;
+      lastSearchedQuery = q;
+      remoteResultsByProvider.clear();
+      for (const providerId of targetIds) {
+        remoteErrorsByProvider.set(providerId, err?.message || 'Suchfehler');
+      }
+      updateSearchResultsDom();
+    }
+  };
+
+  const addEditorItem = (newItem) => {
+    const key = getBundleItemKey(newItem);
+    if (!key) return;
+    if (getExistingKeysSet().has(key)) {
+      showToast(`"${newItem.name}" ist bereits im Bündel enthalten.`, { type: 'info' });
+      return;
+    }
+    draftItems = sortBundleItems([
+      ...draftItems,
+      {
+        ...newItem,
+        order: draftItems.length + 1,
+      },
+    ]);
+    snapshotCheckedKeys.add(key);
+    render();
   };
 
   const renderSnapshotBannerHtml = () => {
@@ -314,7 +429,7 @@ export function renderBundleEditorModal({
         let modeHintHtml = '';
         if (evalInfo.adwareProtected) {
           modeHintHtml =
-            '<span class="card-chip chip-install-protected" title="Adware-Schutz aktiv – wird immer interaktiv am Ende ausgeführt">🛡️ Adware-Schutz</span>';
+            '<span class="card-chip chip-install-protected" title="Adware-Schutz aktiv - wird immer interaktiv am Ende ausgeführt">🛡️ Adware-Schutz</span>';
         } else if (evalInfo.canRunArchiveSilent) {
           modeHintHtml =
             '<span class="card-chip chip-install-silent" title="Stille Archiv-Installation konfiguriert">⚡ Silent</span>';
@@ -332,7 +447,7 @@ export function renderBundleEditorModal({
             <div class="bundle-item-main">
               <div class="bundle-item-title">
                 <strong>${escapeHTML(item.name)}</strong>
-                <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${isArchive ? 'Archiv' : 'Winget'}</span>
+                <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${isArchive ? 'Archiv' : escapeHTML(getProviderLabel(item.source))}</span>
                 ${modeHintHtml}
               </div>
               <div class="bundle-item-meta">
@@ -355,12 +470,47 @@ export function renderBundleEditorModal({
       .join('');
   };
 
+  const renderSourceTabsHtml = () => {
+    const archiveTotal = getVisibleArchiveCount();
+    const tabs = [
+      `<button type="button" class="source-chip ${activeSource === 'archive' ? 'active' : ''}" data-search-source="archive">
+        <span>🗄️</span>
+        <span>Archiv (${archiveTotal})</span>
+      </button>`,
+      ...activeRemoteProviders.map((provider) => {
+        const knownCount = getKnownCountForProvider(provider.id);
+        return `<button type="button" class="source-chip ${activeSource === provider.id ? 'active' : ''}" data-search-source="${escapeHTML(provider.id)}">
+          <span>⚡</span>
+          <span>${escapeHTML(provider.name)} (${knownCount})</span>
+        </button>`;
+      }),
+      `<button type="button" class="source-chip ${activeSource === 'all' ? 'active' : ''}" data-search-source="all">
+        <span>🔎</span>
+        <span>Alle Quellen</span>
+      </button>`,
+    ];
+    return tabs.join('');
+  };
+
+  const getSearchPlaceholder = () => {
+    if (activeSource === 'archive') {
+      return 'Archiv-Programme filtern (Name, Kategorie, Winget-ID)...';
+    }
+    if (activeSource === 'all') {
+      return 'Archiv filtern & Online-Suche in Paketmanagern starten (z. B. vlc, 7zip)...';
+    }
+    return `In ${getProviderLabel(activeSource)} suchen (z. B. vlc, firefox, VideoLAN.VLC)...`;
+  };
+
   const render = () => {
     if (!isStillOpen()) return;
 
-    const focusId = document.activeElement?.id || '';
-    const selectionStart = document.activeElement?.selectionStart ?? null;
-    const selectionEnd = document.activeElement?.selectionEnd ?? null;
+    const activeEl = document.activeElement;
+    const focusId = activeEl instanceof HTMLElement ? activeEl.id : '';
+    const selectionStart =
+      activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement ? activeEl.selectionStart : null;
+    const selectionEnd =
+      activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement ? activeEl.selectionEnd : null;
 
     const modalTitle = isSnapshotMode
       ? '📸 Bündel aus diesem PC erstellen'
@@ -410,20 +560,13 @@ export function renderBundleEditorModal({
 
         <div class="bundle-search-section">
           <div class="bundle-section-head">
-            <strong>➕ Programme hinzufügen (Archiv + Winget)</strong>
+            <strong>➕ Programme hinzufügen</strong>
             <div class="bundle-source-toggles">
-              <button type="button" class="source-chip ${searchSources.has('archive') ? 'active' : ''}" data-search-source="archive">
-                <span>${searchSources.has('archive') ? '✓' : '+'}</span>
-                <span>Archiv</span>
-              </button>
-              <button type="button" class="source-chip ${searchSources.has('winget') ? 'active' : ''}" data-search-source="winget">
-                <span>${searchSources.has('winget') ? '✓' : '+'}</span>
-                <span>Winget</span>
-              </button>
+              ${renderSourceTabsHtml()}
             </div>
           </div>
           <div class="bundle-search-bar">
-            <input type="text" id="bundleAddSearchInput" value="${escapeHTML(searchQuery)}" placeholder="Programmname oder Winget-ID eingeben (Enter für Winget-Suche)...">
+            <input type="text" id="bundleAddSearchInput" value="${escapeHTML(searchQuery)}" placeholder="${escapeHTML(getSearchPlaceholder())}">
             <button type="button" class="btn btn-primary" data-editor-action="search-packages">🔎 Suchen</button>
           </div>
           <div class="bundle-search-results" id="bundleSearchResults">
@@ -455,28 +598,28 @@ export function renderBundleEditorModal({
 
     // Bind input listeners without inline attributes (strict CSP)
     const nameInput = modal.querySelector('#bundleNameInput');
-    if (nameInput) {
+    if (nameInput instanceof HTMLInputElement) {
       nameInput.oninput = () => {
         draftName = nameInput.value;
       };
     }
 
     const iconInput = modal.querySelector('#bundleIconInput');
-    if (iconInput) {
+    if (iconInput instanceof HTMLInputElement) {
       iconInput.oninput = () => {
         draftIcon = iconInput.value.trim() || DEFAULT_BUNDLE_ICON;
       };
     }
 
     const descInput = modal.querySelector('#bundleDescInput');
-    if (descInput) {
+    if (descInput instanceof HTMLTextAreaElement) {
       descInput.oninput = () => {
         draftDesc = descInput.value;
       };
     }
 
     const snapFilterInput = modal.querySelector('#bundleSnapshotFilter');
-    if (snapFilterInput) {
+    if (snapFilterInput instanceof HTMLInputElement) {
       snapFilterInput.oninput = () => {
         snapshotFilterText = snapFilterInput.value;
         const listEl = modal.querySelector('#bundleItemsList');
@@ -485,25 +628,52 @@ export function renderBundleEditorModal({
     }
 
     const addSearchInput = modal.querySelector('#bundleAddSearchInput');
-    if (addSearchInput) {
+    if (addSearchInput instanceof HTMLInputElement) {
       addSearchInput.oninput = () => {
         searchQuery = addSearchInput.value;
-        const resultsEl = modal.querySelector('#bundleSearchResults');
-        if (resultsEl) resultsEl.innerHTML = renderSearchResultsHtml();
+        const trimmed = searchQuery.trim();
+        clearPendingDebounce();
+
+        if (activeSource !== 'archive') {
+          if (trimmed.length >= 2) {
+            if (trimmed !== lastSearchedQuery) {
+              hasSearchedRemote = false;
+            }
+            updateSearchResultsDom();
+            searchDebounceTimer = setTimeout(() => {
+              runRemoteSearch(trimmed);
+            }, 450);
+          } else {
+            clearRemoteSearchState();
+            updateSearchResultsDom();
+          }
+          return;
+        }
+
+        updateSearchResultsDom();
       };
+
       addSearchInput.onkeydown = (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          runCombinedSearch();
+          if (activeSource === 'archive') {
+            updateSearchResultsDom();
+          } else {
+            runRemoteSearch(searchQuery, { explicit: true });
+          }
         }
       };
     }
 
     if (focusId) {
       const targetEl = modal.querySelector(`#${focusId}`);
-      if (targetEl && typeof targetEl.focus === 'function') {
+      if (targetEl instanceof HTMLElement) {
         targetEl.focus();
-        if (selectionStart !== null && typeof targetEl.setSelectionRange === 'function') {
+        if (
+          selectionStart !== null &&
+          selectionEnd !== null &&
+          (targetEl instanceof HTMLInputElement || targetEl instanceof HTMLTextAreaElement)
+        ) {
           try {
             targetEl.setSelectionRange(selectionStart, selectionEnd);
           } catch {
@@ -517,18 +687,23 @@ export function renderBundleEditorModal({
   overlay.hidden = false;
 
   modal.onchange = (e) => {
-    const snapChk = e.target.closest('[data-snap-check-key]');
-    if (snapChk) {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+
+    const snapChk = target.closest('[data-snap-check-key]');
+    if (snapChk instanceof HTMLInputElement) {
       const key = snapChk.dataset.snapCheckKey;
-      if (snapChk.checked) snapshotCheckedKeys.add(key);
-      else snapshotCheckedKeys.delete(key);
+      if (key) {
+        if (snapChk.checked) snapshotCheckedKeys.add(key);
+        else snapshotCheckedKeys.delete(key);
+      }
       render();
       return;
     }
 
-    const optChk = e.target.closest('[data-optional-index]');
-    if (optChk) {
-      const idx = parseInt(optChk.dataset.optionalIndex, 10);
+    const optChk = target.closest('[data-optional-index]');
+    if (optChk instanceof HTMLInputElement) {
+      const idx = parseInt(optChk.dataset.optionalIndex || '', 10);
       if (draftItems[idx]) {
         draftItems[idx] = { ...draftItems[idx], optional: optChk.checked };
       }
@@ -536,43 +711,44 @@ export function renderBundleEditorModal({
   };
 
   modal.onclick = async (e) => {
-    const iconPresetBtn = e.target.closest('[data-icon-preset]');
-    if (iconPresetBtn) {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+
+    const iconPresetBtn = target.closest('[data-icon-preset]');
+    if (iconPresetBtn instanceof HTMLElement) {
       draftIcon = iconPresetBtn.dataset.iconPreset || DEFAULT_BUNDLE_ICON;
       render();
       return;
     }
 
-    const sourceBtn = e.target.closest('[data-search-source]');
-    if (sourceBtn) {
-      const src = sourceBtn.dataset.searchSource;
-      if (searchSources.has(src)) searchSources.delete(src);
-      else searchSources.add(src);
-      render();
+    const sourceBtn = target.closest('[data-search-source]');
+    if (sourceBtn instanceof HTMLElement) {
+      const src = sourceBtn.dataset.searchSource || 'archive';
+      if (src !== activeSource) {
+        activeSource = src;
+        clearPendingDebounce();
+        render();
+        const trimmed = searchQuery.trim();
+        if (activeSource !== 'archive' && trimmed.length >= 2 && lastSearchedQuery !== trimmed) {
+          await runRemoteSearch(trimmed);
+        }
+      }
       return;
     }
 
-    const addBtn = e.target.closest('[data-editor-add-idx]');
-    if (addBtn) {
-      const idx = parseInt(addBtn.dataset.editorAddIdx, 10);
-      const combined = [
-        ...buildArchiveQuickMatches(),
-        ...(searchSources.has('winget')
-          ? remoteWingetResults.map((pkg) => ({
-              editorItem: toEditorItemFromProvider({ ...pkg, providerId: 'winget' }),
-            }))
-          : []),
-      ];
-      const chosen = combined[idx];
+    const addBtn = target.closest('[data-editor-add-idx]');
+    if (addBtn instanceof HTMLElement) {
+      const idx = parseInt(addBtn.dataset.editorAddIdx || '', 10);
+      const chosen = renderedSearchEntries[idx];
       if (chosen?.editorItem) {
         addEditorItem(chosen.editorItem);
       }
       return;
     }
 
-    const moveBtn = e.target.closest('[data-move-index]');
-    if (moveBtn) {
-      const idx = parseInt(moveBtn.dataset.moveIndex, 10);
+    const moveBtn = target.closest('[data-move-index]');
+    if (moveBtn instanceof HTMLElement) {
+      const idx = parseInt(moveBtn.dataset.moveIndex || '', 10);
       const dir = moveBtn.dataset.moveDir;
       const targetIdx = dir === 'up' ? idx - 1 : idx + 1;
       draftItems = moveBundleItem(draftItems, idx, targetIdx);
@@ -580,9 +756,9 @@ export function renderBundleEditorModal({
       return;
     }
 
-    const removeBtn = e.target.closest('[data-remove-index]');
-    if (removeBtn) {
-      const idx = parseInt(removeBtn.dataset.removeIndex, 10);
+    const removeBtn = target.closest('[data-remove-index]');
+    if (removeBtn instanceof HTMLElement) {
+      const idx = parseInt(removeBtn.dataset.removeIndex || '', 10);
       const removed = draftItems[idx];
       if (removed) {
         snapshotCheckedKeys.delete(getBundleItemKey(removed));
@@ -592,17 +768,22 @@ export function renderBundleEditorModal({
       return;
     }
 
-    const actionBtn = e.target.closest('[data-editor-action]');
-    if (!actionBtn) return;
+    const actionBtn = target.closest('[data-editor-action]');
+    if (!(actionBtn instanceof HTMLElement)) return;
     const action = actionBtn.dataset.editorAction;
 
     if (action === 'cancel') {
+      clearPendingDebounce();
       closeModal();
       return;
     }
 
     if (action === 'search-packages') {
-      await runCombinedSearch();
+      if (activeSource === 'archive') {
+        updateSearchResultsDom();
+      } else {
+        await runRemoteSearch(searchQuery, { explicit: true });
+      }
       return;
     }
 
@@ -640,7 +821,8 @@ export function renderBundleEditorModal({
       const finalName = draftName.trim();
       if (!finalName) {
         showToast('Bitte einen Bündel-Namen eingeben.', { type: 'warn' });
-        modal.querySelector('#bundleNameInput')?.focus();
+        const nameEl = modal.querySelector('#bundleNameInput');
+        if (nameEl instanceof HTMLElement) nameEl.focus();
         return;
       }
 
@@ -653,6 +835,7 @@ export function renderBundleEditorModal({
         return;
       }
 
+      clearPendingDebounce();
       isSaving = true;
       render();
 
@@ -681,9 +864,11 @@ export function renderBundleEditorModal({
 
   // Drag & Drop Sortierung der Paketliste
   modal.ondragstart = (e) => {
-    const row = e.target.closest('.bundle-item-row');
-    if (!row) return;
-    dragFromIndex = parseInt(row.dataset.itemIndex, 10);
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest('.bundle-item-row');
+    if (!(row instanceof HTMLElement)) return;
+    dragFromIndex = parseInt(row.dataset.itemIndex || '', 10);
     row.classList.add('is-dragging');
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
@@ -692,7 +877,9 @@ export function renderBundleEditorModal({
   };
 
   modal.ondragover = (e) => {
-    const row = e.target.closest('.bundle-item-row');
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest('.bundle-item-row');
     if (!row || dragFromIndex < 0) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
@@ -703,16 +890,20 @@ export function renderBundleEditorModal({
   };
 
   modal.ondragleave = (e) => {
-    const row = e.target.closest('.bundle-item-row');
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest('.bundle-item-row');
     if (!row) return;
     row.classList.remove('is-drag-over');
   };
 
   modal.ondrop = (e) => {
-    const row = e.target.closest('.bundle-item-row');
-    if (!row || dragFromIndex < 0) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest('.bundle-item-row');
+    if (!(row instanceof HTMLElement) || dragFromIndex < 0) return;
     e.preventDefault();
-    const toIndex = parseInt(row.dataset.itemIndex, 10);
+    const toIndex = parseInt(row.dataset.itemIndex || '', 10);
     row.classList.remove('is-drag-over');
     if (Number.isInteger(toIndex) && toIndex !== dragFromIndex) {
       draftItems = moveBundleItem(draftItems, dragFromIndex, toIndex);

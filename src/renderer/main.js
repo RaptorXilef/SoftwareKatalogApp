@@ -505,11 +505,23 @@ async function bootstrap() {
         showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error' });
       }
     },
+    onExportAllBundles: async () => {
+      const res = await window.electronAPI.exportAllBundles();
+      if (res?.success) {
+        showToast(`${res.count || 0} Bündel erfolgreich als JSON exportiert.`, { type: 'success' });
+      } else if (res?.error && !res.canceled) {
+        showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error' });
+      }
+    },
     onImportBundle: async () => {
       const res = await window.electronAPI.importBundle();
       if (res?.success) {
         await reloadUI();
-        showToast(`Bündel "${res.bundle?.name || 'Import'}" importiert.`, { type: 'success' });
+        const msg =
+          res.importedCount > 1
+            ? `${res.importedCount} Bündel erfolgreich importiert.`
+            : `Bündel "${res.bundle?.name || 'Import'}" importiert.`;
+        showToast(msg, { type: 'success' });
       } else if (res?.error && !res.canceled) {
         showToast(`Import fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
       }

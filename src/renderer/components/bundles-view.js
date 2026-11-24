@@ -29,7 +29,7 @@ function renderEmptyBundlesHtml(hasSearch) {
       <div class="bundles-empty-actions">
         <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
         <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
-        <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 JSON importieren</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Bündel importieren</button>
       </div>
     </div>
   `;
@@ -67,7 +67,7 @@ function renderBundleCardHtml(bundle) {
             <span class="bundle-card-counts">${summary.total} Paket(e) · ${archiveCount} Archiv · ${wingetCount} Winget</span>
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="Bündel als JSON exportieren">📤 Export</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="Bündel als JSON exportieren">📤 Exportieren</button>
       </div>
 
       ${bundle.description ? `<p class="bundle-card-desc">${escapeHTML(bundle.description)}</p>` : ''}
@@ -122,9 +122,10 @@ export function renderBundlesView() {
     return `${b.name} ${b.description} ${itemNames}`.toLowerCase().includes(q);
   });
 
-  const activeElId = document.activeElement?.id || '';
-  const selStart = document.activeElement?.selectionStart ?? null;
-  const selEnd = document.activeElement?.selectionEnd ?? null;
+  const activeEl = document.activeElement;
+  const activeElId = activeEl instanceof HTMLElement ? activeEl.id : '';
+  const selStart = activeEl instanceof HTMLInputElement ? activeEl.selectionStart : null;
+  const selEnd = activeEl instanceof HTMLInputElement ? activeEl.selectionEnd : null;
 
   const ipcNoticeHtml = state.bundlesIpcUnavailable
     ? `<div class="discover-notice">⚠️ Die Bündel-Funktion im Hauptprozess ist noch nicht aktiv (alte Electron-Instanz läuft noch). Bitte beende alle laufenden Electron-Fenster und starte <code>npm run dev</code> bzw. die App einmal neu.</div>`
@@ -135,12 +136,13 @@ export function renderBundlesView() {
       <div class="bundles-header-main">
         <div>
           <h2>📦 Paketbündel</h2>
-          <p class="muted">Zentral im Archiv gespeichert (<code>data/bundles.json</code>) – auf allen PCs direkt abgleichbar</p>
+          <p class="muted">Zentral im Archiv gespeichert (<code>data/bundles.json</code>) - auf allen PCs direkt abgleichbar</p>
         </div>
         <div class="bundles-header-actions">
           <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
           <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
-          <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Importieren</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Bündel importieren</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="export-all" ${state.bundles.length === 0 ? 'disabled' : ''}>📤 Alle Bündel exportieren</button>
         </div>
       </div>
 
@@ -164,29 +166,32 @@ export function renderBundlesView() {
 
   const searchInput = container.querySelector('#bundleSearchInput');
   const clearBtn = container.querySelector('#clearBundleSearchBtn');
-  if (searchInput) {
+  if (searchInput instanceof HTMLInputElement) {
     searchInput.oninput = () => {
       state.bundleSearchQuery = searchInput.value;
-      if (clearBtn) clearBtn.hidden = state.bundleSearchQuery.length === 0;
+      if (clearBtn instanceof HTMLElement) clearBtn.hidden = state.bundleSearchQuery.length === 0;
       renderBundlesView();
     };
   }
-  if (clearBtn) {
+  if (clearBtn instanceof HTMLElement) {
     clearBtn.onclick = () => {
       state.bundleSearchQuery = '';
       renderBundlesView();
-      container.querySelector('#bundleSearchInput')?.focus();
+      const inputEl = container.querySelector('#bundleSearchInput');
+      if (inputEl instanceof HTMLElement) inputEl.focus();
     };
   }
 
   if (activeElId === 'bundleSearchInput') {
     const refocused = container.querySelector('#bundleSearchInput');
-    refocused?.focus();
-    if (selStart !== null && typeof refocused?.setSelectionRange === 'function') {
-      try {
-        refocused.setSelectionRange(selStart, selEnd);
-      } catch {
-        // Ignorieren
+    if (refocused instanceof HTMLInputElement) {
+      refocused.focus();
+      if (selStart !== null && selEnd !== null) {
+        try {
+          refocused.setSelectionRange(selStart, selEnd);
+        } catch {
+          // Ignorieren
+        }
       }
     }
   }
@@ -198,8 +203,10 @@ export function initBundlesView(handlers) {
   if (!container) return;
 
   container.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-bundle-action]');
-    if (!btn) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const btn = target.closest('[data-bundle-action]');
+    if (!(btn instanceof HTMLElement)) return;
     const action = btn.dataset.bundleAction;
     const bundleId = btn.dataset.bundleId || '';
     const bundle = bundleId ? state.bundles.find((b) => b.id === bundleId) || null : null;
@@ -210,6 +217,8 @@ export function initBundlesView(handlers) {
       viewHandlers.onSnapshotFromPc?.();
     } else if (action === 'import') {
       viewHandlers.onImportBundle?.();
+    } else if (action === 'export-all') {
+      viewHandlers.onExportAllBundles?.();
     } else if (action === 'clear-search') {
       state.bundleSearchQuery = '';
       renderBundlesView();

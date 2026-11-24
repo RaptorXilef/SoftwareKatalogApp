@@ -2,16 +2,22 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildBundleDraftFromInstalled,
+  buildExportAllBundlesPayload,
   buildExportBundlePayload,
   evaluateBundleItemStatus,
   evaluateBundleStatus,
+  getBundleEditorArchiveCandidates,
   getBundleItemKey,
+  getKnownProviderPackages,
   matchesSelectedItemId,
+  mergeProviderEditorResults,
   moveBundleItem,
   normalizeBundle,
   planBundleExecution,
+  resolveImportedBundleId,
   sortBundleItems,
   validateImportBundlePayload,
+  validateImportBundlesPayload,
 } from '../src/shared/bundles-logic.js';
 
 describe('bundles-logic: Schema, Sortierung & Export/Import', () => {
@@ -409,6 +415,148 @@ describe('bundles-logic: 1-Klick-PC-Snapshot', () => {
         { order: 1, source: 'winget', name: 'Git' },
         { order: 2, source: 'archive', name: 'VLC Media Player' },
       ]
+    );
+  });
+});
+
+describe('bundles-logic: Bündel-Editor-Kandidaten (Archiv & Winget)', () => {
+  it('liefert ALLE sichtbaren Archiv-Programme ohne 20er-Limit und respektiert versteckte Kategorien', () => {
+    const catalog = Array.from({ length: 35 }, (_, idx) => ({
+      id: `app-${idx + 1}`,
+      name: `Programm ${String(idx + 1).padStart(2, '0')}`,
+      mainCategory: idx % 2 === 0 ? 'Tools' : 'Multimedia',
+      subCategories: [],
+      hiddenCategory: idx === 34 ? 'Privat' : '',
+      lastFiles: [`C:\\Archiv\\App${idx + 1}\\setup-1.0.${idx}.exe`],
+    }));
+
+    const allVisible = getBundleEditorArchiveCandidates(catalog);
+    assert.equal(allVisible.length, 34);
+    assert.equal(allVisible[0].providerId, 'archive');
+    assert.equal(allVisible[0].editorItem.source, 'archive');
+
+    const withHidden = getBundleEditorArchiveCandidates(catalog, { visibleHiddenCats: ['Privat'] });
+    assert.equal(withHidden.length, 35);
+
+    const filtered = getBundleEditorArchiveCandidates(catalog, { query: 'Programm 25' });
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].packageId, 'app-25');
+  });
+
+  it('ermittelt bekannte/installierte Winget-Pakete, dedupliziert und führt Remote-Treffer sauber zusammen', () => {
+    const packages = [
+      {
+        id: 'arch-vlc',
+        archiveItemId: 'arch-vlc',
+        name: 'VLC Media Player (Archiv)',
+        inArchive: true,
+        isInstalled: false,
+        packageManager: 'winget',
+        packageId: 'VideoLAN.VLC',
+        webVersion: '3.0.21',
+      },
+      {
+        id: 'winget:videolan.vlc',
+        name: 'VLC media player',
+        inArchive: false,
+        isInstalled: true,
+        installedVersion: '3.0.20',
+        packageManager: 'winget',
+        packageId: 'VideoLAN.VLC',
+        publisher: 'VideoLAN',
+      },
+      {
+        id: 'winget:git.git',
+        name: 'Git',
+        inArchive: false,
+        isInstalled: true,
+        installedVersion: '2.48.0',
+        packageManager: 'winget',
+        packageId: 'Git.Git',
+        publisher: 'The Git Development Community',
+      },
+      {
+        id: 'registry:legacy',
+        name: 'Legacy Tool',
+        inArchive: false,
+        isInstalled: true,
+        packageManager: null,
+        packageId: null,
+      },
+    ];
+
+    const known = getKnownProviderPackages(packages, { providerId: 'winget' });
+    assert.equal(known.length, 2);
+    assert.equal(known[0].packageId, 'Git.Git');
+    assert.equal(known[1].packageId, 'VideoLAN.VLC');
+    assert.equal(known[1].isInstalled, true);
+    assert.equal(known[1].inArchive, true);
+
+    const knownFiltered = getKnownProviderPackages(packages, { providerId: 'winget', query: 'videolan' });
+    assert.equal(knownFiltered.length, 1);
+    assert.equal(knownFiltered[0].packageId, 'VideoLAN.VLC');
+
+    const merged = mergeProviderEditorResults({
+      knownPackages: knownFiltered,
+      remoteResults: [
+        { packageId: 'VideoLAN.VLC', name: 'VLC media player', version: '3.0.24' },
+        { packageId: 'VideoLAN.VLC.Nightly', name: 'VLC Nightly', version: '4.0.0' },
+      ],
+      providerId: 'winget',
+    });
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].isInstalled, true);
+    assert.equal(merged[0].version, '3.0.24');
+    assert.equal(merged[1].packageId, 'VideoLAN.VLC.Nightly');
+    assert.equal(merged[1].isInstalled, false);
+  });
+
+  it('validiert Einzel- und Mehrfach-Exporte und löst ID-Kollisionen beim Import auf', () => {
+    const b1 = normalizeBundle({
+      id: 'b-1',
+      name: 'Basis',
+      items: [{ source: 'winget', packageId: '7zip.7zip', name: '7-Zip' }],
+    });
+    const b2 = normalizeBundle({
+      id: 'b-2',
+      name: 'Medien',
+      items: [{ source: 'archive', refId: 'vlc', name: 'VLC' }],
+    });
+
+    const multiExport = buildExportAllBundlesPayload([b1, b2]);
+    assert.equal(multiExport.format, 'software-katalog-bundles');
+    assert.equal(multiExport.bundles.length, 2);
+
+    const parsedMulti = validateImportBundlesPayload(multiExport);
+    assert.equal(parsedMulti.valid, true);
+    assert.equal(parsedMulti.bundles.length, 2);
+
+    const parsedRawArr = validateImportBundlesPayload([
+      { name: 'Direkt', items: [{ source: 'winget', packageId: 'Git.Git', name: 'Git' }] },
+    ]);
+    assert.equal(parsedRawArr.valid, true);
+    assert.equal(parsedRawArr.bundles.length, 1);
+
+    const parsedSingle = validateImportBundlesPayload(buildExportBundlePayload(b1));
+    assert.equal(parsedSingle.valid, true);
+    assert.equal(parsedSingle.bundles.length, 1);
+
+    assert.equal(validateImportBundlesPayload([]).valid, false);
+    assert.equal(validateImportBundlesPayload({ format: 'software-katalog-bundles', bundles: [] }).valid, false);
+
+    let seq = 0;
+    const existing = new Set(['b-1', 'new-1']);
+    assert.equal(
+      resolveImportedBundleId('b-free', existing, () => `new-${++seq}`),
+      'b-free'
+    );
+    assert.equal(
+      resolveImportedBundleId('b-1', existing, () => `new-${++seq}`),
+      'new-2'
+    );
+    assert.equal(
+      resolveImportedBundleId('', existing, () => `new-${++seq}`),
+      'new-3'
     );
   });
 });

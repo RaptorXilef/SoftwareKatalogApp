@@ -203,6 +203,21 @@ describe('parseWingetSearchOutput', () => {
       source: 'winget',
     });
   });
+
+  it('liefert bei limit = 0 alle gefundenen Treffer ohne Begrenzung auf 25', () => {
+    const rows = Array.from(
+      { length: 32 },
+      (_, idx) => `App ${idx + 1}                             Vendor.App${idx + 1}         1.0.${idx}  winget`
+    );
+    const out = [
+      'Name                                ID                     Version Quelle',
+      '-------------------------------------------------------------------------',
+      ...rows,
+    ].join('\n');
+
+    assert.equal(parseWingetSearchOutput(out).length, 25);
+    assert.equal(parseWingetSearchOutput(out, 0).length, 32);
+  });
 });
 
 describe('parseWingetUpgradeOutput', () => {

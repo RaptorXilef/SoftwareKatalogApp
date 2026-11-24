@@ -320,9 +320,10 @@ export function parseWingetSearchOutput(stdout, limit = 25) {
 
   const headerLine = sepIdx > 0 ? lines[sepIdx - 1] : '';
   const offsets = getColumnOffsets(headerLine);
+  const maxResults = Number.isFinite(limit) && limit > 0 ? limit : Number.POSITIVE_INFINITY;
   const results = [];
 
-  for (let i = sepIdx + 1; i < lines.length && results.length < limit; i++) {
+  for (let i = sepIdx + 1; i < lines.length && results.length < maxResults; i++) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed || /^</.test(trimmed)) continue;

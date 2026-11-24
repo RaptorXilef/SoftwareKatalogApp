@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { dialog } from 'electron';
 import {
+  buildExportAllBundlesPayload,
   buildExportBundlePayload,
   evaluateBundleStatus,
   matchesSelectedItemId,
   normalizeBundle,
   planBundleExecution,
-  validateImportBundlePayload,
+  resolveImportedBundleId,
+  validateImportBundlesPayload,
 } from '../shared/bundles-logic.js';
 import { buildUnifiedPackages, canDownloadOnline } from '../shared/unified-packages.js';
 import { extractVersion, sanitizeFileName } from '../shared/version.js';
@@ -183,6 +185,30 @@ export async function exportBundle(bundleId) {
   }
 }
 
+export async function exportAllBundles() {
+  try {
+    const bundles = readBundlesFromDisk();
+    if (bundles.length === 0) {
+      return { success: false, error: 'Es sind keine Bündel zum Exportieren vorhanden.' };
+    }
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Alle Bündel als JSON exportieren',
+      defaultPath: 'SoftwareKatalog_Alle_Buendel.json',
+      filters: [{ name: 'Software-Katalog Bündel (JSON)', extensions: ['json'] }],
+    });
+    if (canceled || !filePath) {
+      return { success: false, canceled: true };
+    }
+
+    const payload = buildExportAllBundlesPayload(bundles);
+    await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    return { success: true, filePath, count: bundles.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 export async function importBundle() {
   try {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -195,28 +221,47 @@ export async function importBundle() {
     }
 
     const rawText = await fs.promises.readFile(filePaths[0], 'utf-8');
-    const parsed = JSON.parse(rawText);
-    const validation = validateImportBundlePayload(parsed);
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return { success: false, error: 'Ungültige JSON-Datei.' };
+    }
+
+    const validation = validateImportBundlesPayload(parsed);
     if (!validation.valid) {
       return { success: false, error: validation.error };
     }
 
     const now = Date.now();
-    const newId = crypto.randomUUID();
-    const imported = normalizeBundle(
-      {
-        ...validation.bundle,
-        id: newId,
-        createdAt: now,
-        updatedAt: now,
-      },
-      { now, fallbackId: newId }
-    );
-
     const bundles = readBundlesFromDisk();
-    bundles.push(imported);
+    const existingIds = new Set(bundles.map((b) => b.id));
+    const imported = [];
+
+    for (const candidate of validation.bundles) {
+      const resolvedId = resolveImportedBundleId(candidate.id, existingIds, () => crypto.randomUUID());
+      existingIds.add(resolvedId);
+      const normalized = normalizeBundle(
+        {
+          ...candidate,
+          id: resolvedId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        { now, fallbackId: resolvedId }
+      );
+      bundles.push(normalized);
+      imported.push(normalized);
+    }
+
     writeBundlesAtomic(bundles);
-    return { success: true, bundle: imported, bundles };
+    return {
+      success: true,
+      bundle: imported[0],
+      importedBundles: imported,
+      importedCount: imported.length,
+      bundles,
+    };
   } catch (e) {
     return { success: false, error: e.message };
   }

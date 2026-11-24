@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteBundle: (bundleId) => ipcRenderer.invoke('bundles-delete', bundleId),
   duplicateBundle: (bundleId) => ipcRenderer.invoke('bundles-duplicate', bundleId),
   exportBundle: (bundleId) => ipcRenderer.invoke('bundles-export', bundleId),
+  exportAllBundles: () => ipcRenderer.invoke('bundles-export-all'),
   importBundle: () => ipcRenderer.invoke('bundles-import'),
   runBundleInstall: (bundleId, selectedItemIds, opts) =>
     ipcRenderer.invoke('bundles-run-install', bundleId, selectedItemIds, opts),
@@ -84,7 +85,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
   checkSingleWeb: (payload) => ipcRenderer.invoke('check-single-web', payload),
-  searchWinget: (query) => ipcRenderer.invoke('search-winget', query),
+  searchWinget: (query, opts) => ipcRenderer.invoke('search-winget', query, opts),
   downloadWebUpdate: (item, opts) => ipcRenderer.invoke('download-web-update', item, opts),
   openVisualScraper: (url) => ipcRenderer.invoke('open-visual-scraper', url),
   openVisualLinkPicker: (url, knownVer) => ipcRenderer.invoke('open-visual-link-picker', url, knownVer),

@@ -80,8 +80,8 @@ function getEffectiveWingetId(item) {
   return String(item.wingetId || '').trim();
 }
 
-export async function searchWinget(query) {
-  return wingetProvider.search(query);
+export async function searchWinget(query, opts = {}) {
+  return wingetProvider.search(query, opts);
 }
 
 export async function fetchWingetInfo(wingetId, signal = null) {

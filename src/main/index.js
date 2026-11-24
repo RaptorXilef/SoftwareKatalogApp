@@ -9,6 +9,7 @@ import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-update
 import {
   deleteBundle,
   duplicateBundle,
+  exportAllBundles,
   exportBundle,
   importBundle,
   loadBundles,
@@ -116,36 +117,61 @@ function createWindow() {
   });
 }
 
-function registerIpcHandlers() {
-  // Navigation & System
-  ipcMain.on('open-path', async (_e, folderPath) => {
-    const err = await shell.openPath(folderPath);
-    if (err) console.error(`Fehler beim Öffnen: ${folderPath}`, err);
-  });
+function handleIpc(channel, handler) {
+  ipcMain.removeHandler(channel);
+  ipcMain.handle(channel, handler);
+}
 
-  ipcMain.on('open-url', (_e, url) => {
-    try {
-      const parsed = new URL(url);
-      if (['http:', 'https:'].includes(parsed.protocol)) {
-        shell.openExternal(url);
+function registerBundleIpcHandlers() {
+  // Paketbündel (zentral in data/bundles.json)
+  handleIpc('bundles-load', () => loadBundles());
+  handleIpc('bundles-save', (_e, bundle) => saveBundle(bundle));
+  handleIpc('bundles-delete', (_e, bundleId) => deleteBundle(bundleId));
+  handleIpc('bundles-duplicate', (_e, bundleId) => duplicateBundle(bundleId));
+  handleIpc('bundles-export', (_e, bundleId) => exportBundle(bundleId));
+  handleIpc('bundles-export-all', () => exportAllBundles());
+  handleIpc('bundles-import', () => importBundle());
+  handleIpc('bundles-run-install', (_e, bundleId, selectedItemIds, opts) =>
+    runBundleInstall(bundleId, selectedItemIds, opts || {})
+  );
+}
+
+let ipcRegistered = false;
+
+function registerIpcHandlers() {
+  if (!ipcRegistered) {
+    ipcRegistered = true;
+
+    // Navigation & System
+    ipcMain.on('open-path', async (_e, folderPath) => {
+      const err = await shell.openPath(folderPath);
+      if (err) console.error(`Fehler beim Öffnen: ${folderPath}`, err);
+    });
+
+    ipcMain.on('open-url', (_e, url) => {
+      try {
+        const parsed = new URL(url);
+        if (['http:', 'https:'].includes(parsed.protocol)) {
+          shell.openExternal(url);
+        }
+      } catch {
+        console.warn('Ungültige URL blockiert:', url);
       }
-    } catch {
-      console.warn('Ungültige URL blockiert:', url);
-    }
-  });
+    });
+  }
 
   // Jobs
-  ipcMain.handle('get-jobs', () => getJobsSnapshot());
-  ipcMain.handle('cancel-job', (_e, jobId) => cancelJob(jobId));
-  ipcMain.handle('dismiss-job', (_e, jobId) => dismissJob(jobId));
+  handleIpc('get-jobs', () => getJobsSnapshot());
+  handleIpc('cancel-job', (_e, jobId) => cancelJob(jobId));
+  handleIpc('dismiss-job', (_e, jobId) => dismissJob(jobId));
 
   // Katalog & Scans
-  ipcMain.handle('load-catalog', () => loadCatalogWithLiveStatus());
-  ipcMain.handle('run-scan', (_e, mode) => runArchiveScan(mode));
-  ipcMain.handle('scan-single', (_e, folderPath) => scanSingleFolder(folderPath));
-  ipcMain.handle('save-meta-json', (_e, targetPath, data) => saveMetaJson(targetPath, data));
+  handleIpc('load-catalog', () => loadCatalogWithLiveStatus());
+  handleIpc('run-scan', (_e, mode) => runArchiveScan(mode));
+  handleIpc('scan-single', (_e, folderPath) => scanSingleFolder(folderPath));
+  handleIpc('save-meta-json', (_e, targetPath, data) => saveMetaJson(targetPath, data));
 
-  ipcMain.handle('add-software', async () => {
+  handleIpc('add-software', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Ordner der neuen Software auswählen',
       properties: ['openDirectory'],
@@ -153,72 +179,61 @@ function registerIpcHandlers() {
     if (canceled || filePaths.length === 0) return { success: false, canceled: true };
     return createSoftwareEntry(filePaths[0]);
   });
-  ipcMain.handle('add-software-from-path', (_e, targetDir) => createSoftwareEntry(targetDir));
+  handleIpc('add-software-from-path', (_e, targetDir) => createSoftwareEntry(targetDir));
 
   // Medien
-  ipcMain.handle('add-media', (_e, targetPath, filePaths) => addMediaFiles(targetPath, filePaths));
-  ipcMain.handle('add-icon', (_e, targetPath, filePath) => addIconFile(targetPath, filePath));
-  ipcMain.handle('delete-media', (_e, targetPath, mediaPath) => deleteMediaFile(targetPath, mediaPath));
-  ipcMain.handle('extract-exe-icon', (_e, exePath, targetDir) => extractExeIcon(exePath, targetDir));
+  handleIpc('add-media', (_e, targetPath, filePaths) => addMediaFiles(targetPath, filePaths));
+  handleIpc('add-icon', (_e, targetPath, filePath) => addIconFile(targetPath, filePath));
+  handleIpc('delete-media', (_e, targetPath, mediaPath) => deleteMediaFile(targetPath, mediaPath));
+  handleIpc('extract-exe-icon', (_e, exePath, targetDir) => extractExeIcon(exePath, targetDir));
 
   // Lokale PC-Tools & Installation
-  ipcMain.handle('scan-local-versions', (_e, opts) => scanLocalVersions(opts || {}));
-  ipcMain.handle('scan-installed-software', (_e, opts) => scanInstalledSoftware(opts || {}));
-  ipcMain.handle('extract-cached-app-icon', (_e, payload) => extractCachedAppIcon(payload || {}));
-  ipcMain.handle('uninstall-software', (_e, payload) => uninstallSoftware(payload || {}));
-  ipcMain.handle('auto-detect-path', (_e, names) => autoDetectPath(names));
-  ipcMain.handle('auto-detect-all', () => autoDetectAllMissingPaths(loadCatalogWithLiveStatus()));
-  ipcMain.handle('get-installed-apps', () => getInstalledApps());
-  ipcMain.handle('detect-installer', (_e, payload) => detectInstallerFile(payload?.filePath, payload || {}));
-  ipcMain.handle('record-inno-inf', (_e, payload) => recordInnoInfFile(payload || {}));
-  ipcMain.handle('execute-installer', (_e, payload) => executeAndVerifyInstaller(payload));
+  handleIpc('scan-local-versions', (_e, opts) => scanLocalVersions(opts || {}));
+  handleIpc('scan-installed-software', (_e, opts) => scanInstalledSoftware(opts || {}));
+  handleIpc('extract-cached-app-icon', (_e, payload) => extractCachedAppIcon(payload || {}));
+  handleIpc('uninstall-software', (_e, payload) => uninstallSoftware(payload || {}));
+  handleIpc('auto-detect-path', (_e, names) => autoDetectPath(names));
+  handleIpc('auto-detect-all', () => autoDetectAllMissingPaths(loadCatalogWithLiveStatus()));
+  handleIpc('get-installed-apps', () => getInstalledApps());
+  handleIpc('detect-installer', (_e, payload) => detectInstallerFile(payload?.filePath, payload || {}));
+  handleIpc('record-inno-inf', (_e, payload) => recordInnoInfFile(payload || {}));
+  handleIpc('execute-installer', (_e, payload) => executeAndVerifyInstaller(payload));
 
   // Paket-Provider (Registry, Suche, Details, Updates, Install/Uninstall)
-  ipcMain.handle('providers-list', () => listProvidersInfo());
-  ipcMain.handle('providers-set-enabled', (_e, id, enabled) => setProviderEnabled(id, Boolean(enabled)));
-  ipcMain.handle('providers-check-availability', (_e, id) => checkProviderAvailability(id));
-  ipcMain.handle('providers-search', (_e, query, opts) => searchAcrossProviders(query, opts || {}));
-  ipcMain.handle('providers-show', (_e, providerId, packageId, opts) => showPackage(providerId, packageId, opts || {}));
-  ipcMain.handle('providers-list-upgrades', (_e, opts) => listUpgradesAcrossProviders(opts || {}));
-  ipcMain.handle('providers-install', (_e, providerId, packageId, opts) =>
+  handleIpc('providers-list', () => listProvidersInfo());
+  handleIpc('providers-set-enabled', (_e, id, enabled) => setProviderEnabled(id, Boolean(enabled)));
+  handleIpc('providers-check-availability', (_e, id) => checkProviderAvailability(id));
+  handleIpc('providers-search', (_e, query, opts) => searchAcrossProviders(query, opts || {}));
+  handleIpc('providers-show', (_e, providerId, packageId, opts) => showPackage(providerId, packageId, opts || {}));
+  handleIpc('providers-list-upgrades', (_e, opts) => listUpgradesAcrossProviders(opts || {}));
+  handleIpc('providers-install', (_e, providerId, packageId, opts) =>
     installPackage(providerId, packageId, opts || {})
   );
-  ipcMain.handle('providers-uninstall', (_e, providerId, packageId, opts) =>
+  handleIpc('providers-uninstall', (_e, providerId, packageId, opts) =>
     uninstallPackage(providerId, packageId, opts || {})
   );
-  ipcMain.handle('providers-cache-stats', () => getProviderCacheStats());
-  ipcMain.handle('providers-cache-clear', () => clearProviderCache());
+  handleIpc('providers-cache-stats', () => getProviderCacheStats());
+  handleIpc('providers-cache-clear', () => clearProviderCache());
 
   // Archiv-Linker (Aufnehmen & Verknüpfen generischer Pakete im Archiv)
-  ipcMain.handle('archive-check-collision', (_e, targetDir) => checkArchiveTargetCollision(targetDir));
-  ipcMain.handle('archive-find-link', (_e, packageManager, packageId) =>
-    findExistingArchiveLink(packageManager, packageId)
-  );
-  ipcMain.handle('archive-link-package', (_e, payload) => linkPackageToArchive(payload || {}));
+  handleIpc('archive-check-collision', (_e, targetDir) => checkArchiveTargetCollision(targetDir));
+  handleIpc('archive-find-link', (_e, packageManager, packageId) => findExistingArchiveLink(packageManager, packageId));
+  handleIpc('archive-link-package', (_e, payload) => linkPackageToArchive(payload || {}));
 
   // Schritt D Power-Werkzeuge (Winget-Matcher, Massenaktionen, Manueller Archiv-Aufräumer)
-  ipcMain.handle('winget-matcher-scan', (_e, opts) => runWingetMatcherScan(opts || {}));
-  ipcMain.handle('winget-matcher-apply', (_e, assignments) => applyWingetMatches(assignments || []));
-  ipcMain.handle('batch-download-archive-updates', (_e, itemIds) => batchDownloadArchiveUpdates(itemIds));
-  ipcMain.handle('batch-update-packages', (_e, tasks, opts) => batchUpdatePackages(tasks || [], opts || {}));
-  ipcMain.handle('archive-cleanup-preview', (_e, opts) => previewArchiveCleanup(opts || {}));
-  ipcMain.handle('archive-cleanup-set-keep', (_e, itemPath, keepAllVersions) =>
+  handleIpc('winget-matcher-scan', (_e, opts) => runWingetMatcherScan(opts || {}));
+  handleIpc('winget-matcher-apply', (_e, assignments) => applyWingetMatches(assignments || []));
+  handleIpc('batch-download-archive-updates', (_e, itemIds) => batchDownloadArchiveUpdates(itemIds));
+  handleIpc('batch-update-packages', (_e, tasks, opts) => batchUpdatePackages(tasks || [], opts || {}));
+  handleIpc('archive-cleanup-preview', (_e, opts) => previewArchiveCleanup(opts || {}));
+  handleIpc('archive-cleanup-set-keep', (_e, itemPath, keepAllVersions) =>
     setKeepAllVersions(itemPath, keepAllVersions)
   );
-  ipcMain.handle('archive-cleanup-execute', (_e, opts) => executeArchiveCleanup(opts || {}));
+  handleIpc('archive-cleanup-execute', (_e, opts) => executeArchiveCleanup(opts || {}));
 
-  // Paketbündel (zentral in data/bundles.json)
-  ipcMain.handle('bundles-load', () => loadBundles());
-  ipcMain.handle('bundles-save', (_e, bundle) => saveBundle(bundle));
-  ipcMain.handle('bundles-delete', (_e, bundleId) => deleteBundle(bundleId));
-  ipcMain.handle('bundles-duplicate', (_e, bundleId) => duplicateBundle(bundleId));
-  ipcMain.handle('bundles-export', (_e, bundleId) => exportBundle(bundleId));
-  ipcMain.handle('bundles-import', () => importBundle());
-  ipcMain.handle('bundles-run-install', (_e, bundleId, selectedItemIds, opts) =>
-    runBundleInstall(bundleId, selectedItemIds, opts || {})
-  );
+  registerBundleIpcHandlers();
 
-  ipcMain.handle('copy-files-to-pc', async (_e, sourceFiles) => {
+  handleIpc('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Speicherort auf diesem PC auswählen',
       properties: ['openDirectory'],
@@ -235,20 +250,20 @@ function registerIpcHandlers() {
   });
 
   // Online-Updates (GitHub, Winget, Web-Scraper, Downloads)
-  ipcMain.handle('check-web-versions', () => checkAllWebVersions());
-  ipcMain.handle('check-single-web', (_e, payload) => checkSingleWebSource(payload));
-  ipcMain.handle('search-winget', (_e, query) => searchWinget(query));
-  ipcMain.handle('download-web-update', (_e, item, opts) => downloadWebUpdate(item, opts));
-  ipcMain.handle('open-visual-scraper', (_e, url) => openVisualScraper(url));
-  ipcMain.handle('open-visual-link-picker', (_e, url, knownVer) => openVisualLinkPicker(url, knownVer));
+  handleIpc('check-web-versions', () => checkAllWebVersions());
+  handleIpc('check-single-web', (_e, payload) => checkSingleWebSource(payload));
+  handleIpc('search-winget', (_e, query, opts) => searchWinget(query, opts || {}));
+  handleIpc('download-web-update', (_e, item, opts) => downloadWebUpdate(item, opts));
+  handleIpc('open-visual-scraper', (_e, url) => openVisualScraper(url));
+  handleIpc('open-visual-link-picker', (_e, url, knownVer) => openVisualLinkPicker(url, knownVer));
 
-  ipcMain.handle('fetch-software-metadata', (_e, payload) => fetchSoftwareMetadata(payload));
-  ipcMain.handle('fetch-changelog', (_e, item) => fetchChangelog(item));
+  handleIpc('fetch-software-metadata', (_e, payload) => fetchSoftwareMetadata(payload));
+  handleIpc('fetch-changelog', (_e, item) => fetchChangelog(item));
 
   // Einstellungen, Backup & Reset
-  ipcMain.handle('get-app-info', () => ({ version: app.getVersion() }));
-  ipcMain.handle('get-settings', () => getConfig());
-  ipcMain.handle('save-settings', (_e, settings) => {
+  handleIpc('get-app-info', () => ({ version: app.getVersion() }));
+  handleIpc('get-settings', () => getConfig());
+  handleIpc('save-settings', (_e, settings) => {
     try {
       saveConfig(settings);
       return { success: true };
@@ -256,7 +271,7 @@ function registerIpcHandlers() {
       return { success: false, error: e.message };
     }
   });
-  ipcMain.handle('select-dir', async (_e, opts = {}) => {
+  handleIpc('select-dir', async (_e, opts = {}) => {
     const defaultPath = opts?.defaultToArchive ? getConfig().absTargetPath : opts?.defaultPath || undefined;
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: opts?.title || 'Ordner auswählen',
@@ -265,7 +280,7 @@ function registerIpcHandlers() {
     });
     return canceled ? null : filePaths[0];
   });
-  ipcMain.handle('select-file', async (_e, filters, returnAbsolute = false) => {
+  handleIpc('select-file', async (_e, filters, returnAbsolute = false) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'Datei auswählen',
       properties: ['openFile'],
@@ -275,22 +290,24 @@ function registerIpcHandlers() {
     return returnAbsolute ? filePaths[0] : path.relative(getAppFolder(), filePaths[0]);
   });
 
-  ipcMain.handle('reset-paths', (_e, type) => resetAllPaths(type));
-  ipcMain.handle('reset-local-versions', () => {
+  handleIpc('reset-paths', (_e, type) => resetAllPaths(type));
+  handleIpc('reset-local-versions', () => {
     saveConfig({ installedVersions: {} });
     return { success: true };
   });
-  ipcMain.handle('create-backup', () => createBackup());
-  ipcMain.handle('restore-backup', () => restoreBackup());
+  handleIpc('create-backup', () => createBackup());
+  handleIpc('restore-backup', () => restoreBackup());
 
   // App Self-Update
-  ipcMain.handle('check-app-update', () => checkAppUpdate());
-  ipcMain.handle('install-app-update', (_e, url, isPortable) => downloadAndInstallAppUpdate(url, isPortable));
+  handleIpc('check-app-update', () => checkAppUpdate());
+  handleIpc('install-app-update', (_e, url, isPortable) => downloadAndInstallAppUpdate(url, isPortable));
 }
 
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  registerIpcHandlers();
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
@@ -299,8 +316,16 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    initDefaultProviders();
-    setupMediaProtocolHandler();
+    try {
+      initDefaultProviders();
+    } catch (err) {
+      console.error('Fehler beim Initialisieren der Paket-Provider:', err);
+    }
+    try {
+      setupMediaProtocolHandler();
+    } catch (err) {
+      console.error('Fehler beim Registrieren des catalog-media-Protokolls:', err);
+    }
     registerIpcHandlers();
     createWindow();
   });

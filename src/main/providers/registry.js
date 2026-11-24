@@ -136,6 +136,7 @@ export async function searchAcrossProviders(query, { providerIds = null, limit =
         providerName: provider.name,
         success: Boolean(res?.success),
         results: Array.isArray(res?.results) ? res.results : [],
+        hint: res?.hint || '',
         error: res?.error || null,
       };
     })

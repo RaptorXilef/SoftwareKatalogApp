@@ -1,6 +1,7 @@
 import { detectAdwareSignals, normalizeInstallMode, sanitizeSilentArgs } from './installer-logic.js';
-import { canDownloadOnline, getBaseName, getPackageStatus } from './unified-packages.js';
-import { compareVersions } from './version.js';
+import { scoreCatalogItem } from './search.js';
+import { canDownloadOnline, getBaseName, getPackageStatus, isPackageVisible } from './unified-packages.js';
+import { compareVersions, extractVersion } from './version.js';
 
 export const BUNDLE_SOURCES = Object.freeze(['archive', 'winget']);
 export const DEFAULT_BUNDLE_ICON = '📦';
@@ -183,6 +184,18 @@ export function buildExportBundlePayload(bundle) {
   };
 }
 
+/**
+ * Erstellt das Export-JSON-Objekt für alle Bündel.
+ */
+export function buildExportAllBundlesPayload(bundles = []) {
+  return {
+    format: 'software-katalog-bundles',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    bundles: (Array.isArray(bundles) ? bundles : []).map((b) => normalizeBundle(b)),
+  };
+}
+
 export function validateImportBundlePayload(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { valid: false, error: 'Ungültiges JSON-Format: Bündel-Objekt erwartet.' };
@@ -215,6 +228,255 @@ export function validateImportBundlePayload(raw) {
       items: normalizedItems,
     }),
   };
+}
+
+/**
+ * Validiert sowohl Einzel- als auch Mehrfach-Bündel-Exporte beim JSON-Import.
+ */
+export function validateImportBundlesPayload(raw) {
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) {
+      return { valid: false, error: 'Die JSON-Datei enthält keine Bündel.' };
+    }
+    const bundles = [];
+    for (let i = 0; i < raw.length; i++) {
+      const check = validateImportBundlePayload(raw[i]);
+      if (!check.valid) {
+        return { valid: false, error: `Bündel #${i + 1}: ${check.error}` };
+      }
+      bundles.push(check.bundle);
+    }
+    return { valid: true, bundles };
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return { valid: false, error: 'Ungültiges JSON-Format: Bündel-Objekt erwartet.' };
+  }
+
+  if (
+    raw.format !== undefined &&
+    raw.format !== 'software-katalog-bundle' &&
+    raw.format !== 'software-katalog-bundles'
+  ) {
+    return { valid: false, error: 'Unbekanntes Bündel-Exportformat.' };
+  }
+
+  if (raw.format === 'software-katalog-bundles' || Array.isArray(raw.bundles)) {
+    if (!Array.isArray(raw.bundles) || raw.bundles.length === 0) {
+      return { valid: false, error: 'Die JSON-Datei enthält keine gültige Bündel-Liste.' };
+    }
+    const bundles = [];
+    for (let i = 0; i < raw.bundles.length; i++) {
+      const check = validateImportBundlePayload(raw.bundles[i]);
+      if (!check.valid) {
+        return { valid: false, error: `Bündel #${i + 1}: ${check.error}` };
+      }
+      bundles.push(check.bundle);
+    }
+    return { valid: true, bundles };
+  }
+
+  const single = validateImportBundlePayload(raw);
+  if (!single.valid) {
+    return { valid: false, error: single.error };
+  }
+  return { valid: true, bundles: [single.bundle] };
+}
+
+/**
+ * Vergibt beim Import eine kollisionsfreie Bündel-ID.
+ */
+export function resolveImportedBundleId(importedId, existingIds, generateId) {
+  const used = existingIds instanceof Set ? existingIds : new Set(existingIds || []);
+  const cleanId = String(importedId || '').trim();
+  if (cleanId && !used.has(cleanId)) {
+    return cleanId;
+  }
+
+  let candidate = String(generateId() || '').trim();
+  while (!candidate || used.has(candidate)) {
+    candidate = String(generateId() || '').trim();
+  }
+  return candidate;
+}
+
+/**
+ * Liefert alle sichtbaren Archiv-Programme für den Bündel-Editor (ohne 20er-Limit).
+ */
+export function getBundleEditorArchiveCandidates(catalog = [], { query = '', visibleHiddenCats = [] } = {}) {
+  const q = String(query || '').trim();
+  const scored = [];
+
+  for (const item of catalog || []) {
+    if (!item || !isPackageVisible(item, visibleHiddenCats)) continue;
+    const res = scoreCatalogItem(item, q);
+    if (res.matched) {
+      scored.push({ score: res.score, item });
+    }
+  }
+
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      String(a.item.name || '').localeCompare(String(b.item.name || ''), 'de', { sensitivity: 'base' })
+  );
+
+  return scored.map(({ item }) => {
+    const linkedPkgId = String(item.packageId || item.wingetId || '').trim();
+    const archiveVer = item.lastFiles?.[0] ? extractVersion(getBaseName(item.lastFiles[0])) : '';
+    return {
+      providerId: 'archive',
+      packageId: item.id,
+      linkedPackageId: linkedPkgId,
+      name: item.name,
+      version: archiveVer || item.webVersion || '',
+      isInstalled: Boolean(item.isInstalled),
+      inArchive: true,
+      shortDescription: item.mainCategory || '',
+      editorItem: {
+        source: 'archive',
+        refId: item.id,
+        packageId: linkedPkgId,
+        name: item.name,
+        optional: false,
+      },
+    };
+  });
+}
+
+/**
+ * Liefert bekannte & installierte Pakete eines Paketmanagers (z. B. Winget) zur Sofortauswahl.
+ */
+export function getKnownProviderPackages(packages = [], { providerId = 'winget', query = '' } = {}) {
+  const targetPm = String(providerId || 'winget')
+    .trim()
+    .toLowerCase();
+  const byPkgId = new Map();
+
+  for (const pkg of packages || []) {
+    if (!pkg) continue;
+    const pkgPm = String(pkg.packageManager || (pkg.wingetId ? 'winget' : ''))
+      .trim()
+      .toLowerCase();
+    const pkgId = String(pkg.packageId || (targetPm === 'winget' ? pkg.wingetId : '') || '').trim();
+    if (!pkgId || pkgPm !== targetPm) continue;
+
+    const key = pkgId.toLowerCase();
+    const existing = byPkgId.get(key);
+    if (!existing) {
+      byPkgId.set(key, {
+        packageId: pkgId,
+        name: String(pkg.name || pkgId).trim(),
+        version: pkg.installedVersion || pkg.webVersion || '',
+        isInstalled: Boolean(pkg.isInstalled),
+        inArchive: Boolean(pkg.inArchive),
+        publisher: String(pkg.publisher || '').trim(),
+      });
+    } else {
+      const preferNew = Boolean(pkg.isInstalled) && !existing.isInstalled;
+      byPkgId.set(key, {
+        packageId: preferNew ? pkgId : existing.packageId,
+        name: preferNew ? String(pkg.name || pkgId).trim() : existing.name,
+        version: pkg.installedVersion || existing.version || pkg.webVersion || '',
+        isInstalled: existing.isInstalled || Boolean(pkg.isInstalled),
+        inArchive: existing.inArchive || Boolean(pkg.inArchive),
+        publisher: existing.publisher || String(pkg.publisher || '').trim(),
+      });
+    }
+  }
+
+  const queryWords = String(query || '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const filtered = [...byPkgId.values()].filter((entry) => {
+    if (queryWords.length === 0) return true;
+    const hay = `${entry.name} ${entry.packageId} ${entry.publisher}`.toLowerCase();
+    return queryWords.every((w) => hay.includes(w));
+  });
+
+  filtered.sort((a, b) => {
+    if (a.isInstalled !== b.isInstalled) return Number(b.isInstalled) - Number(a.isInstalled);
+    return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' });
+  });
+
+  return filtered.map((entry) => ({
+    providerId: targetPm,
+    packageId: entry.packageId,
+    linkedPackageId: '',
+    name: entry.name,
+    version: entry.version,
+    isInstalled: entry.isInstalled,
+    inArchive: entry.inArchive,
+    shortDescription: entry.publisher || (entry.isInstalled ? 'Auf diesem PC installiert' : 'Aus Archiv bekannt'),
+    editorItem: {
+      source: targetPm,
+      refId: '',
+      packageId: entry.packageId,
+      name: entry.name,
+      optional: false,
+    },
+  }));
+}
+
+/**
+ * Kombiniert Remote-Suchergebnisse mit bekannten lokalen Provider-Paketen ohne Duplikate.
+ */
+export function mergeProviderEditorResults({ knownPackages = [], remoteResults = [], providerId = 'winget' } = {}) {
+  const targetPm = String(providerId || 'winget')
+    .trim()
+    .toLowerCase();
+  const knownByKey = new Map();
+  for (const kp of knownPackages || []) {
+    const key = String(kp?.packageId || '')
+      .trim()
+      .toLowerCase();
+    if (key) knownByKey.set(key, kp);
+  }
+
+  const merged = [];
+  const seenKeys = new Set();
+
+  for (const pkg of remoteResults || []) {
+    const pkgId = String(pkg?.packageId || pkg?.id || '').trim();
+    if (!pkgId) continue;
+    const key = pkgId.toLowerCase();
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    const known = knownByKey.get(key);
+    const name = String(pkg?.name || known?.name || pkgId).trim();
+    merged.push({
+      providerId: targetPm,
+      packageId: pkgId,
+      linkedPackageId: '',
+      name,
+      version: pkg?.version || known?.version || '',
+      isInstalled: Boolean(known?.isInstalled),
+      inArchive: Boolean(known?.inArchive),
+      shortDescription: pkg?.shortDescription || known?.shortDescription || '',
+      editorItem: {
+        source: targetPm,
+        refId: '',
+        packageId: pkgId,
+        name,
+        optional: false,
+      },
+    });
+  }
+
+  for (const kp of knownPackages || []) {
+    const key = String(kp?.packageId || '')
+      .trim()
+      .toLowerCase();
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    merged.push(kp);
+  }
+
+  return merged;
 }
 
 export function findMatchingPackageForBundleItem(item, packages = []) {

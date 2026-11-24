@@ -2120,13 +2120,22 @@
 }
 
 .bundle-search-results {
-  max-height: 190px;
+  max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
   display: flex;
   flex-direction: column;
+}
+
+.bundle-search-group-bar {
+  padding: 6px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface) 75%, var(--bg));
+  border-bottom: 1px solid var(--border);
 }
 
 .bundle-search-row {
