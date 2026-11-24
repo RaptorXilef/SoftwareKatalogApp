@@ -744,7 +744,9 @@ export function planBundleExecution(evaluatedItems = [], { allowSilent = true, s
 
     let willRunSilent = false;
     if (!isProtected) {
-      if (item.source === 'archive') {
+      if (item.policySilentOnly) {
+        willRunSilent = true;
+      } else if (item.source === 'archive') {
         willRunSilent = Boolean(allowSilent && item.canRunArchiveSilent);
       } else if (item.source === 'winget') {
         willRunSilent = Boolean(silentWinget && item.canRunWingetSilent);

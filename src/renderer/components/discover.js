@@ -1,7 +1,7 @@
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
 import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { openNestedDialog, pickArchiveTargetFolder } from '../modals/archive-target-modal.js';
-import { isProviderUsable, state } from '../state.js';
+import { evaluateItemPolicy, isProviderUsable, state } from '../state.js';
 import { closestButton, closestEl, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
@@ -66,6 +66,27 @@ function findMatchingInstalledPackage(pkg) {
   });
 }
 
+function toDiscoverPolicyPkg(pkg) {
+  const providerId = String(pkg?.providerId || pkg?.packageManager || 'winget')
+    .trim()
+    .toLowerCase();
+  const packageId = String(pkg?.packageId || pkg?.id || '').trim();
+  const archiveMatch = findMatchingArchivePackage(pkg);
+  const archiveId = providerId === 'archive' ? packageId : archiveMatch?.id || null;
+  return {
+    id: packageId,
+    archiveItemId: archiveId,
+    inArchive: Boolean(providerId === 'archive' || archiveMatch),
+    providerId,
+    source: providerId,
+    packageManager: providerId === 'archive' ? archiveMatch?.packageManager || 'archive' : providerId,
+    packageId: providerId === 'archive' ? pkg?.linkedPackageId || '' : packageId,
+    wingetId: providerId === 'winget' ? packageId : archiveMatch?.wingetId || '',
+    name: pkg?.name || packageId,
+    installMode: pkg?.installMode || archiveMatch?.installMode || 'interactive',
+  };
+}
+
 function renderSourceChips() {
   const container = document.getElementById('discoverSourceChips');
   if (!container) return;
@@ -101,7 +122,10 @@ function renderLocalActions() {
   if (!container) return;
 
   const msiProvider = state.providers.find((p) => p.id === 'msi');
-  const showMsiBtn = msiProvider ? isProviderUsable('msi') : false;
+  const msiPolicy = evaluateItemPolicy({ providerId: 'msi', packageManager: 'msi', name: 'MSI' }, 'install');
+  const showMsiBtn = msiProvider
+    ? isProviderUsable('msi') && !(msiPolicy.listType === 'blacklist' && !msiPolicy.visible)
+    : false;
   if (!showMsiBtn) {
     container.hidden = true;
     container.innerHTML = '';
@@ -130,6 +154,55 @@ async function runLocalMsiWizard({ onReload }) {
   const pkgPublisher = meta?.publisher || '';
   const productCode = meta?.productCode || '';
 
+  const msiPolicy = evaluateItemPolicy(
+    {
+      providerId: 'msi',
+      packageManager: 'msi',
+      packageId: productCode,
+      name: pkgName,
+      installMode: 'interactive',
+    },
+    'install'
+  );
+  if (!msiPolicy.allowed) {
+    showToast(msiPolicy.error || 'MSI-Installation durch Zugriffsrichtlinie blockiert.', {
+      type: 'error',
+      duration: 6000,
+    });
+    return;
+  }
+
+  const msiModeOptionsHtml = msiPolicy.silentOnly
+    ? `
+        <div class="archive-link-options">
+          <label class="radio-card">
+            <input type="radio" name="msiInstallMode" value="silent" checked>
+            <div>
+              <strong>⚡ Silent (<code>/qn /norestart</code>) · 🔒 Richtlinie: Nur Silent</strong>
+              <p>Zugriffsrichtlinie erzwingt die stille Hintergrundinstallation.</p>
+            </div>
+          </label>
+        </div>
+      `
+    : `
+        <div class="archive-link-options">
+          <label class="radio-card">
+            <input type="radio" name="msiInstallMode" value="interactive" checked>
+            <div>
+              <strong>🖱️ Interaktiv (Standard)</strong>
+              <p>Startet den Windows-Installer-Assistenten mit sichtbaren Dialogen.</p>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" name="msiInstallMode" value="silent">
+            <div>
+              <strong>⚡ Silent (<code>/qn /norestart</code>)</strong>
+              <p>Installiert im Hintergrund ohne Rückfragen (Opt-in).</p>
+            </div>
+          </label>
+        </div>
+      `;
+
   const choice = await openNestedDialog({
     defaultAction: 'cancel',
     html: `
@@ -147,22 +220,7 @@ async function runLocalMsiWizard({ onReload }) {
           <div class="tech-row"><span>Datei</span><code>${escapeHTML(filePath)}</code></div>
         </div>
 
-        <div class="archive-link-options">
-          <label class="radio-card">
-            <input type="radio" name="msiInstallMode" value="interactive" checked>
-            <div>
-              <strong>🖱️ Interaktiv (Standard)</strong>
-              <p>Startet den Windows-Installer-Assistenten mit sichtbaren Dialogen.</p>
-            </div>
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="msiInstallMode" value="silent">
-            <div>
-              <strong>⚡ Silent (<code>/qn /norestart</code>)</strong>
-              <p>Installiert im Hintergrund ohne Rückfragen (Opt-in).</p>
-            </div>
-          </label>
-        </div>
+        ${msiModeOptionsHtml}
 
         <label class="check-row">
           <input type="checkbox" id="chkMsiSaveToArchive">
@@ -272,18 +330,30 @@ function renderResults() {
     return;
   }
 
-  if (state.discoverResults.length === 0) {
+  const visibleEntries = state.discoverResults
+    .map((pkg, idx) => ({
+      pkg,
+      idx,
+      policy: evaluateItemPolicy(toDiscoverPolicyPkg(pkg), 'install'),
+    }))
+    .filter((entry) => entry.policy.visible);
+
+  if (visibleEntries.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>Keine Pakete gefunden</h3>
-        <p>Prüfe den Suchbegriff oder aktiviere weitere Quellen.</p>
+        <h3>${state.discoverResults.length > 0 ? 'Treffer durch Zugriffsrichtlinie ausgeblendet' : 'Keine Pakete gefunden'}</h3>
+        <p>${
+          state.discoverResults.length > 0
+            ? 'Die gefundenen Pakete sind fuer Endnutzer durch die aktive Whitelist/Blacklist ausgeblendet.'
+            : 'Prüfe den Suchbegriff oder aktiviere weitere Quellen.'
+        }</p>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = state.discoverResults
-    .map((pkg, idx) => {
+  container.innerHTML = visibleEntries
+    .map(({ pkg, idx, policy }) => {
       const providerId = pkg.providerId || pkg.packageManager || 'winget';
       const badgeInfo = getProviderBadgeInfo(providerId, state.providers);
       const providerLabel = pkg.providerName || badgeInfo?.label || providerId;
@@ -300,6 +370,12 @@ function renderResults() {
         : canLinkToArchive
           ? `<button type="button" class="btn btn-archive" data-discover-action="link-archive" data-result-idx="${idx}">${canDownloadToArchive ? '🗄️ Ins Archiv laden' : '📥 Ins Archiv aufnehmen'}</button>`
           : '';
+
+      const installBtnHtml = policy.adwareConflict
+        ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" disabled title="${escapeHTML(policy.error)}">🚫 Blockiert (Adware-Schutz)</button>`
+        : policy.silentOnly
+          ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" title="Zugriffsrichtlinie erzwingt stille Installation">⚡ Silent installieren</button>`
+          : `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}">⬇️ Installieren</button>`;
 
       return `
         <article class="discover-card">
@@ -319,7 +395,7 @@ function renderResults() {
           </div>
           <div class="discover-card-actions">
             <button type="button" class="btn btn-ghost" data-discover-action="details" data-result-idx="${idx}">ℹ️ Details</button>
-            <button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}">⬇️ Installieren</button>
+            ${installBtnHtml}
             ${archiveActionHtml}
           </div>
         </article>
@@ -488,6 +564,15 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
     }
 
     if (action === 'install') {
+      const policyEval = evaluateItemPolicy(toDiscoverPolicyPkg(pkg), 'install');
+      if (!policyEval.allowed) {
+        showToast(policyEval.error || 'Installation durch Zugriffsrichtlinie blockiert.', {
+          type: 'error',
+          duration: 6000,
+        });
+        return;
+      }
+
       const archiveMatch = findMatchingArchivePackage(pkg);
       const canLinkAfterInstall = providerId !== 'archive' && !archiveMatch && Boolean(packageId);
       const supportsSetupDl = getProviderCapability(providerId, 'supportsArchiveDownload');
@@ -509,7 +594,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
       showToast(`Starte Installation für ${pkg.name || packageId}...`, { type: 'info' });
 
       const res = await window.electronAPI.installPackage(providerId, packageId, {
-        silent: false,
+        silent: policyEval.silentOnly,
         itemName: pkg.name || packageId,
       });
 

@@ -1,4 +1,6 @@
 import { normalizeProviderCategory, normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
+import { evaluatePackageAccess } from '../auth-service.js';
+import { loadCatalogWithLiveStatus } from '../catalog-service.js';
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
 import { bunProvider } from './bun-provider.js';
@@ -336,6 +338,35 @@ export async function listUpgradesAcrossProviders({ providerIds = null, signal =
   return { success: true, upgrades, byProvider };
 }
 
+function findArchiveMatchForPolicy(providerId, packageId) {
+  const cleanPm = String(providerId || '')
+    .trim()
+    .toLowerCase();
+  const cleanPid = String(packageId || '').trim();
+  const cleanPidLower = cleanPid.toLowerCase();
+  if (!cleanPidLower) return null;
+
+  try {
+    const items = loadCatalogWithLiveStatus();
+    if (cleanPm === 'archive') {
+      return items.find((c) => String(c.id || '').trim() === cleanPid) || null;
+    }
+    return (
+      items.find((c) => {
+        const cPm = String(c.packageManager || (c.wingetId ? 'winget' : ''))
+          .trim()
+          .toLowerCase();
+        const cPid = String(c.packageId || c.wingetId || '')
+          .trim()
+          .toLowerCase();
+        return cPid === cleanPidLower && (!cPm || cPm === cleanPm);
+      }) || null
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function installPackage(providerId, packageId, opts = {}) {
   const provider = getProvider(providerId);
   if (!provider?.capabilities.install || typeof provider.install !== 'function') {
@@ -344,7 +375,35 @@ export async function installPackage(providerId, packageId, opts = {}) {
   if (!isProviderEnabled(provider.id)) {
     return { success: false, error: `Provider "${provider.name}" ist derzeit deaktiviert.` };
   }
-  return provider.install(packageId, opts);
+
+  const cleanPid = String(packageId || '').trim();
+  const matchedArchive = findArchiveMatchForPolicy(provider.id, cleanPid);
+  const action = opts?.upgrade ? 'update' : 'install';
+  const policyPkg = {
+    id: matchedArchive?.id || (provider.id === 'archive' ? cleanPid : `${provider.id}:${cleanPid}`),
+    archiveItemId: matchedArchive?.id || (provider.id === 'archive' ? cleanPid : null),
+    inArchive: Boolean(matchedArchive || provider.id === 'archive'),
+    packageManager: provider.id === 'archive' ? matchedArchive?.packageManager || 'archive' : provider.id,
+    providerId: provider.id,
+    packageId: provider.id === 'archive' ? matchedArchive?.packageId || matchedArchive?.wingetId || '' : cleanPid,
+    wingetId: provider.id === 'winget' ? cleanPid : matchedArchive?.wingetId || '',
+    name: opts?.itemName || matchedArchive?.name || cleanPid,
+    installMode: opts?.installMode || matchedArchive?.installMode || 'interactive',
+  };
+
+  const decision = evaluatePackageAccess(policyPkg, action);
+  if (!decision.allowed) {
+    return {
+      success: false,
+      policyBlocked: true,
+      adwareConflict: decision.adwareConflict,
+      code: decision.adwareConflict ? 'POLICY_ADWARE_CONFLICT' : 'POLICY_BLOCKED',
+      error: decision.error,
+    };
+  }
+
+  const effectiveOpts = decision.silentOnly ? { ...opts, silent: true, allowSilent: true } : opts;
+  return provider.install(packageId, effectiveOpts);
 }
 
 export async function uninstallPackage(providerId, packageId, opts = {}) {

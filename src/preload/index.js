@@ -155,6 +155,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAuthPolicyPath: (policyPath, opts) => ipcRenderer.invoke('auth-set-policy-path', policyPath, opts),
   lockAuthPolicyInHklm: (policyPath) => ipcRenderer.invoke('auth-lock-hklm', policyPath),
   unlockAuthPolicyInHklm: () => ipcRenderer.invoke('auth-unlock-hklm'),
+  getAccessPolicy: () => ipcRenderer.invoke('policy-get'),
+  updateAccessPolicy: (policy) => ipcRenderer.invoke('policy-update', policy),
+  exportAccessPolicy: () => ipcRenderer.invoke('policy-export'),
+  importAccessPolicy: () => ipcRenderer.invoke('policy-import'),
   onAuthStatusUpdated: (cb) => {
     const listener = (_event, status) => cb(status);
     ipcRenderer.on('auth-status-updated', listener);

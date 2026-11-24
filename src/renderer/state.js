@@ -1,3 +1,4 @@
+import { createDefaultAccessPolicy, evaluatePackagePolicy, normalizeAccessPolicy } from '../shared/policy-logic.js';
 import { filterUsableProviders, isProviderUsableInUi } from '../shared/provider-lifecycle-logic.js';
 import { buildUnifiedPackages, computeTabCounts, getBaseName, getPackageStatus } from '../shared/unified-packages.js';
 
@@ -78,6 +79,7 @@ export const state = {
     integrityWarning: '',
     integrityChecksum: '',
     platformSupportedForHklm: true,
+    accessPolicy: createDefaultAccessPolicy(),
   },
 };
 
@@ -131,12 +133,112 @@ function getVisibleTabPackages() {
   });
 }
 
+export function isAdminAuthenticated() {
+  return Boolean(state.authStatus?.enabled && state.authStatus?.isAuthenticated);
+}
+
+export function getAccessPolicy() {
+  return state.authStatus?.accessPolicy || createDefaultAccessPolicy();
+}
+
+/**
+ * @param {Record<string, any> | null | undefined} item
+ * @param {'update' | 'install' | 'view'} [action]
+ */
+export function evaluateItemPolicy(item, action = 'view') {
+  return evaluatePackagePolicy(item, action, getAccessPolicy(), isAdminAuthenticated());
+}
+
+export function isItemVisibleForTab(item, tab = state.activeTab) {
+  if (!item) return false;
+  if (tab === 'updates') return evaluateItemPolicy(item, 'update').visible;
+  if (tab === 'discover') return evaluateItemPolicy(item, 'install').visible;
+  return evaluateItemPolicy(item, 'view').visible;
+}
+
+export function buildBundleItemPolicyPkg(entry, matchedPkg = null) {
+  const src = String(entry?.source || 'archive')
+    .trim()
+    .toLowerCase();
+  const matched = matchedPkg || entry?.matchedPackage || null;
+  return {
+    id: matched?.id || entry?.refId || entry?.packageId || entry?.key || '',
+    archiveItemId: matched?.archiveItemId || (src === 'archive' ? entry?.refId || null : null),
+    inArchive: Boolean(src === 'archive' || matched?.inArchive),
+    source: src,
+    packageManager: matched?.packageManager || (src === 'archive' ? 'archive' : src),
+    packageId: entry?.packageId || matched?.packageId || matched?.wingetId || '',
+    wingetId: matched?.wingetId || '',
+    name: entry?.name || matched?.name || entry?.packageId || entry?.refId || '',
+    installMode: entry?.installMode || matched?.installMode || 'interactive',
+    adwareProtected: Boolean(entry?.adwareProtected),
+  };
+}
+
+function findMatchedPackageForBundlePolicy(entry) {
+  const refId = String(entry?.refId || '').trim();
+  const pkgIdLower = String(entry?.packageId || '')
+    .trim()
+    .toLowerCase();
+  const src = String(entry?.source || 'archive')
+    .trim()
+    .toLowerCase();
+  if (src === 'archive') {
+    if (refId) {
+      const direct = state.packages.find((p) => p.inArchive && (p.id === refId || p.archiveItemId === refId));
+      if (direct) return direct;
+    }
+    if (pkgIdLower) {
+      return (
+        state.packages.find(
+          (p) =>
+            p.inArchive &&
+            String(p.packageId || p.wingetId || '')
+              .trim()
+              .toLowerCase() === pkgIdLower
+        ) || null
+      );
+    }
+    return null;
+  }
+  if (!pkgIdLower) return null;
+  return (
+    state.packages.find((p) => {
+      const pId = String(p.packageId || p.wingetId || '')
+        .trim()
+        .toLowerCase();
+      const pPm = String(p.packageManager || (p.wingetId ? 'winget' : ''))
+        .trim()
+        .toLowerCase();
+      return pId === pkgIdLower && (!pPm || pPm === src);
+    }) || null
+  );
+}
+
+export function getVisibleBundleItems(bundle) {
+  const rawItems = Array.isArray(bundle?.items) ? bundle.items : [];
+  return rawItems.filter((entry) => {
+    const matched = findMatchedPackageForBundlePolicy(entry);
+    return evaluateItemPolicy(buildBundleItemPolicyPkg(entry, matched), 'view').visible;
+  });
+}
+
+export function getVisibleBundles() {
+  return (state.bundles || []).filter((b) => {
+    const items = Array.isArray(b?.items) ? b.items : [];
+    if (items.length === 0) return true;
+    return getVisibleBundleItems(b).length > 0;
+  });
+}
+
 export function getTabCounts() {
   return computeTabCounts(getVisibleTabPackages(), {
     visibleHiddenCats: state.settings.visibleHiddenCats || [],
     versionCompareDepth: state.settings.versionCompareDepth ?? 3,
-    bundlesCount: state.bundles.length,
+    bundlesCount: getVisibleBundles().length,
     ignoredUpdates: state.ignoredUpdates,
+    accessPolicy: getAccessPolicy(),
+    isAdmin: isAdminAuthenticated(),
   });
 }
 
@@ -281,6 +383,7 @@ export function applyAuthStatus(status) {
     policyExists: Boolean(status.policyExists),
     integrityValid: status.integrityValid !== false,
     platformSupportedForHklm: status.platformSupportedForHklm !== false,
+    accessPolicy: normalizeAccessPolicy(status.accessPolicy),
   };
   return state.authStatus;
 }

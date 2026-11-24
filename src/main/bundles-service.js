@@ -15,6 +15,7 @@ import {
 import { buildUnifiedPackages, canDownloadOnline } from '../shared/unified-packages.js';
 import { extractVersion, sanitizeFileName } from '../shared/version.js';
 import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArchive } from './archive-linker.js';
+import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig, getDataFolder } from './config.js';
 import { createJob } from './jobs.js';
@@ -380,12 +381,62 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
       selectedEntries.push(entry);
     }
 
-    const plan = planBundleExecution(selectedEntries, {
+    const allowedEntries = [];
+    for (const entry of selectedEntries) {
+      const matched = entry.matchedPackage || {};
+      const policyPkg = {
+        id: matched.id || entry.refId || entry.packageId || entry.key,
+        archiveItemId: matched.archiveItemId || (entry.source === 'archive' ? entry.refId : null),
+        inArchive: Boolean(entry.source === 'archive' || matched.inArchive),
+        source: entry.source,
+        packageManager: matched.packageManager || (entry.source === 'archive' ? 'archive' : entry.source),
+        packageId: entry.packageId || matched.packageId || matched.wingetId || '',
+        wingetId: matched.wingetId || '',
+        name: entry.name || matched.name || '',
+        installMode: entry.installMode || matched.installMode || 'interactive',
+        adwareProtected: Boolean(entry.adwareProtected),
+      };
+      const decision = evaluatePackageAccess(policyPkg, entry.action === 'update' ? 'update' : 'install');
+      if (!decision.allowed) {
+        failed++;
+        results.push({
+          key: entry.key,
+          name: entry.name,
+          source: entry.source,
+          status: 'error',
+          policyBlocked: true,
+          adwareConflict: decision.adwareConflict,
+          error: decision.error,
+        });
+        continue;
+      }
+      allowedEntries.push({
+        ...entry,
+        policySilentOnly: decision.silentOnly,
+      });
+    }
+
+    const plan = planBundleExecution(allowedEntries, {
       allowSilent: options.allowSilent !== false,
       silentWinget: Boolean(options.silentWinget),
     });
 
     if (plan.orderedQueue.length === 0) {
+      if (failed > 0) {
+        const firstErr = results.find((r) => r.policyBlocked)?.error || 'Durch Zugriffsrichtlinie blockiert.';
+        job.finish('error', firstErr, { autoRemoveMs: 5500 });
+        return {
+          success: false,
+          policyBlocked: true,
+          completed: 0,
+          failed,
+          skipped,
+          canceled: false,
+          error: firstErr,
+          phaseSummary: plan.stats,
+          results,
+        };
+      }
       job.finish('done', 'Alle ausgewählten Pakete sind bereits aktuell oder übersprungen.', { autoRemoveMs: 4000 });
       return {
         success: true,
@@ -498,7 +549,9 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
           sourcePath: setupFile,
           targetVersion: targetVersion || catItem.webVersion || null,
           useJob: false,
-          allowSilent: entry.willRunSilent,
+          allowSilent: entry.willRunSilent || Boolean(entry.policySilentOnly),
+          silent: entry.policySilentOnly ? true : null,
+          action: entry.action === 'update' ? 'update' : 'install',
           onProgress: (_pct, detail) => {
             job.update(basePct + stepSpan * 0.6, `${prefix}: ${detail}`);
           },
@@ -545,16 +598,17 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
 
       const existingArchiveLink = findExistingArchiveLink(entry.source, entry.packageId);
       const isUpgradeAction = entry.action === 'update' && typeof provider.upgrade === 'function';
+      const forceSilentProvider = entry.willRunSilent || Boolean(entry.policySilentOnly);
       job.update(basePct, `${prefix}: ${isUpgradeAction ? 'Aktualisiere' : 'Installiere'} über ${provider.name}...`);
       const provRes = isUpgradeAction
         ? await provider.upgrade(entry.packageId, {
-            silent: entry.willRunSilent,
+            silent: forceSilentProvider,
             itemName: entry.name,
             signal: job.signal,
             useJob: false,
           })
         : await provider.install(entry.packageId, {
-            silent: entry.willRunSilent,
+            silent: forceSilentProvider,
             itemName: entry.name,
             signal: job.signal,
             useJob: false,

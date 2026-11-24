@@ -21,12 +21,15 @@ function normalizeQueueItem(raw, { silent = false, forceInteractive = false, gen
     installMode === 'interactive-required' ||
     Boolean(raw?.interactiveRequired) ||
     (installMode !== 'silent' && adwareSignal.flagged);
+  const forceSilent = Boolean(raw?.forceSilent);
 
   let mode;
-  if (interactiveRequired || forceInteractive) {
+  if (interactiveRequired) {
     mode = 'interactive';
-  } else if (silent === true) {
+  } else if (forceSilent || silent === true) {
     mode = 'silent';
+  } else if (forceInteractive) {
+    mode = 'interactive';
   } else {
     mode = installMode === 'silent' ? 'silent' : 'interactive';
   }
@@ -57,6 +60,7 @@ function normalizeQueueItem(raw, { silent = false, forceInteractive = false, gen
     hasWebUpdate: Boolean(raw?.hasWebUpdate),
     hasArchiveUpdate: Boolean(raw?.hasArchiveUpdate),
     installMode,
+    forceSilent,
     archiveSaveSpec: raw?.archiveSaveSpec || null,
   };
 }

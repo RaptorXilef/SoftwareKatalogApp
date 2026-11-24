@@ -3,6 +3,7 @@ import { canDownloadOnline } from '../shared/unified-packages.js';
 import { createUpdateQueueManager } from '../shared/update-queue-core.js';
 import { extractVersion } from '../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-linker.js';
+import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { isAdminSessionActive, isProcessElevated, startAdminSession } from './elevated-helper.js';
@@ -77,7 +78,37 @@ async function executeQueueItem(entry, { signal, onProgress }) {
     return { success: false, canceled: true };
   }
 
-  const useSilent = !entry.interactiveRequired && entry.mode === 'silent';
+  let catalogMatch = null;
+  if (entry.inArchive && entry.itemId) {
+    catalogMatch = loadCatalogWithLiveStatus().find((c) => c.id === entry.itemId) || null;
+  }
+
+  const runtimePolicyDecision = evaluatePackageAccess(
+    {
+      id: entry.itemId,
+      archiveItemId: entry.inArchive ? entry.itemId : null,
+      inArchive: Boolean(entry.inArchive),
+      source: entry.source,
+      packageManager: entry.packageManager || catalogMatch?.packageManager || '',
+      packageId: entry.packageId || catalogMatch?.packageId || catalogMatch?.wingetId || '',
+      wingetId: catalogMatch?.wingetId || '',
+      name: entry.name || catalogMatch?.name || '',
+      installMode: catalogMatch?.installMode || entry.installMode || 'interactive',
+      interactiveRequired: Boolean(entry.interactiveRequired),
+    },
+    'update'
+  );
+
+  if (!runtimePolicyDecision.allowed) {
+    return {
+      success: false,
+      policyBlocked: true,
+      adwareConflict: runtimePolicyDecision.adwareConflict,
+      error: runtimePolicyDecision.error,
+    };
+  }
+
+  const useSilent = !entry.interactiveRequired && (runtimePolicyDecision.silentOnly || entry.mode === 'silent');
 
   if (entry.inArchive) {
     let catItem = loadCatalogWithLiveStatus().find((c) => c.id === entry.itemId);
@@ -158,7 +189,8 @@ async function executeQueueItem(entry, { signal, onProgress }) {
         useJob: false,
         signal,
         allowSilent: useSilent,
-        silent: useSilent,
+        silent: useSilent ? true : null,
+        action: 'update',
         onProgress: (pct, detail) => onProgress?.(pct, detail),
       });
     }
@@ -243,11 +275,73 @@ async function maybeStartAdminSessionForBatch(itemCount, { skipAutoAdminPrompt =
 }
 
 export async function enqueueUpdates(items = [], opts = {}) {
-  const count = Array.isArray(items) ? items.length : 0;
+  const rawItems = Array.isArray(items) ? items : [];
+  if (rawItems.length === 0) {
+    return { ...queueManager.enqueueUpdates([], opts), adminPrompt: { attempted: false } };
+  }
+
+  const catalogById = new Map(loadCatalogWithLiveStatus().map((c) => [c.id, c]));
+  const allowedItems = [];
+  const blockedItems = [];
+
+  for (const raw of rawItems) {
+    if (!raw) continue;
+    const itemId = String(raw.itemId || raw.id || '').trim();
+    const catItem = itemId ? catalogById.get(itemId) || null : null;
+    const pkgForPolicy = {
+      id: itemId,
+      archiveItemId: raw.inArchive ? itemId : catItem?.id || null,
+      inArchive: Boolean(raw.inArchive || catItem),
+      source: raw.source || (catItem ? 'archive' : raw.packageManager || 'winget'),
+      packageManager:
+        raw.packageManager || catItem?.packageManager || (raw.wingetId || catItem?.wingetId ? 'winget' : ''),
+      packageId: raw.packageId || raw.wingetId || catItem?.packageId || catItem?.wingetId || '',
+      wingetId: raw.wingetId || catItem?.wingetId || '',
+      name: raw.name || catItem?.name || itemId,
+      installMode: catItem?.installMode || raw.installMode || 'interactive',
+      interactiveRequired: Boolean(raw.interactiveRequired),
+    };
+
+    const decision = evaluatePackageAccess(pkgForPolicy, 'update');
+    if (!decision.allowed) {
+      blockedItems.push({
+        itemId,
+        name: pkgForPolicy.name,
+        reason: decision.reason,
+        adwareConflict: decision.adwareConflict,
+        error: decision.error,
+      });
+      continue;
+    }
+
+    allowedItems.push({
+      ...raw,
+      installMode: pkgForPolicy.installMode,
+      forceSilent: decision.silentOnly || Boolean(raw.forceSilent),
+    });
+  }
+
+  if (allowedItems.length === 0 && blockedItems.length > 0) {
+    return {
+      success: false,
+      policyBlocked: true,
+      added: 0,
+      skippedDuplicates: 0,
+      blockedCount: blockedItems.length,
+      blockedItems,
+      error: blockedItems[0].error,
+      state: getQueueState(),
+      adminPrompt: { attempted: false },
+    };
+  }
+
+  const count = allowedItems.length;
   const adminPrompt = count >= 2 ? await maybeStartAdminSessionForBatch(count, opts) : { attempted: false };
-  const queueRes = queueManager.enqueueUpdates(items, opts);
+  const queueRes = queueManager.enqueueUpdates(allowedItems, opts);
   return {
     ...queueRes,
+    blockedCount: blockedItems.length,
+    blockedItems,
     adminPrompt,
   };
 }

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { buildExportPolicyPayload, validateImportPolicyPayload } from '../shared/policy-logic.js';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
 import { executeArchiveCleanup, previewArchiveCleanup, setKeepAllVersions } from './archive-cleaner.js';
 import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArchive } from './archive-linker.js';
@@ -8,6 +9,7 @@ import { applyWingetMatches, runWingetMatcherScan } from './archive-matcher.js';
 import {
   checkAdminIpcAccess,
   configureAuthService,
+  getAccessPolicy,
   getAuthStatus,
   initAuthService,
   lockAuthPolicyInHklm,
@@ -15,6 +17,7 @@ import {
   logoutAuth,
   setAuthPolicyPath,
   unlockAuthPolicyInHklm,
+  updateAccessPolicy,
   updateAuthConfig,
 } from './auth-service.js';
 import { batchDownloadArchiveUpdates, batchUpdatePackages } from './batch-updater.js';
@@ -402,6 +405,54 @@ function registerIpcHandlers() {
   handleIpc('auth-set-policy-path', (_e, policyPath, opts) => setAuthPolicyPath(policyPath, opts || {}));
   handleIpc('auth-lock-hklm', (_e, policyPath) => lockAuthPolicyInHklm(policyPath));
   handleIpc('auth-unlock-hklm', () => unlockAuthPolicyInHklm());
+
+  // Zugriffsrichtlinien (Whitelist / Blacklist + Modus-Beschraenkung)
+  handleIpc('policy-get', () => getAccessPolicy());
+  handleIpc('policy-update', (_e, policy) => updateAccessPolicy(policy));
+  handleIpc('policy-export', async () => {
+    try {
+      const current = getAccessPolicy();
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: 'Zugriffsrichtlinien als JSON exportieren',
+        defaultPath: 'SoftwareKatalog_Zugriffsrichtlinien.json',
+        filters: [{ name: 'Software-Katalog Richtlinien (JSON)', extensions: ['json'] }],
+      });
+      if (canceled || !filePath) {
+        return { success: false, canceled: true };
+      }
+      const payload = buildExportPolicyPayload(current.accessPolicy);
+      await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+      return { success: true, filePath };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  handleIpc('policy-import', async () => {
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Zugriffsrichtlinien aus JSON importieren',
+        properties: ['openFile'],
+        filters: [{ name: 'Software-Katalog Richtlinien (JSON)', extensions: ['json'] }],
+      });
+      if (canceled || filePaths.length === 0) {
+        return { success: false, canceled: true };
+      }
+      const rawText = await fs.promises.readFile(filePaths[0], 'utf-8');
+      let parsed;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        return { success: false, error: 'Ungueltige JSON-Datei.' };
+      }
+      const validation = validateImportPolicyPayload(parsed);
+      if (!validation.valid) {
+        return { success: false, error: 'error' in validation ? validation.error : 'Ungueltige Richtlinie.' };
+      }
+      return updateAccessPolicy(validation.accessPolicy);
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 if (app.isPackaged && !app.requestSingleInstanceLock()) {

@@ -40,6 +40,7 @@ import {
 import { ensureAdminAuthenticated, openLoginModal } from './modals/login-modal.js';
 import {
   applyAuthStatus,
+  evaluateItemPolicy,
   getItemById,
   getItemStatus,
   refreshAuthStatus,
@@ -260,48 +261,65 @@ function openUpdateCardContextMenu(event, item) {
   const st = getItemStatus(item);
   const targetVersion = st.targetUpdateVersion || st.webVersion || st.archiveVersion || '';
   const silentLocked = item.installMode === 'interactive-required';
+  const policyEval = evaluateItemPolicy(item, 'update');
+  const adwareBlocked = policyEval.adwareConflict || silentLocked;
+
+  const menuItems = [];
+  if (!policyEval.silentOnly) {
+    menuItems.push({
+      id: 'update-interactive',
+      label: '🖱️ Jetzt interaktiv aktualisieren',
+      onSelect: () => enqueueUpdateItems([item], { silent: false, forceInteractive: true }),
+    });
+  }
+
+  menuItems.push({
+    id: 'update-silent',
+    label: '⚡ Jetzt silent aktualisieren',
+    hint: policyEval.adwareConflict
+      ? '🚫 Adware-Konflikt'
+      : silentLocked
+        ? '🛡️ Adware-Schutz'
+        : policyEval.silentOnly
+          ? '🔒 Nur Silent'
+          : '',
+    disabled: adwareBlocked,
+    title: policyEval.adwareConflict
+      ? policyEval.error
+      : silentLocked
+        ? '🛡️ Gesperrt wegen Adware-/Klick-Schutz (installMode: interactive-required)'
+        : 'Update im Hintergrund (silent) einreihen',
+    onSelect: () => enqueueUpdateItems([item], { silent: true }),
+  });
+
+  menuItems.push(
+    { type: 'separator' },
+    {
+      id: 'ignore-version',
+      label: targetVersion ? `⏭️ Diese Version ignorieren (v${targetVersion})` : '⏭️ Diese Version ignorieren',
+      disabled: !targetVersion,
+      title: !targetVersion ? 'Keine eindeutige Zielversion erkannt' : '',
+      onSelect: () => ignorePackageUpdate(item, { mode: 'version', targetVersion }),
+    },
+    {
+      id: 'ignore-all',
+      label: '🚫 Alle Updates ignorieren',
+      danger: true,
+      onSelect: () => ignorePackageUpdate(item, { mode: 'all', targetVersion }),
+    },
+    { type: 'separator' },
+    {
+      id: 'open-details',
+      label: 'ℹ️ Details öffnen',
+      onSelect: () => openDetailModal(item.id),
+    }
+  );
 
   openContextMenu({
     x: event.clientX,
     y: event.clientY,
     ariaLabel: `Aktionen für ${item.name}`,
-    items: [
-      {
-        id: 'update-interactive',
-        label: '🖱️ Jetzt interaktiv aktualisieren',
-        onSelect: () => enqueueUpdateItems([item], { silent: false, forceInteractive: true }),
-      },
-      {
-        id: 'update-silent',
-        label: '⚡ Jetzt silent aktualisieren',
-        hint: silentLocked ? '🛡️ Adware-Schutz' : '',
-        disabled: silentLocked,
-        title: silentLocked
-          ? '🛡️ Gesperrt wegen Adware-/Klick-Schutz (installMode: interactive-required)'
-          : 'Update im Hintergrund (silent) einreihen',
-        onSelect: () => enqueueUpdateItems([item], { silent: true }),
-      },
-      { type: 'separator' },
-      {
-        id: 'ignore-version',
-        label: targetVersion ? `⏭️ Diese Version ignorieren (v${targetVersion})` : '⏭️ Diese Version ignorieren',
-        disabled: !targetVersion,
-        title: !targetVersion ? 'Keine eindeutige Zielversion erkannt' : '',
-        onSelect: () => ignorePackageUpdate(item, { mode: 'version', targetVersion }),
-      },
-      {
-        id: 'ignore-all',
-        label: '🚫 Alle Updates ignorieren',
-        danger: true,
-        onSelect: () => ignorePackageUpdate(item, { mode: 'all', targetVersion }),
-      },
-      { type: 'separator' },
-      {
-        id: 'open-details',
-        label: 'ℹ️ Details öffnen',
-        onSelect: () => openDetailModal(item.id),
-      },
-    ],
+    items: menuItems,
   });
 }
 
@@ -385,11 +403,18 @@ async function enqueueUpdateItems(targetItems, { silent = false, forceInteractiv
     if (res.added > 0) {
       const modeHint = silent ? ' (Silent-Modus mit Adware-Schutz)' : '';
       showToast(`${res.added} Update(s) in die Warteschlange eingereiht${modeHint}.`, { type: 'info' });
+      if (res.blockedCount > 0) {
+        const firstReason = res.blockedItems?.[0]?.error || 'Durch Zugriffsrichtlinie blockiert.';
+        showToast(`${res.blockedCount} Update(s) durch Zugriffsrichtlinie blockiert: ${firstReason}`, {
+          type: 'warn',
+          duration: 6000,
+        });
+      }
     } else {
       showToast('Alle ausgewählten Updates befinden sich bereits in der Warteschlange.', { type: 'info' });
     }
   } else if (res?.error) {
-    showToast(`Warteschlangen-Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+    showToast(res.policyBlocked ? res.error : `Warteschlangen-Fehler: ${res.error}`, { type: 'error', duration: 6000 });
   }
 }
 
@@ -462,7 +487,9 @@ function setupUpdatesBatchBar() {
     if (btn.id === 'btnBatchUpdateSelected') {
       const entries = getVisibleUpdateEntries();
       const selectedItems = entries.map((entry) => entry.item).filter((item) => state.selectedUpdateIds.has(item.id));
-      await enqueueUpdateItems(selectedItems, { silent: false });
+      const selectedSilentOnly =
+        selectedItems.length > 0 && selectedItems.every((item) => evaluateItemPolicy(item, 'update').silentOnly);
+      await enqueueUpdateItems(selectedItems, { silent: selectedSilentOnly });
     }
   });
 }
@@ -677,6 +704,8 @@ function handleAuthStatusUpdate(status) {
   const wasAuthenticated = Boolean(prev.enabled && prev.isAuthenticated);
   const next = applyAuthStatus(status);
   renderAuthHeaderControls();
+  renderTagChips();
+  renderActiveView();
 
   if (wasAuthenticated && next.enabled && !next.isAuthenticated) {
     closeAdminModalIfOpen();
@@ -862,6 +891,8 @@ async function bootstrap() {
         }
         closeAdminModalIfOpen();
         renderAuthHeaderControls();
+        renderTagChips();
+        renderActiveView();
         showToast('Admin-Sitzung abgemeldet.', { type: 'info' });
       } finally {
         manualLogoutInFlight = false;

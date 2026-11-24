@@ -9,6 +9,7 @@ import {
 import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import { extractVersion } from '../../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from '../archive-linker.js';
+import { evaluatePackageAccess } from '../auth-service.js';
 import { isAdminSessionActive, runStartProcessElevated } from '../elevated-helper.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runPowerShellScript } from './cli-runner.js';
@@ -181,8 +182,29 @@ export async function installLocalMsi({
   const meta = await readMsiFileMetadata(cleanPath);
   const displayName = String(itemName || meta.name || path.basename(cleanPath, '.msi')).trim();
 
+  const decision = evaluatePackageAccess(
+    {
+      packageManager: 'msi',
+      providerId: 'msi',
+      packageId: meta.productCode || '',
+      name: displayName,
+      installMode: 'interactive',
+    },
+    'install'
+  );
+  if (!decision.allowed) {
+    return {
+      success: false,
+      policyBlocked: true,
+      adwareConflict: decision.adwareConflict,
+      code: decision.adwareConflict ? 'POLICY_ADWARE_CONFLICT' : 'POLICY_BLOCKED',
+      error: decision.error,
+    };
+  }
+
+  const effectiveSilent = decision.silentOnly ? true : Boolean(silent);
   const installRes = await msiProvider.install(cleanPath, {
-    silent: Boolean(silent),
+    silent: effectiveSilent,
     itemName: displayName,
     useJob: true,
   });

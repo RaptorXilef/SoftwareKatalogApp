@@ -166,7 +166,7 @@ export const archiveProvider = {
     };
   },
 
-  async install(packageId, { filePath = '', allowSilent = false } = {}) {
+  async install(packageId, { filePath = '', allowSilent = false, silent = null } = {}) {
     const items = loadCatalogWithLiveStatus();
     const item = items.find((i) => i.id === packageId);
     if (!item) {
@@ -179,12 +179,14 @@ export const archiveProvider = {
     }
 
     const targetVersion = extractVersion(path.basename(sourcePath)) || item.webVersion || null;
+    const forceSilent = silent === true;
     return executeAndVerifyInstaller({
       itemId: item.id,
       itemName: item.name,
       sourcePath,
       targetVersion,
-      allowSilent: Boolean(allowSilent),
+      allowSilent: Boolean(allowSilent || forceSilent),
+      silent: forceSilent ? true : null,
     });
   },
 };

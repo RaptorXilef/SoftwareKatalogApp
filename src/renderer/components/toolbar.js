@@ -3,6 +3,7 @@ import {
   getActiveSortMode,
   getTabCounts,
   getUsableProviders,
+  isItemVisibleForTab,
   setActiveOriginFilter,
   setActiveSortMode,
   state,
@@ -206,6 +207,7 @@ export function renderTagChips() {
   for (const item of state.catalog) {
     const isHidden = Boolean(item.hiddenCategory?.trim());
     if (isHidden && !visibleHidden.includes(item.hiddenCategory)) continue;
+    if (!isItemVisibleForTab({ ...item, inArchive: true }, 'archive')) continue;
     for (const t of item.tags) allTags.add(t);
   }
 

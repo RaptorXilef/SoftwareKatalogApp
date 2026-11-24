@@ -1,4 +1,11 @@
 import { getArchiveRootLabel, normalizePathKey } from '../../shared/multi-archive-logic.js';
+import {
+  getPolicyEntryKey,
+  normalizeAccessPolicy,
+  removePolicyEntry,
+  updatePolicyEntryExecutionMode,
+  upsertPolicyEntry,
+} from '../../shared/policy-logic.js';
 import { formatProviderStatusBadge, groupProvidersByUiCategory } from '../../shared/provider-lifecycle-logic.js';
 import {
   buildSettingsSavePlan,
@@ -9,6 +16,7 @@ import {
   SETTINGS_TABS,
   toggleDraftProvider,
 } from '../../shared/settings-draft-logic.js';
+import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { renderAdminSessionButton, renderAuthHeaderControls } from '../components/toolbar.js';
@@ -91,6 +99,454 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   let currentAuthStatus = applyAuthStatus(initialAuthStatus || state.authStatus);
   renderAuthHeaderControls();
+
+  let savedPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
+  let draftPolicy = normalizeAccessPolicy(currentAuthStatus?.accessPolicy);
+  let activePolicyScopeTab = 'updates';
+  let policySearchSource = 'all';
+  let policySearchQuery = '';
+  let policyWingetResults = [];
+  let policyWingetLoading = false;
+  let policyWingetError = '';
+  let policyManualMatchType = 'packageId';
+  let policyManualValue = '';
+  let policyManualLabel = '';
+
+  const getActivePolicyScopeKey = () =>
+    draftPolicy.scopeMode === 'separate' ? (activePolicyScopeTab === 'install' ? 'install' : 'updates') : 'shared';
+
+  const getActivePolicyRuleSet = () => draftPolicy[getActivePolicyScopeKey()];
+
+  const updateActivePolicyRuleSet = (updater) => {
+    const key = getActivePolicyScopeKey();
+    const currentSet = draftPolicy[key];
+    const nextSet = updater(currentSet);
+    draftPolicy = normalizeAccessPolicy({
+      ...draftPolicy,
+      [key]: nextSet,
+    });
+  };
+
+  const getPolicyMatchTypeBadge = (matchType) => {
+    if (matchType === 'packageId') return 'Paket-ID';
+    if (matchType === 'archiveId') return 'Archiv-ID';
+    if (matchType === 'provider') return 'Paketmanager';
+    return 'Name';
+  };
+
+  const buildCandidateFromPackage = (pkg) => {
+    const pm = String(pkg?.packageManager || (pkg?.wingetId ? 'winget' : ''))
+      .trim()
+      .toLowerCase();
+    const pid = String(pkg?.packageId || pkg?.wingetId || '').trim();
+    if (pid) {
+      return {
+        matchType: 'packageId',
+        value: pid,
+        label: String(pkg?.name || pid).trim(),
+        meta: `${pm || 'Paket'} · ${pid}`,
+        badge: pkg?.inArchive ? 'Archiv & PC' : 'Installiert',
+      };
+    }
+    if (pkg?.inArchive && pkg?.id) {
+      return {
+        matchType: 'archiveId',
+        value: String(pkg.id).trim(),
+        label: String(pkg?.name || pkg.id).trim(),
+        meta: `Archiv-ID · ${pkg.id}`,
+        badge: 'Archiv',
+      };
+    }
+    return {
+      matchType: 'name',
+      value: String(pkg?.name || '').trim(),
+      label: String(pkg?.name || '').trim(),
+      meta: 'Name-Abgleich',
+      badge: pkg?.inArchive ? 'Archiv' : 'Installiert',
+    };
+  };
+
+  const getPolicyCandidateRows = () => {
+    const queryWords = policySearchQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const matchesQuery = (text) => {
+      if (queryWords.length === 0) return true;
+      const hay = String(text || '').toLowerCase();
+      return queryWords.every((w) => hay.includes(w));
+    };
+
+    if (policySearchSource === 'provider') {
+      const list = [
+        { id: 'archive', name: 'Archiv (lokal)', description: 'Programme aus dem lokalen Archiv' },
+        ...providers.filter((p) => p.id !== 'archive'),
+      ];
+      return list
+        .filter((p) => matchesQuery(`${p.name} ${p.id} ${p.description || ''}`))
+        .map((p) => ({
+          matchType: 'provider',
+          value: p.id,
+          label: p.name,
+          meta: `Provider · ${p.id}`,
+          badge: 'Paketmanager',
+        }));
+    }
+
+    if (policySearchSource === 'winget') {
+      return policyWingetResults.map((pkg) => {
+        const pid = String(pkg.packageId || pkg.id || '').trim();
+        return {
+          matchType: 'packageId',
+          value: pid,
+          label: String(pkg.name || pid).trim(),
+          meta: `Winget · ${pid}${pkg.version ? ` (v${pkg.version})` : ''}`,
+          badge: 'Winget',
+        };
+      });
+    }
+
+    const seen = new Set();
+    const candidates = [];
+    for (const pkg of state.packages || []) {
+      if (!pkg) continue;
+      if (policySearchSource === 'archive' && !pkg.inArchive) continue;
+      if (policySearchSource === 'installed' && !pkg.isInstalled) continue;
+
+      const cand = buildCandidateFromPackage(pkg);
+      if (!cand.value) continue;
+      if (!matchesQuery(`${cand.label} ${cand.value} ${cand.meta} ${pkg.publisher || ''}`)) continue;
+
+      const key = getPolicyEntryKey(cand);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(cand);
+    }
+
+    candidates.sort((a, b) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' }));
+    return candidates.slice(0, 40);
+  };
+
+  const renderPolicyCandidateListHtml = () => {
+    const isReadOnly = Boolean(currentAuthStatus?.isReadOnlyPolicy);
+    const ruleSet = getActivePolicyRuleSet();
+    const existingKeys = new Set((ruleSet.entries || []).map((entry) => getPolicyEntryKey(entry)));
+
+    if (policySearchSource === 'manual') {
+      return `
+        <div class="policy-manual-form">
+          <div class="policy-manual-grid">
+            <label class="form-field">
+              <span>Regel-Typ</span>
+              <select id="cfgPolicyManualType" ${isReadOnly ? 'disabled' : ''}>
+                <option value="packageId" ${policyManualMatchType === 'packageId' ? 'selected' : ''}>Paket-ID (z. B. VideoLAN.VLC)</option>
+                <option value="archiveId" ${policyManualMatchType === 'archiveId' ? 'selected' : ''}>Archiv-ID</option>
+                <option value="name" ${policyManualMatchType === 'name' ? 'selected' : ''}>Programmname (Wildcard * moeglich)</option>
+                <option value="provider" ${policyManualMatchType === 'provider' ? 'selected' : ''}>Paketmanager (winget, scoop, archive...)</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Wert / Muster</span>
+              <input type="text" id="cfgPolicyManualValue" value="${escapeHTML(policyManualValue)}" placeholder="z. B. VideoLAN.VLC oder *Adobe*" ${isReadOnly ? 'disabled' : ''}>
+            </label>
+            <label class="form-field">
+              <span>Anzeigename (optional)</span>
+              <input type="text" id="cfgPolicyManualLabel" value="${escapeHTML(policyManualLabel)}" placeholder="z. B. VLC Media Player" ${isReadOnly ? 'disabled' : ''}>
+            </label>
+          </div>
+          <div class="policy-manual-actions">
+            <button type="button" class="btn btn-primary btn-xs" data-policy-action="add-manual" ${isReadOnly ? 'disabled' : ''}>➕ Regel hinzufuegen</button>
+          </div>
+        </div>
+      `;
+    }
+
+    if (policySearchSource === 'winget') {
+      if (policyWingetLoading) {
+        return '<div class="policy-candidate-empty">⏳ Suche in Winget-Quellen...</div>';
+      }
+      if (policyWingetError) {
+        return `<div class="policy-candidate-empty">${escapeHTML(policyWingetError)}</div>`;
+      }
+      if (policyWingetResults.length === 0) {
+        return '<div class="policy-candidate-empty">Gib oben einen Programmnamen ein und klicke auf "🔎 Winget suchen".</div>';
+      }
+    }
+
+    const candidates = getPolicyCandidateRows();
+    if (candidates.length === 0) {
+      return '<div class="policy-candidate-empty">Keine passenden Programme gefunden.</div>';
+    }
+
+    return candidates
+      .map((cand) => {
+        const key = getPolicyEntryKey(cand);
+        const inList = existingKeys.has(key);
+        const badgeInfo = cand.matchType === 'provider' ? getProviderBadgeInfo(cand.value, providers) : null;
+        return `
+          <div class="policy-candidate-row">
+            <div class="policy-candidate-main">
+              <div class="policy-candidate-title">
+                <strong>${escapeHTML(cand.label)}</strong>
+                <span class="policy-match-badge">${escapeHTML(badgeInfo?.label || cand.badge)}</span>
+              </div>
+              <span class="policy-candidate-meta"><code>${escapeHTML(cand.meta)}</code></span>
+            </div>
+            <button
+              type="button"
+              class="btn btn-xs ${inList ? 'btn-danger' : 'btn-primary'}"
+              data-policy-toggle-candidate
+              data-match-type="${escapeHTML(cand.matchType)}"
+              data-match-value="${escapeHTML(cand.value)}"
+              data-match-label="${escapeHTML(cand.label)}"
+              ${isReadOnly ? 'disabled' : ''}
+            >
+              ${inList ? '✓ Entfernen' : '+ Hinzufuegen'}
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const renderPolicyEntriesHtml = () => {
+    const isReadOnly = Boolean(currentAuthStatus?.isReadOnlyPolicy);
+    const ruleSet = getActivePolicyRuleSet();
+    const entries = ruleSet.entries || [];
+    const isBlacklist = ruleSet.listType === 'blacklist';
+
+    if (entries.length === 0) {
+      const emptyHint =
+        ruleSet.listType === 'whitelist'
+          ? 'Whitelist ist leer - fuer normale Nutzer sind aktuell alle Programme dieses Bereichs ausgeblendet.'
+          : ruleSet.listType === 'blacklist'
+            ? 'Blacklist ist leer - aktuell ist kein Programm explizit gesperrt.'
+            : 'Noch keine Einzelregeln hinterlegt. Du kannst oben Programme zur Liste hinzufuegen.';
+      return `<div class="policy-candidate-empty">${escapeHTML(emptyHint)}</div>`;
+    }
+
+    return entries
+      .map((entry) => {
+        const modeSelectHtml = isBlacklist
+          ? '<span class="policy-match-badge is-blacklist">🚫 Blockiert</span>'
+          : `
+            <select
+              class="policy-entry-mode-select"
+              data-policy-entry-mode
+              data-match-type="${escapeHTML(entry.matchType)}"
+              data-match-value="${escapeHTML(entry.value)}"
+              title="Ausfuehrungsmodus fuer diesen Eintrag"
+              ${isReadOnly ? 'disabled' : ''}
+            >
+              <option value="inherit" ${entry.executionMode === 'inherit' ? 'selected' : ''}>Standard uebernehmen</option>
+              <option value="silent-only" ${entry.executionMode === 'silent-only' ? 'selected' : ''}>⚡ Nur Silent</option>
+              <option value="allow-interactive" ${entry.executionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ Silent &amp; Interaktiv</option>
+            </select>
+          `;
+
+        return `
+          <div class="policy-entry-row">
+            <div class="policy-entry-main">
+              <div class="policy-entry-head">
+                <span class="policy-match-badge">${escapeHTML(getPolicyMatchTypeBadge(entry.matchType))}</span>
+                <strong>${escapeHTML(entry.label)}</strong>
+              </div>
+              <code>${escapeHTML(entry.value)}</code>
+            </div>
+            <div class="policy-entry-controls">
+              ${modeSelectHtml}
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs"
+                data-policy-remove-entry
+                data-match-type="${escapeHTML(entry.matchType)}"
+                data-match-value="${escapeHTML(entry.value)}"
+                title="Eintrag entfernen"
+                ${isReadOnly ? 'disabled' : ''}
+              >
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  };
+
+  const renderPolicySectionHtml = () => {
+    const isReadOnly = Boolean(currentAuthStatus?.isReadOnlyPolicy);
+    const isDirty = JSON.stringify(draftPolicy) !== JSON.stringify(savedPolicy);
+    const activeRuleSet = getActivePolicyRuleSet();
+    const isSeparate = draftPolicy.scopeMode === 'separate';
+    const scopeLabel = !isSeparate
+      ? 'Gemeinsame Regeln (Updates & Installieren)'
+      : activePolicyScopeTab === 'install'
+        ? 'Regeln fuer Neu-Installationen'
+        : 'Regeln fuer Updates';
+
+    const sourceTabs = [
+      { id: 'all', label: '📦 Archiv & PC' },
+      { id: 'archive', label: '🗄️ Archiv' },
+      { id: 'installed', label: '💻 Installiert' },
+      { id: 'winget', label: '🪽 Winget (Online)' },
+      { id: 'provider', label: '🧩 Paketmanager' },
+      { id: 'manual', label: '✏️ Manuell' },
+    ];
+
+    const subtabsHtml = isSeparate
+      ? `
+        <div class="policy-subtabs" role="tablist" aria-label="Richtlinien-Bereich">
+          <button
+            type="button"
+            class="policy-subtab-btn ${activePolicyScopeTab === 'updates' ? 'active' : ''}"
+            data-policy-scope-tab="updates"
+          >
+            ⬆️ Updates (${draftPolicy.updates.entries.length})
+          </button>
+          <button
+            type="button"
+            class="policy-subtab-btn ${activePolicyScopeTab === 'install' ? 'active' : ''}"
+            data-policy-scope-tab="install"
+          >
+            ⬇️ Neu installieren (${draftPolicy.install.entries.length})
+          </button>
+        </div>
+      `
+      : '';
+
+    const searchRowHtml =
+      policySearchSource === 'manual'
+        ? ''
+        : `
+          <div class="policy-search-row">
+            <input
+              type="text"
+              id="cfgPolicyCandidateSearch"
+              value="${escapeHTML(policySearchQuery)}"
+              placeholder="${policySearchSource === 'winget' ? 'Winget-Paket suchen (z. B. 7zip, VLC)...' : 'Programme nach Name, Paket-ID oder Herausgeber filtern...'}"
+            >
+            ${
+              policySearchSource === 'winget'
+                ? '<button type="button" class="btn btn-primary btn-xs" data-policy-action="search-winget">🔎 Winget suchen</button>'
+                : ''
+            }
+          </div>
+        `;
+
+    return `
+      <div class="policy-header-row">
+        <div>
+          <h3>🛡️ Zugriffsrichtlinien (Whitelist / Blacklist &amp; Modus)</h3>
+          <p class="panel-hint">
+            Steuert fuer Endnutzer, welche Programme sichtbar sind und ob Setups nur still (<code>Nur Silent</code>) oder auch interaktiv laufen duerfen.
+          </p>
+        </div>
+        <div class="policy-header-actions">
+          ${isDirty ? '<span class="settings-dirty-badge">● Ungespeichert</span>' : ''}
+          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="export">📤 Exportieren</button>
+          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="import" ${isReadOnly ? 'disabled' : ''}>📥 Importieren</button>
+        </div>
+      </div>
+
+      ${
+        isReadOnly
+          ? '<div class="auth-integrity-banner is-warn" role="status">🔒 Die Policy-Datei ist schreibgeschuetzt. Zugriffsrichtlinien koennen hier nicht geaendert werden.</div>'
+          : ''
+      }
+
+      <div class="policy-editor-card">
+        <div class="policy-master-toggles">
+          <label class="check-row">
+            <input type="checkbox" id="cfgPolicyEnabled" ${draftPolicy.enabled ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
+            <span><strong>Zugriffsrichtlinien aktivieren</strong></span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="cfgPolicyApplyToAdmin" ${draftPolicy.applyToAdmin ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
+            <span>Richtlinien auch auf angemeldete Administratoren anwenden (Standard: Aus - Admin sieht &amp; verwaltet immer alles)</span>
+          </label>
+        </div>
+
+        <div class="policy-scope-row">
+          <span class="policy-field-title">Geltungsbereich:</span>
+          <div class="policy-scope-switcher" role="group" aria-label="Geltungsbereich">
+            <button
+              type="button"
+              class="policy-scope-btn ${!isSeparate ? 'active' : ''}"
+              data-policy-scope-mode="shared"
+              ${isReadOnly ? 'disabled' : ''}
+            >
+              🔗 Gemeinsam (Updates &amp; Installieren)
+            </button>
+            <button
+              type="button"
+              class="policy-scope-btn ${isSeparate ? 'active' : ''}"
+              data-policy-scope-mode="separate"
+              ${isReadOnly ? 'disabled' : ''}
+            >
+              🔀 Getrennt (Updates / Installieren)
+            </button>
+          </div>
+        </div>
+
+        ${subtabsHtml}
+
+        <div class="policy-ruleset-box">
+          <div class="policy-ruleset-head">
+            <strong>${escapeHTML(scopeLabel)}</strong>
+          </div>
+
+          <div class="form-grid-2">
+            <label class="form-field">
+              <span>Listen-Modus</span>
+              <select id="cfgPolicyListType" ${isReadOnly ? 'disabled' : ''}>
+                <option value="none" ${activeRuleSet.listType === 'none' ? 'selected' : ''}>Keine Listen-Filterung (alle sichtbar)</option>
+                <option value="whitelist" ${activeRuleSet.listType === 'whitelist' ? 'selected' : ''}>Whitelist (nur ausgewaehlte Programme erlauben)</option>
+                <option value="blacklist" ${activeRuleSet.listType === 'blacklist' ? 'selected' : ''}>Blacklist (ausgewaehlte Programme sperren)</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Standard-Ausfuehrungsmodus</span>
+              <select id="cfgPolicyExecMode" ${isReadOnly ? 'disabled' : ''}>
+                <option value="allow-interactive" ${activeRuleSet.defaultExecutionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ Silent &amp; Interaktiv erlaubt</option>
+                <option value="silent-only" ${activeRuleSet.defaultExecutionMode === 'silent-only' ? 'selected' : ''}>⚡ Nur Silent (Adware-geschuetzte Setups werden blockiert)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="policy-picker-box">
+            <div class="policy-source-chips">
+              ${sourceTabs
+                .map(
+                  (src) =>
+                    `<button type="button" class="origin-chip ${policySearchSource === src.id ? 'active' : ''}" data-policy-source="${src.id}">${escapeHTML(src.label)}</button>`
+                )
+                .join('')}
+            </div>
+            ${searchRowHtml}
+            <div id="policyCandidateList" class="policy-candidate-list">
+              ${renderPolicyCandidateListHtml()}
+            </div>
+          </div>
+
+          <div class="policy-entries-box">
+            <div class="policy-entries-head">
+              <strong>Aktive Eintraege (${activeRuleSet.entries.length})</strong>
+              ${
+                activeRuleSet.entries.length > 0
+                  ? `<button type="button" class="btn btn-ghost btn-xs" data-policy-action="clear-ruleset" ${isReadOnly ? 'disabled' : ''}>🗑️ Liste leeren</button>`
+                  : ''
+              }
+            </div>
+            <div id="policyEntriesList" class="policy-entries-list">
+              ${renderPolicyEntriesHtml()}
+            </div>
+          </div>
+        </div>
+
+        <div class="auth-form-actions">
+          <span class="muted">Speicherung erfolgt manipulationssicher zusammen mit der Admin-Policy in <code>admin-policy.json</code>.</span>
+          <button type="button" class="btn btn-primary" data-policy-action="save" ${isReadOnly ? 'disabled' : ''}>🛡️ Zugriffsrichtlinien speichern</button>
+        </div>
+      </div>
+    `;
+  };
 
   let currentAdminStatus = initialAdminStatus || state.adminSession || { mode: 'off', supported: true };
   if (initialAdminStatus) {
@@ -657,16 +1113,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         </section>
 
         <section class="settings-section" id="settingsPolicySection">
-          <h3>🛡️ Software-Richtlinien (Whitelist & Blacklist)</h3>
-          <div class="settings-placeholder-card">
-            <div class="settings-placeholder-head">
-              <strong>Paket- & Paketmanager-Regeln</strong>
-              <span class="settings-placeholder-badge">Vorbereitet (P7)</span>
-            </div>
-            <p class="panel-hint">
-              Hier werden künftig erlaubte und gesperrte Software-Pakete sowie Richtlinien für Paketmanager zentral gepflegt.
-            </p>
-          </div>
+          ${renderPolicySectionHtml()}
         </section>
       </section>
 
@@ -781,6 +1228,54 @@ export async function renderSettingsModal(initialTab = 'general') {
     updateDirtyUi();
   };
 
+  const refreshPolicySectionUi = () => {
+    if (modalToken !== activeSettingsToken || overlay.hidden) return;
+    const sec = modal.querySelector('#settingsPolicySection');
+    if (sec instanceof HTMLElement) {
+      sec.innerHTML = renderPolicySectionHtml();
+    }
+  };
+
+  const refreshPolicyListsInPlace = () => {
+    const candList = modal.querySelector('#policyCandidateList');
+    if (candList instanceof HTMLElement) {
+      candList.innerHTML = renderPolicyCandidateListHtml();
+    }
+    const entriesList = modal.querySelector('#policyEntriesList');
+    if (entriesList instanceof HTMLElement) {
+      entriesList.innerHTML = renderPolicyEntriesHtml();
+    }
+  };
+
+  const runWingetPolicySearch = async () => {
+    const q = policySearchQuery.trim();
+    if (q.length < 2) {
+      policyWingetError = 'Bitte mindestens 2 Zeichen fuer die Winget-Suche eingeben.';
+      policyWingetResults = [];
+      refreshPolicyListsInPlace();
+      return;
+    }
+    policyWingetLoading = true;
+    policyWingetError = '';
+    refreshPolicyListsInPlace();
+    try {
+      const res = await window.electronAPI.searchProviders(q, { providerIds: ['winget'], limit: 25 });
+      if (modalToken !== activeSettingsToken || overlay.hidden) return;
+      policyWingetLoading = false;
+      policyWingetResults = Array.isArray(res?.results) ? res.results : [];
+      if (res?.byProvider?.winget?.success === false && res.byProvider.winget.error) {
+        policyWingetError = res.byProvider.winget.error;
+      }
+      refreshPolicyListsInPlace();
+    } catch (err) {
+      if (modalToken !== activeSettingsToken || overlay.hidden) return;
+      policyWingetLoading = false;
+      policyWingetResults = [];
+      policyWingetError = err?.message || 'Winget-Suche fehlgeschlagen.';
+      refreshPolicyListsInPlace();
+    }
+  };
+
   const refreshAuthSectionUi = (nextStatus) => {
     if (nextStatus) {
       currentAuthStatus = applyAuthStatus(nextStatus);
@@ -791,6 +1286,7 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (sec instanceof HTMLElement) {
       sec.innerHTML = renderAuthSectionHtml(currentAuthStatus);
     }
+    refreshPolicySectionUi();
   };
 
   const refreshProvidersSectionUi = () => {
@@ -943,6 +1439,19 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   modal.oninput = (e) => {
     if (!(e.target instanceof Element)) return;
+    if (e.target.id === 'cfgPolicyCandidateSearch' && e.target instanceof HTMLInputElement) {
+      policySearchQuery = e.target.value;
+      refreshPolicyListsInPlace();
+      return;
+    }
+    if (e.target.id === 'cfgPolicyManualValue' && e.target instanceof HTMLInputElement) {
+      policyManualValue = e.target.value;
+      return;
+    }
+    if (e.target.id === 'cfgPolicyManualLabel' && e.target instanceof HTMLInputElement) {
+      policyManualLabel = e.target.value;
+      return;
+    }
     if (e.target.id === 'cfgFilenamePattern') {
       updatePreview();
     }
@@ -955,8 +1464,55 @@ export async function renderSettingsModal(initialTab = 'general') {
     syncDraftFromDom();
   };
 
+  modal.onkeydown = (e) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.id === 'cfgPolicyCandidateSearch') {
+      if (policySearchSource === 'winget') {
+        e.preventDefault();
+        void runWingetPolicySearch();
+      }
+    }
+  };
+
   modal.onchange = (e) => {
     if (!(e.target instanceof Element)) return;
+    if (e.target.id === 'cfgPolicyEnabled' && e.target instanceof HTMLInputElement) {
+      draftPolicy = normalizeAccessPolicy({ ...draftPolicy, enabled: e.target.checked });
+      refreshPolicySectionUi();
+      return;
+    }
+    if (e.target.id === 'cfgPolicyApplyToAdmin' && e.target instanceof HTMLInputElement) {
+      draftPolicy = normalizeAccessPolicy({ ...draftPolicy, applyToAdmin: e.target.checked });
+      refreshPolicySectionUi();
+      return;
+    }
+    if (e.target.id === 'cfgPolicyListType' && e.target instanceof HTMLSelectElement) {
+      const nextListType = e.target.value;
+      updateActivePolicyRuleSet((rs) => ({ ...rs, listType: nextListType }));
+      refreshPolicySectionUi();
+      return;
+    }
+    if (e.target.id === 'cfgPolicyExecMode' && e.target instanceof HTMLSelectElement) {
+      const nextExecMode = e.target.value;
+      updateActivePolicyRuleSet((rs) => ({ ...rs, defaultExecutionMode: nextExecMode }));
+      refreshPolicySectionUi();
+      return;
+    }
+    if (e.target.id === 'cfgPolicyManualType' && e.target instanceof HTMLSelectElement) {
+      policyManualMatchType = e.target.value;
+      return;
+    }
+    const entryModeSel = e.target.closest('[data-policy-entry-mode]');
+    if (entryModeSel instanceof HTMLSelectElement) {
+      const mType = entryModeSel.dataset.matchType;
+      const mVal = entryModeSel.dataset.matchValue;
+      updateActivePolicyRuleSet((rs) => ({
+        ...rs,
+        entries: updatePolicyEntryExecutionMode(rs.entries, mType, mVal, entryModeSel.value),
+      }));
+      refreshPolicySectionUi();
+      return;
+    }
+
     const toggle = e.target.closest('[data-provider-toggle]');
     if (toggle instanceof HTMLInputElement) {
       const providerId = toggle.dataset.providerToggle;
@@ -982,6 +1538,135 @@ export async function renderSettingsModal(initialTab = 'general') {
     const tabBtn = e.target.closest('[data-settings-tab]');
     if (tabBtn instanceof HTMLElement) {
       switchTab(tabBtn.dataset.settingsTab);
+      return;
+    }
+
+    const policyScopeBtn = e.target.closest('[data-policy-scope-mode]');
+    if (policyScopeBtn instanceof HTMLElement) {
+      const nextScope = policyScopeBtn.dataset.policyScopeMode;
+      if (nextScope === 'shared' || nextScope === 'separate') {
+        draftPolicy = normalizeAccessPolicy({ ...draftPolicy, scopeMode: nextScope });
+        refreshPolicySectionUi();
+      }
+      return;
+    }
+
+    const policyScopeTabBtn = e.target.closest('[data-policy-scope-tab]');
+    if (policyScopeTabBtn instanceof HTMLElement) {
+      activePolicyScopeTab = policyScopeTabBtn.dataset.policyScopeTab === 'install' ? 'install' : 'updates';
+      refreshPolicySectionUi();
+      return;
+    }
+
+    const policySourceBtn = e.target.closest('[data-policy-source]');
+    if (policySourceBtn instanceof HTMLElement) {
+      policySearchSource = policySourceBtn.dataset.policySource || 'all';
+      refreshPolicySectionUi();
+      return;
+    }
+
+    const toggleCandBtn = e.target.closest('[data-policy-toggle-candidate]');
+    if (toggleCandBtn instanceof HTMLElement) {
+      const matchType = toggleCandBtn.dataset.matchType || '';
+      const value = toggleCandBtn.dataset.matchValue || '';
+      const label = toggleCandBtn.dataset.matchLabel || value;
+      const targetKey = getPolicyEntryKey({ matchType, value });
+      const activeSet = getActivePolicyRuleSet();
+      const exists = activeSet.entries.some((entry) => getPolicyEntryKey(entry) === targetKey);
+      updateActivePolicyRuleSet((rs) => ({
+        ...rs,
+        entries: exists
+          ? removePolicyEntry(rs.entries, matchType, value)
+          : upsertPolicyEntry(rs.entries, { matchType, value, label, executionMode: 'inherit' }),
+      }));
+      refreshPolicySectionUi();
+      return;
+    }
+
+    const removeEntryBtn = e.target.closest('[data-policy-remove-entry]');
+    if (removeEntryBtn instanceof HTMLElement) {
+      const matchType = removeEntryBtn.dataset.matchType || '';
+      const value = removeEntryBtn.dataset.matchValue || '';
+      updateActivePolicyRuleSet((rs) => ({
+        ...rs,
+        entries: removePolicyEntry(rs.entries, matchType, value),
+      }));
+      refreshPolicySectionUi();
+      return;
+    }
+
+    const policyActionBtn = e.target.closest('[data-policy-action]');
+    if (policyActionBtn instanceof HTMLElement) {
+      const pAct = policyActionBtn.dataset.policyAction;
+      if (pAct === 'search-winget') {
+        await runWingetPolicySearch();
+      } else if (pAct === 'add-manual') {
+        const cleanVal = policyManualValue.trim();
+        if (!cleanVal) {
+          showToast('Bitte einen Wert oder ein Muster eingeben.', { type: 'warn' });
+          return;
+        }
+        updateActivePolicyRuleSet((rs) => ({
+          ...rs,
+          entries: upsertPolicyEntry(rs.entries, {
+            matchType: policyManualMatchType,
+            value: cleanVal,
+            label: policyManualLabel.trim() || cleanVal,
+            executionMode: 'inherit',
+          }),
+        }));
+        policyManualValue = '';
+        policyManualLabel = '';
+        refreshPolicySectionUi();
+      } else if (pAct === 'clear-ruleset') {
+        updateActivePolicyRuleSet((rs) => ({ ...rs, entries: [] }));
+        refreshPolicySectionUi();
+      } else if (pAct === 'save') {
+        if (policyActionBtn instanceof HTMLButtonElement) policyActionBtn.disabled = true;
+        try {
+          const res = await window.electronAPI.updateAccessPolicy(draftPolicy);
+          if (modalToken !== activeSettingsToken) return;
+          if (res?.status) {
+            savedPolicy = normalizeAccessPolicy(res.status.accessPolicy);
+            draftPolicy = normalizeAccessPolicy(res.status.accessPolicy);
+            refreshAuthSectionUi(res.status);
+          }
+          if (res?.success) {
+            await triggerCatalogReload();
+            showToast('Zugriffsrichtlinien gespeichert.', { type: 'success' });
+          } else {
+            showToast(res?.error || 'Zugriffsrichtlinien konnten nicht gespeichert werden.', {
+              type: 'error',
+              duration: 6000,
+            });
+          }
+        } finally {
+          if (policyActionBtn instanceof HTMLButtonElement && policyActionBtn.isConnected) {
+            policyActionBtn.disabled = false;
+          }
+        }
+      } else if (pAct === 'export') {
+        const res = await window.electronAPI.exportAccessPolicy();
+        if (res?.success) {
+          showToast('Zugriffsrichtlinien erfolgreich exportiert.', { type: 'success' });
+        } else if (res?.error && !res.canceled) {
+          showToast(res.error, { type: 'error', duration: 6000 });
+        }
+      } else if (pAct === 'import') {
+        const res = await window.electronAPI.importAccessPolicy();
+        if (modalToken !== activeSettingsToken) return;
+        if (res?.status) {
+          savedPolicy = normalizeAccessPolicy(res.status.accessPolicy);
+          draftPolicy = normalizeAccessPolicy(res.status.accessPolicy);
+          refreshAuthSectionUi(res.status);
+        }
+        if (res?.success) {
+          await triggerCatalogReload();
+          showToast('Zugriffsrichtlinien importiert und aktiviert.', { type: 'success' });
+        } else if (res?.error && !res.canceled) {
+          showToast(res.error, { type: 'error', duration: 6000 });
+        }
+      }
       return;
     }
 

@@ -1,6 +1,6 @@
 import { evaluateBundleStatus } from '../../shared/bundles-logic.js';
 import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
-import { getUsableProviders, state } from '../state.js';
+import { getUsableProviders, getVisibleBundleItems, getVisibleBundles, state } from '../state.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { queueItemsForIconResolution } from './cards.js';
 
@@ -39,7 +39,11 @@ function renderEmptyBundlesHtml(hasSearch) {
 
 function renderBundleCardHtml(bundle) {
   const depth = state.settings.versionCompareDepth ?? 3;
-  const evaluation = evaluateBundleStatus(bundle, {
+  const visibleBundle = {
+    ...bundle,
+    items: getVisibleBundleItems(bundle),
+  };
+  const evaluation = evaluateBundleStatus(visibleBundle, {
     packages: state.packages,
     versionCompareDepth: depth,
   });
@@ -157,8 +161,8 @@ function getBundleProviderFilterOptions() {
       options.push({ id: prov.id, label: prov.name });
     }
   }
-  for (const bundle of state.bundles || []) {
-    for (const item of bundle.items || []) {
+  for (const bundle of getVisibleBundles()) {
+    for (const item of getVisibleBundleItems(bundle)) {
       const src = String(item.source || '')
         .trim()
         .toLowerCase();
@@ -181,14 +185,16 @@ export function renderBundlesView() {
   }
   const activeFilter = state.bundleProviderFilter || 'all';
 
+  const visibleBundles = getVisibleBundles();
   const q = state.bundleSearchQuery.trim().toLowerCase();
-  const filtered = state.bundles.filter((b) => {
+  const filtered = visibleBundles.filter((b) => {
+    const visibleItems = getVisibleBundleItems(b);
     if (activeFilter !== 'all') {
-      const hasSource = (b.items || []).some((it) => String(it.source || '').toLowerCase() === activeFilter);
+      const hasSource = visibleItems.some((it) => String(it.source || '').toLowerCase() === activeFilter);
       if (!hasSource) return false;
     }
     if (!q) return true;
-    const itemNames = (b.items || []).map((i) => `${i.name} ${i.packageId}`).join(' ');
+    const itemNames = visibleItems.map((i) => `${i.name} ${i.packageId}`).join(' ');
     return `${b.name} ${b.description} ${itemNames}`.toLowerCase().includes(q);
   });
 
@@ -234,7 +240,7 @@ export function renderBundlesView() {
           <input type="text" id="bundleSearchInput" value="${escapeHTML(state.bundleSearchQuery)}" placeholder="Bündel oder enthaltene Programme suchen (Strg+F)..." autocomplete="off">
           <button type="button" id="clearBundleSearchBtn" class="clear-btn" title="Suche leeren" ${state.bundleSearchQuery ? '' : 'hidden'}>✕</button>
         </div>
-        <span class="muted">${filtered.length} von ${state.bundles.length} Bündel(n)</span>
+        <span class="muted">${filtered.length} von ${visibleBundles.length} Bündel(n)</span>
       </div>
       ${filterBarHtml}
     </div>

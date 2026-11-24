@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { normalizeAccessPolicy } from './policy-logic.js';
 
 export const HKLM_POLICY_REGISTRY_PATH = 'HKLM\\SOFTWARE\\Policies\\SoftwareKatalog';
 export const HKLM_POLICY_VALUE_NAME = 'PolicyFilePath';
@@ -52,6 +53,9 @@ export const PROTECTED_ADMIN_IPC_CHANNELS = new Set([
   'auth-set-policy-path',
   'auth-lock-hklm',
   'auth-unlock-hklm',
+  'policy-update',
+  'policy-export',
+  'policy-import',
 ]);
 
 Object.freeze(PROTECTED_ADMIN_IPC_CHANNELS);
@@ -251,6 +255,20 @@ export function validateCredentialsInput({ username, password, requirePassword =
   return { valid: true, username: cleanUser };
 }
 
+/**
+ * @param {Record<string, any>} policyDoc
+ * @returns {{
+ *   schemaVersion: number,
+ *   updatedAt: string,
+ *   auth: {
+ *     enabled: boolean,
+ *     username: string,
+ *     passwordHash: Record<string, any> | null,
+ *     sessionTimeoutMinutes: number,
+ *   },
+ *   accessPolicy?: ReturnType<typeof normalizeAccessPolicy>,
+ * }}
+ */
 function buildCanonicalPolicyPayload(policyDoc) {
   const rawAuth = policyDoc?.auth && typeof policyDoc.auth === 'object' ? policyDoc.auth : {};
   const normalizedHash = normalizePasswordHashRecord(rawAuth.passwordHash);
@@ -268,7 +286,7 @@ function buildCanonicalPolicyPayload(policyDoc) {
       }
     : null;
 
-  return {
+  const canonical = {
     schemaVersion: Number.isInteger(policyDoc?.schemaVersion) ? policyDoc.schemaVersion : POLICY_SCHEMA_VERSION,
     updatedAt: typeof policyDoc?.updatedAt === 'string' ? policyDoc.updatedAt : '',
     auth: {
@@ -278,6 +296,15 @@ function buildCanonicalPolicyPayload(policyDoc) {
       sessionTimeoutMinutes: normalizeSessionTimeoutMinutes(rawAuth.sessionTimeoutMinutes),
     },
   };
+
+  if (policyDoc?.accessPolicy !== undefined) {
+    return {
+      ...canonical,
+      accessPolicy: normalizeAccessPolicy(policyDoc.accessPolicy),
+    };
+  }
+
+  return canonical;
 }
 
 /**
@@ -298,6 +325,7 @@ export function computePolicyIntegrity(policyDoc) {
  *   username?: string,
  *   passwordHash?: Record<string, any> | null,
  *   sessionTimeoutMinutes?: number,
+ *   accessPolicy?: Record<string, any>,
  *   updatedAt?: string,
  * }} [params]
  */
@@ -306,9 +334,10 @@ export function createPolicyDocument({
   username = '',
   passwordHash = null,
   sessionTimeoutMinutes = 0,
+  accessPolicy = undefined,
   updatedAt = new Date().toISOString(),
 } = {}) {
-  const canonical = buildCanonicalPolicyPayload({
+  const docInput = {
     schemaVersion: POLICY_SCHEMA_VERSION,
     updatedAt,
     auth: {
@@ -317,7 +346,12 @@ export function createPolicyDocument({
       passwordHash: enabled ? passwordHash : null,
       sessionTimeoutMinutes: normalizeSessionTimeoutMinutes(sessionTimeoutMinutes),
     },
-  });
+  };
+  if (accessPolicy !== undefined) {
+    docInput.accessPolicy = accessPolicy;
+  }
+
+  const canonical = buildCanonicalPolicyPayload(docInput);
   const checksum = computePolicyIntegrity(canonical);
 
   return {

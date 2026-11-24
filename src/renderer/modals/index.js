@@ -34,6 +34,7 @@ export function resetModalContent() {
   content.onclick = null;
   content.onchange = null;
   content.oninput = null;
+  content.onkeydown = null;
   content.ondragstart = null;
   content.ondragover = null;
   content.ondragleave = null;

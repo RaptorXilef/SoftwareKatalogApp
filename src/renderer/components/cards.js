@@ -8,12 +8,14 @@ import {
 } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import {
+  evaluateItemPolicy,
   getActiveOriginFilter,
   getActiveSortMode,
   getItemStatus,
   hasAnyLocalPath,
   hasOnlineSource,
   isItemNew,
+  isItemVisibleForTab,
   isProviderUsable,
   state,
 } from '../state.js';
@@ -201,6 +203,8 @@ function isProviderItemVisible(item) {
 function matchesTabAndFilter(item, st) {
   const tab = state.activeTab;
 
+  if (!isItemVisibleForTab(item, tab)) return false;
+
   if (tab === 'updates') {
     if (!isProviderItemVisible(item)) return false;
     if (item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) return false;
@@ -244,6 +248,7 @@ function getTabBaseCount(visibleHidden) {
   for (const item of state.packages) {
     if (!isPackageVisible(item, visibleHidden)) continue;
     if (!isProviderItemVisible(item)) continue;
+    if (!isItemVisibleForTab(item, state.activeTab)) continue;
     const st = getItemStatus(item);
     if (
       state.activeTab === 'updates' &&
@@ -490,6 +495,7 @@ export function getPendingArchiveWebUpdateItems() {
   for (const item of state.packages) {
     if (!item.inArchive) continue;
     if (!isPackageVisible(item, visibleHidden)) continue;
+    if (!isItemVisibleForTab(item, 'updates')) continue;
     const st = getItemStatus(item);
     if (st.hasWebUpdate && !st.isIgnoredUpdate && canDownloadOnline(item)) {
       items.push(item);
@@ -531,13 +537,29 @@ export function renderUpdatesBatchBar(entries = null) {
     selectedCount > 0 ? activeEntries.filter((e) => state.selectedUpdateIds.has(e.item.id)) : activeEntries;
   let silentCount = 0;
   let protectedCount = 0;
+  let policySilentOnlyCount = 0;
+  let adwareConflictCount = 0;
+
   for (const { item } of modeSourceEntries) {
+    const policyEval = evaluateItemPolicy(item, 'update');
+    if (policyEval.silentOnly) policySilentOnlyCount++;
+    if (policyEval.adwareConflict) adwareConflictCount++;
     if (!item.inArchive) continue;
     const badge = getInstallModeBadge(item);
     if (badge?.type === 'silent') silentCount++;
     else if (badge?.type === 'protected') protectedCount++;
   }
+
+  const allSilentOnly = modeSourceEntries.length > 0 && policySilentOnlyCount === modeSourceEntries.length;
+  const anySilentOnly =
+    activeEntries.length > 0 && activeEntries.every(({ item }) => evaluateItemPolicy(item, 'update').silentOnly);
+
   const modePills = [];
+  if (anySilentOnly) {
+    modePills.push(
+      '<span class="batch-mode-pill is-silent" title="Zugriffsrichtlinie erzwingt stille Updates">🔒 Richtlinie: Nur Silent</span>'
+    );
+  }
   if (silentCount > 0) {
     modePills.push(
       `<span class="batch-mode-pill is-silent" title="Wird bei Massenaktualisierung still installiert">⚡ ${silentCount} Silent</span>`
@@ -548,7 +570,20 @@ export function renderUpdatesBatchBar(entries = null) {
       `<span class="batch-mode-pill is-protected" title="Silent-Parameter werden wegen Adware-Schutz immer ignoriert">🛡️ ${protectedCount} Interaktiv-Schutz</span>`
     );
   }
+  if (adwareConflictCount > 0) {
+    modePills.push(
+      `<span class="batch-mode-pill is-protected" title="Adware-Schutz blockiert stille Installation unter Richtlinie Nur Silent">🚫 ${adwareConflictCount} Adware-Konflikt</span>`
+    );
+  }
   const modePillsHtml = modePills.length > 0 ? `<div class="batch-mode-pills">${modePills.join('')}</div>` : '';
+
+  const standardAllBtnHtml = anySilentOnly
+    ? ''
+    : `<button type="button" class="btn btn-primary" id="btnUpdateAllStandard" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+        ⬆️ Alle Updaten <span class="btn-count-badge">${totalCount}</span>
+      </button>`;
+  const silentAllBtnCls = anySilentOnly ? 'btn-primary' : 'btn-local';
+  const selectedBtnLabel = allSilentOnly ? '⚡ Ausgewählte silent aktualisieren' : '⬆️ Ausgewählte aktualisieren';
 
   bar.hidden = false;
   bar.innerHTML = `
@@ -567,14 +602,12 @@ export function renderUpdatesBatchBar(entries = null) {
       <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
         ⬇️ Alle Online-Updates ins Archiv laden <span class="btn-count-badge">${pendingArchiveDownloads}</span>
       </button>
-      <button type="button" class="btn btn-primary" id="btnUpdateAllStandard" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
-        ⬆️ Alle Updaten <span class="btn-count-badge">${totalCount}</span>
-      </button>
-      <button type="button" class="btn btn-local" id="btnUpdateAllSilent" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
+      ${standardAllBtnHtml}
+      <button type="button" class="btn ${silentAllBtnCls}" id="btnUpdateAllSilent" ${totalCount === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
         ⚡ Alle Updaten (silent) <span class="btn-count-badge">${totalCount}</span>
       </button>
       <button type="button" class="btn btn-ghost" id="btnBatchUpdateSelected" ${selectedCount === 0 ? 'disabled' : disabledAttr}>
-        ⬆️ Ausgewählte aktualisieren <span class="btn-count-badge">${selectedCount}</span>
+        ${selectedBtnLabel} <span class="btn-count-badge">${selectedCount}</span>
       </button>
     </div>
   `;

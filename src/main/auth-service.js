@@ -20,6 +20,13 @@ import {
   verifyPolicyIntegrity,
 } from '../shared/auth-logic.js';
 import {
+  cloneAccessPolicy,
+  createDefaultAccessPolicy,
+  createFailClosedAccessPolicy,
+  evaluatePackagePolicy,
+  normalizeAccessPolicy,
+} from '../shared/policy-logic.js';
+import {
   isAdminSessionActive,
   isProcessElevated,
   runPowerShellElevated,
@@ -268,6 +275,8 @@ export function createAuthService(deps = {}) {
     integrityValid: true,
     integrityWarning: '',
     integrityChecksum: '',
+    hasStoredAccessPolicy: false,
+    accessPolicy: createDefaultAccessPolicy(),
   };
 
   function loadPolicyState() {
@@ -295,6 +304,8 @@ export function createAuthService(deps = {}) {
     let integrityValid = true;
     let integrityWarning = '';
     let integrityChecksum = '';
+    let hasStoredAccessPolicy = false;
+    let accessPolicy = createDefaultAccessPolicy();
 
     if (!policyExists) {
       if (loc.isHklmLocked) {
@@ -303,6 +314,7 @@ export function createAuthService(deps = {}) {
         integrityValid = false;
         integrityWarning =
           'Die per HKLM-Policy festgelegte Datei wurde nicht gefunden. Administrative Aktionen bleiben gesperrt.';
+        accessPolicy = createFailClosedAccessPolicy();
       }
     } else {
       try {
@@ -320,6 +332,7 @@ export function createAuthService(deps = {}) {
           integrityValid = false;
           integrityWarning =
             'Integritaetspruefung der Policy-Datei fehlgeschlagen (moegliche Manipulation). Administrative Aktionen bleiben gesperrt.';
+          accessPolicy = createFailClosedAccessPolicy();
         } else {
           rawEnabled = Boolean(parsed.auth.enabled);
           effectiveEnabled = rawEnabled;
@@ -328,6 +341,11 @@ export function createAuthService(deps = {}) {
           sessionTimeoutMinutes = normalizeSessionTimeoutMinutes(parsed.auth.sessionTimeoutMinutes);
           integrityValid = true;
           integrityWarning = '';
+          hasStoredAccessPolicy = parsed.accessPolicy !== undefined;
+          accessPolicy =
+            parsed.accessPolicy !== undefined
+              ? normalizeAccessPolicy(parsed.accessPolicy)
+              : createDefaultAccessPolicy();
         }
       } catch {
         // Fail-Closed bei Lesefehlern / ungueltigem JSON
@@ -335,6 +353,7 @@ export function createAuthService(deps = {}) {
         integrityValid = false;
         integrityWarning =
           'Policy-Datei konnte nicht gelesen werden oder ist beschaedigt. Administrative Aktionen bleiben gesperrt.';
+        accessPolicy = createFailClosedAccessPolicy();
       }
     }
 
@@ -355,6 +374,8 @@ export function createAuthService(deps = {}) {
       integrityValid,
       integrityWarning,
       integrityChecksum,
+      hasStoredAccessPolicy,
+      accessPolicy,
     };
 
     if (!policyState.effectiveEnabled && isAuthenticated) {
@@ -386,6 +407,7 @@ export function createAuthService(deps = {}) {
       integrityWarning: policyState.integrityWarning,
       integrityChecksum: policyState.integrityChecksum,
       platformSupportedForHklm: platform === 'win32',
+      accessPolicy: cloneAccessPolicy(policyState.accessPolicy),
     };
   }
 
@@ -404,6 +426,7 @@ export function createAuthService(deps = {}) {
       status.policyExists,
       status.integrityValid,
       status.integrityWarning,
+      status.accessPolicy,
     ]);
     if (signature === lastNotifiedSignature) return;
     lastNotifiedSignature = signature;
@@ -626,12 +649,15 @@ export function createAuthService(deps = {}) {
         };
       }
 
+      const preservedAccessPolicy =
+        policyState.hasStoredAccessPolicy || policyState.accessPolicy.enabled ? policyState.accessPolicy : undefined;
       const nextHash = hasNewPassword ? await hashPassword(password) : policyState.passwordHash;
       const doc = createPolicyDocument({
         enabled: true,
         username: check.username,
         passwordHash: nextHash,
         sessionTimeoutMinutes: nextTimeout,
+        accessPolicy: preservedAccessPolicy,
         updatedAt: new Date(nowFn()).toISOString(),
       });
 
@@ -652,12 +678,15 @@ export function createAuthService(deps = {}) {
       authenticatedUser = check.username;
       lastActivityAt = nowFn();
     } else {
+      const preservedAccessPolicy =
+        policyState.hasStoredAccessPolicy || policyState.accessPolicy.enabled ? policyState.accessPolicy : undefined;
       const keptUsername = normalizeUsername(username !== undefined ? username : policyState.username);
       const doc = createPolicyDocument({
         enabled: false,
         username: keptUsername,
         passwordHash: null,
         sessionTimeoutMinutes: nextTimeout,
+        accessPolicy: preservedAccessPolicy,
         updatedAt: new Date(nowFn()).toISOString(),
       });
 
@@ -804,7 +833,7 @@ export function createAuthService(deps = {}) {
     if (!resolvedTarget || !fs.existsSync(resolvedTarget)) {
       return {
         success: false,
-        error: 'Bitte zuerst den Admin-Schutz speichern, bevor der Pfad per HKLM gesperrt wird.',
+        error: 'Bitte zuerst Admin-Schutz oder Zugriffsrichtlinien speichern, bevor der Pfad per HKLM gesperrt wird.',
         status: buildPublicStatus(),
       };
     }
@@ -852,6 +881,93 @@ export function createAuthService(deps = {}) {
     };
   }
 
+  function isCurrentAdmin() {
+    enforceTimeoutIfNeeded();
+    return Boolean(policyState.effectiveEnabled && isAuthenticated);
+  }
+
+  function getAccessPolicy({ refreshDisk = true } = {}) {
+    if (refreshDisk) {
+      loadPolicyState();
+    }
+    const admin = isCurrentAdmin();
+    return {
+      success: true,
+      accessPolicy: cloneAccessPolicy(policyState.accessPolicy),
+      isAdmin: admin,
+      isReadOnlyPolicy: policyState.isReadOnlyPolicy,
+      integrityValid: policyState.integrityValid,
+    };
+  }
+
+  /**
+   * @param {Record<string, any> | null | undefined} pkg
+   * @param {'update' | 'install' | 'view'} [action]
+   * @param {{ refreshDisk?: boolean }} [opts]
+   */
+  function evaluatePackageAccess(pkg, action = 'install', { refreshDisk = true } = {}) {
+    if (refreshDisk) {
+      loadPolicyState();
+    }
+    const admin = isCurrentAdmin();
+    return evaluatePackagePolicy(pkg, action, policyState.accessPolicy, admin);
+  }
+
+  async function updateAccessPolicy(nextPolicyInput) {
+    loadPolicyState();
+
+    if (policyState.isReadOnlyPolicy) {
+      return {
+        success: false,
+        readOnly: true,
+        error:
+          'Die Policy-Datei ist schreibgeschuetzt (Nur-Lese-Zugriff). Aenderungen muessen vom Administrator direkt am geschuetzten Speicherort vorgenommen werden.',
+        status: buildPublicStatus(),
+      };
+    }
+
+    if (policyState.policyExists && !policyState.integrityValid) {
+      return {
+        success: false,
+        error:
+          policyState.integrityWarning ||
+          'Policy-Datei ist beschaedigt oder manipuliert. Bitte zuerst Integritaet wiederherstellen.',
+        status: buildPublicStatus(),
+      };
+    }
+
+    const nextPolicy = normalizeAccessPolicy(nextPolicyInput);
+    const doc = createPolicyDocument({
+      enabled: policyState.rawEnabled,
+      username: policyState.username,
+      passwordHash: policyState.rawEnabled ? policyState.passwordHash : null,
+      sessionTimeoutMinutes: policyState.sessionTimeoutMinutes,
+      accessPolicy: nextPolicy,
+      updatedAt: new Date(nowFn()).toISOString(),
+    });
+
+    try {
+      writeFileAtomic(policyState.policyPath, JSON.stringify(doc, null, 2));
+    } catch (err) {
+      return {
+        success: false,
+        readOnly: isReadOnlyFsError(err),
+        error: isReadOnlyFsError(err)
+          ? 'Policy-Datei konnte nicht ueberschrieben werden (Schreibschutz / fehlende Berechtigung).'
+          : `Zugriffsrichtlinien konnten nicht gespeichert werden: ${err.message}`,
+        status: buildPublicStatus(),
+      };
+    }
+
+    loadPolicyState();
+    notifyStatusChange();
+    return {
+      success: true,
+      accessPolicy: cloneAccessPolicy(policyState.accessPolicy),
+      status: buildPublicStatus(),
+    };
+  }
+
   function dispose() {
     if (timeoutTimer) {
       clearInterval(timeoutTimer);
@@ -871,6 +987,9 @@ export function createAuthService(deps = {}) {
     setPolicyPath,
     lockPolicyPathInHklm,
     unlockPolicyPathInHklm,
+    getAccessPolicy,
+    evaluatePackageAccess,
+    updateAccessPolicy,
     dispose,
   };
 }
@@ -888,3 +1007,7 @@ export const updateAuthConfig = (payload) => defaultAuthService.updateAuthConfig
 export const setAuthPolicyPath = (policyPath, opts) => defaultAuthService.setPolicyPath(policyPath, opts);
 export const lockAuthPolicyInHklm = (policyPath) => defaultAuthService.lockPolicyPathInHklm(policyPath);
 export const unlockAuthPolicyInHklm = () => defaultAuthService.unlockPolicyPathInHklm();
+export const getAccessPolicy = (opts) => defaultAuthService.getAccessPolicy(opts);
+/** @param {Record<string, any> | null | undefined} pkg @param {'update' | 'install' | 'view'} [action] @param {{ refreshDisk?: boolean }} [opts] */
+export const evaluatePackageAccess = (pkg, action, opts) => defaultAuthService.evaluatePackageAccess(pkg, action, opts);
+export const updateAccessPolicy = (policy) => defaultAuthService.updateAccessPolicy(policy);

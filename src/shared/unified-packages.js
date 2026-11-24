@@ -1,6 +1,7 @@
 import { resolvePackageIcon } from './icon-logic.js';
 import { findMatchingIgnoreRule } from './ignore-logic.js';
 import { isIdLikeDisplayName } from './installed-merger.js';
+import { evaluatePackagePolicy } from './policy-logic.js';
 import { compareVersions, extractVersion } from './version.js';
 
 const GENERIC_DIRS = new Set([
@@ -651,7 +652,14 @@ export function normalizeStartTab(tab) {
 
 export function computeTabCounts(
   packages,
-  { visibleHiddenCats = [], versionCompareDepth = 3, bundlesCount = 0, ignoredUpdates = [] } = {}
+  {
+    visibleHiddenCats = [],
+    versionCompareDepth = 3,
+    bundlesCount = 0,
+    ignoredUpdates = [],
+    accessPolicy = null,
+    isAdmin = false,
+  } = {}
 ) {
   let updates = 0;
   let installed = 0;
@@ -661,9 +669,10 @@ export function computeTabCounts(
     if (!isPackageVisible(item, visibleHiddenCats)) continue;
 
     const st = getPackageStatus(item, { versionCompareDepth, ignoredUpdates });
-    if (st.hasVisibleUpdate) updates++;
-    if (item.isInstalled) installed++;
-    if (item.inArchive) archive++;
+    const viewDecision = evaluatePackagePolicy(item, 'view', accessPolicy, isAdmin);
+    if (st.hasVisibleUpdate && evaluatePackagePolicy(item, 'update', accessPolicy, isAdmin).visible) updates++;
+    if (item.isInstalled && viewDecision.visible) installed++;
+    if (item.inArchive && viewDecision.visible) archive++;
   }
 
   return {

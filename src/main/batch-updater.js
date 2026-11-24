@@ -1,6 +1,7 @@
 import { canDownloadOnline, getPackageStatus } from '../shared/unified-packages.js';
 import { extractVersion } from '../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-linker.js';
+import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { isAdminSessionActive, isProcessElevated, startAdminSession } from './elevated-helper.js';
@@ -173,10 +174,58 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
     return { success: true, completed: 0, failed: 0, skipped: 0, canceled: false, results: [] };
   }
 
+  const catalogById = new Map(loadCatalogWithLiveStatus().map((c) => [c.id, c]));
+  const allowedEntries = [];
+  const blockedResults = [];
+
+  for (const task of validTasks) {
+    const catItem = task.inArchive ? catalogById.get(task.id) || null : null;
+    const pkgForPolicy = {
+      id: task.id,
+      archiveItemId: task.inArchive ? task.id : catItem?.id || null,
+      inArchive: Boolean(task.inArchive),
+      source: task.inArchive ? 'archive' : task.packageManager || 'winget',
+      packageManager:
+        task.packageManager || catItem?.packageManager || (task.wingetId || catItem?.wingetId ? 'winget' : ''),
+      packageId: task.packageId || task.wingetId || catItem?.packageId || catItem?.wingetId || '',
+      wingetId: task.wingetId || catItem?.wingetId || '',
+      name: task.name || catItem?.name || task.id,
+      installMode: catItem?.installMode || task.installMode || 'interactive',
+    };
+
+    const decision = evaluatePackageAccess(pkgForPolicy, 'update');
+    if (!decision.allowed) {
+      blockedResults.push({
+        id: task.id,
+        name: pkgForPolicy.name,
+        status: 'error',
+        policyBlocked: true,
+        adwareConflict: decision.adwareConflict,
+        error: decision.error,
+      });
+      continue;
+    }
+
+    allowedEntries.push({ task, decision });
+  }
+
+  if (allowedEntries.length === 0 && blockedResults.length > 0) {
+    return {
+      success: false,
+      policyBlocked: true,
+      completed: 0,
+      failed: blockedResults.length,
+      skipped: 0,
+      canceled: false,
+      error: blockedResults[0].error,
+      results: blockedResults,
+    };
+  }
+
   if (
     !skipAutoAdminPrompt &&
     process.platform === 'win32' &&
-    validTasks.length >= 2 &&
+    allowedEntries.length >= 2 &&
     getConfig().autoRequestAdminForBatch === true &&
     !(await isProcessElevated()) &&
     !isAdminSessionActive()
@@ -195,17 +244,18 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
   }
 
   let completed = 0;
-  let failed = 0;
+  let failed = blockedResults.length;
   let skipped = 0;
-  const results = [];
+  const results = [...blockedResults];
 
   try {
-    for (let i = 0; i < validTasks.length; i++) {
+    for (let i = 0; i < allowedEntries.length; i++) {
       if (job.signal.aborted) break;
 
-      const task = validTasks[i];
-      const basePct = (i / validTasks.length) * 100;
-      const prefix = `[${i + 1}/${validTasks.length}] ${task.name}`;
+      const { task, decision } = allowedEntries[i];
+      const forceSilent = Boolean(decision.silentOnly);
+      const basePct = (i / allowedEntries.length) * 100;
+      const prefix = `[${i + 1}/${allowedEntries.length}] ${task.name}`;
 
       if (task.inArchive) {
         let catItem = loadCatalogWithLiveStatus().find((c) => c.id === task.id);
@@ -260,11 +310,11 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
             const archivePkgId = String(catItem.packageId || catItem.wingetId || '').trim();
             const archiveProv = archivePm ? getProvider(archivePm) : null;
             if (archiveProv?.capabilities?.install && archivePkgId) {
-              job.update(basePct + 50 / validTasks.length, `${prefix}: Aktualisiere via ${archiveProv.name}...`);
+              job.update(basePct + 50 / allowedEntries.length, `${prefix}: Aktualisiere via ${archiveProv.name}...`);
               instRes =
                 typeof archiveProv.upgrade === 'function'
                   ? await archiveProv.upgrade(archivePkgId, {
-                      silent: false,
+                      silent: forceSilent,
                       targetVersion: task.toVersion || catItem.webVersion || '',
                       itemName: catItem.name,
                       signal: job.signal,
@@ -272,7 +322,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
                     })
                   : await archiveProv.install(archivePkgId, {
                       upgrade: true,
-                      silent: false,
+                      silent: forceSilent,
                       targetVersion: task.toVersion || catItem.webVersion || '',
                       itemName: catItem.name,
                       signal: job.signal,
@@ -284,15 +334,17 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
               continue;
             }
           } else {
-            job.update(basePct + 50 / validTasks.length, `${prefix}: Starte Installation...`);
+            job.update(basePct + 50 / allowedEntries.length, `${prefix}: Starte Installation...`);
             instRes = await executeAndVerifyInstaller({
               itemId: catItem.id,
               itemName: catItem.name,
               sourcePath: setupFile,
               targetVersion: targetVersion || catItem.webVersion || null,
               useJob: false,
-              allowSilent: Boolean(allowSilent),
-              onProgress: (_pct, detail) => job.update(basePct + 50 / validTasks.length, `${prefix}: ${detail}`),
+              allowSilent: forceSilent || Boolean(allowSilent),
+              silent: forceSilent ? true : null,
+              action: 'update',
+              onProgress: (_pct, detail) => job.update(basePct + 50 / allowedEntries.length, `${prefix}: ${detail}`),
             });
           }
 
@@ -319,7 +371,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
         continue;
       }
 
-      // Nicht-Archiv-Programm -> Provider Update (Silent bleibt strikt opt-in, Standard interaktiv)
+      // Nicht-Archiv-Programm -> Provider Update (Silent bleibt strikt opt-in, Standard interaktiv, ausser Policy erzwingt silent-only)
       const taskPm = String(task.packageManager || '')
         .trim()
         .toLowerCase();
@@ -329,7 +381,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
         const provRes =
           typeof provider.upgrade === 'function'
             ? await provider.upgrade(task.packageId, {
-                silent: false,
+                silent: forceSilent,
                 targetVersion: task.toVersion || '',
                 itemName: task.name,
                 signal: job.signal,
@@ -337,7 +389,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
               })
             : await provider.install(task.packageId, {
                 upgrade: true,
-                silent: false,
+                silent: forceSilent,
                 targetVersion: task.toVersion || '',
                 itemName: task.name,
                 signal: job.signal,
@@ -365,7 +417,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true, skip
         if (provider.capabilities.supportsArchiveDownload) {
           const saveMode = task.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
           if (saveMode !== 'none') {
-            job.update(basePct + 60 / validTasks.length, `${prefix}: Speichere Setup im Archiv...`);
+            job.update(basePct + 60 / allowedEntries.length, `${prefix}: Speichere Setup im Archiv...`);
             await saveUpdatedPackageToArchive(task, task.archiveSaveSpec, job.signal);
             if (job.signal.aborted) break;
           }

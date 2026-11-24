@@ -32,6 +32,7 @@ import {
 } from '../shared/installer-logic.js';
 import { normalizePythonPackageName } from '../shared/python-parser.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
+import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { isAdminSessionActive, runStartProcessElevated } from './elevated-helper.js';
@@ -525,6 +526,7 @@ export async function executeAndVerifyInstaller({
   silentArgs = null,
   innoInfFile = null,
   itemPath = null,
+  action = null,
 }) {
   const cfg = getConfig();
   const depth = cfg.versionCompareDepth ?? 3;
@@ -532,32 +534,52 @@ export async function executeAndVerifyInstaller({
   const expectedVersion = targetVersion || extractVersion(path.basename(sourcePath));
   const ext = path.extname(sourcePath).toLowerCase();
 
+  let catItem = null;
+  if (itemId) {
+    catItem = loadCatalogWithLiveStatus().find((c) => c.id === itemId) || null;
+  }
+
+  const effectiveMode = normalizeInstallMode(installMode ?? catItem?.installMode);
+  const policyAction =
+    action === 'update' || action === 'install' ? action : catItem?.isInstalled || oldVersion ? 'update' : 'install';
+  const policyPkg = {
+    id: itemId || catItem?.id || '',
+    archiveItemId: catItem?.id || itemId || null,
+    inArchive: true,
+    source: 'archive',
+    packageManager: catItem?.packageManager || (catItem?.wingetId ? 'winget' : 'archive'),
+    packageId: catItem?.packageId || catItem?.wingetId || '',
+    wingetId: catItem?.wingetId || '',
+    name: itemName || catItem?.name || path.basename(sourcePath),
+    installMode: effectiveMode,
+  };
+  const policyDecision = evaluatePackageAccess(policyPkg, policyAction);
+  if (!policyDecision.allowed) {
+    return {
+      success: false,
+      policyBlocked: true,
+      adwareConflict: policyDecision.adwareConflict,
+      code: policyDecision.adwareConflict ? 'POLICY_ADWARE_CONFLICT' : 'POLICY_BLOCKED',
+      error: policyDecision.error,
+    };
+  }
+
   // Archive (.zip, .7z, .rar) lassen sich nicht als Installer überwachen -> direkt öffnen
   if (!['.exe', '.msi', '.msix', '.bat', '.cmd'].includes(ext)) {
     const err = await shell.openPath(sourcePath);
     return err ? { success: false, error: err } : { success: true, status: 'opened' };
   }
 
-  let catItem = null;
-  if (
-    itemId &&
-    (installMode === null ||
-      installMode === undefined ||
-      silentArgs === null ||
-      silentArgs === undefined ||
-      innoInfFile === null ||
-      innoInfFile === undefined ||
-      !itemPath)
-  ) {
-    catItem = loadCatalogWithLiveStatus().find((c) => c.id === itemId) || null;
-  }
-
-  const effectiveMode = normalizeInstallMode(installMode ?? catItem?.installMode);
   let effectiveSilentArgs = sanitizeSilentArgs(silentArgs ?? catItem?.silentArgs ?? '');
   const effectiveInfName = sanitizeInnoInfFileName(innoInfFile ?? catItem?.innoInfFile ?? '');
   const effectiveItemPath = itemPath || catItem?.path || '';
-  const effectiveAllowSilent = silent === null ? Boolean(allowSilent) : Boolean(silent);
-  const forceSilent = silent === true;
+  let effectiveAllowSilent = silent === null ? Boolean(allowSilent) : Boolean(silent);
+  let forceSilent = silent === true;
+
+  if (policyDecision.silentOnly) {
+    effectiveAllowSilent = true;
+    forceSilent = true;
+  }
 
   if (forceSilent && effectiveMode !== 'interactive-required' && !effectiveSilentArgs && fs.existsSync(sourcePath)) {
     const detected = await detectInstallerFile(sourcePath, {
@@ -593,6 +615,16 @@ export async function executeAndVerifyInstaller({
     allowSilent: effectiveAllowSilent,
     forceSilent,
   });
+
+  if (policyDecision.silentOnly && !plan.effectiveSilent) {
+    return {
+      success: false,
+      policyBlocked: true,
+      code: 'POLICY_SILENT_UNAVAILABLE',
+      error:
+        'Durch Zugriffsrichtlinie blockiert: "Nur Silent" ist aktiv, aber für dieses Setup sind keine sicheren Silent-Parameter bekannt.',
+    };
+  }
 
   const displayName = itemName || catItem?.name || path.basename(sourcePath);
   let job = null;

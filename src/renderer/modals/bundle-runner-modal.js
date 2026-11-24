@@ -2,7 +2,7 @@ import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-
 import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { renderBundlesView } from '../components/bundles-view.js';
 import { showToast } from '../components/toast.js';
-import { state } from '../state.js';
+import { buildBundleItemPolicyPkg, evaluateItemPolicy, state } from '../state.js';
 import { closestEl, closestInput, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './archive-target-modal.js';
@@ -39,11 +39,58 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
   let isRescanning = false;
   let isStarting = false;
 
-  const computeEvaluation = () =>
-    evaluateBundleStatus(bundle, {
+  const computeEvaluation = () => {
+    const rawEval = evaluateBundleStatus(bundle, {
       packages: state.packages,
       versionCompareDepth: state.settings.versionCompareDepth ?? 3,
     });
+    const visibleItems = [];
+    let installedCount = 0;
+    let upToDateCount = 0;
+    let outdatedCount = 0;
+    let missingCount = 0;
+    let adwareProtectedCount = 0;
+    let silentReadyCount = 0;
+
+    for (const entry of rawEval.items) {
+      const action = entry.action === 'update' ? 'update' : 'install';
+      const policyEval = evaluateItemPolicy(buildBundleItemPolicyPkg(entry), action);
+      if (!policyEval.visible) continue;
+
+      const policyBlocked = !policyEval.allowed;
+      const enriched = {
+        ...entry,
+        policyEval,
+        policySilentOnly: policyEval.silentOnly,
+        policyAdwareConflict: policyEval.adwareConflict,
+        policyBlocked,
+        defaultSelected: !policyBlocked && entry.defaultSelected,
+      };
+      visibleItems.push(enriched);
+
+      if (enriched.isInstalled) installedCount++;
+      if (enriched.status === 'up-to-date') upToDateCount++;
+      else if (enriched.status === 'outdated') outdatedCount++;
+      else missingCount++;
+      if (enriched.adwareProtected) adwareProtectedCount++;
+      if (enriched.canRunArchiveSilent) silentReadyCount++;
+    }
+
+    const total = visibleItems.length;
+    return {
+      items: visibleItems,
+      summary: {
+        total,
+        installedCount,
+        upToDateCount,
+        outdatedCount,
+        missingCount,
+        adwareProtectedCount,
+        silentReadyCount,
+        statusText: total === 0 ? 'Keine sichtbaren Pakete' : `${installedCount} von ${total} bereits installiert`,
+      },
+    };
+  };
 
   let evaluation = computeEvaluation();
   const selectedKeys = new Set(evaluation.items.filter((it) => it.defaultSelected).map((it) => it.key));
@@ -55,25 +102,30 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     evaluation = computeEvaluation();
     const { items, summary } = evaluation;
 
-    const selectedEntries = items.filter((it) => selectedKeys.has(it.key) && !it.archiveMissing);
+    const selectedEntries = items.filter((it) => selectedKeys.has(it.key) && !it.archiveMissing && !it.policyBlocked);
     const plan = planBundleExecution(selectedEntries, { allowSilent, silentWinget });
     const planByKey = new Map(plan.orderedQueue.map((entry) => [entry.key, entry]));
     const saveMode = state.settings.archiveSaveMode || 'ask';
 
     const rowsHtml =
       items.length === 0
-        ? '<div class="bundle-items-empty">Dieses Bündel enthält noch keine Pakete.</div>'
+        ? '<div class="bundle-items-empty">Dieses Bündel enthält keine für diesen Benutzer sichtbaren Pakete.</div>'
         : items
             .map((entry) => {
-              const checked = selectedKeys.has(entry.key) && !entry.archiveMissing;
+              const rowDisabled = entry.archiveMissing || entry.policyBlocked;
+              const checked = selectedKeys.has(entry.key) && !rowDisabled;
               const planned = planByKey.get(entry.key);
 
               let statusClass = 'is-missing';
-              if (entry.archiveMissing) statusClass = 'is-warn';
+              if (entry.archiveMissing || entry.policyBlocked) statusClass = 'is-warn';
               else if (entry.status === 'up-to-date') statusClass = 'is-ok';
               else if (entry.status === 'outdated') statusClass = 'is-outdated';
 
-              const statusText = entry.archiveMissing ? '⚠️ Nicht im Archiv gefunden' : entry.statusLabel;
+              const statusText = entry.policyBlocked
+                ? '🚫 Durch Richtlinie blockiert'
+                : entry.archiveMissing
+                  ? '⚠️ Nicht im Archiv gefunden'
+                  : entry.statusLabel;
 
               let versionNote = '';
               if (entry.installedVersion && entry.availableVersion && entry.status === 'outdated') {
@@ -85,9 +137,14 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
               }
 
               let phaseBadgeHtml = '';
-              if (entry.adwareProtected) {
+              if (entry.policyAdwareConflict) {
+                phaseBadgeHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(entry.policyEval?.error || '')}">🚫 Adware vs. Nur Silent</span>`;
+              } else if (entry.adwareProtected) {
                 phaseBadgeHtml =
                   '<span class="card-chip chip-install-protected" title="Silent-Parameter werden wegen Adware-Schutz immer ignoriert">🛡️ Adware-Schutz</span>';
+              } else if (entry.policySilentOnly) {
+                phaseBadgeHtml =
+                  '<span class="card-chip chip-install-silent" title="Zugriffsrichtlinie erzwingt stille Ausführung">🔒 Nur Silent</span>';
               } else if (planned?.willRunSilent) {
                 phaseBadgeHtml = '<span class="card-chip chip-install-silent">⚡ Phase 1: Still</span>';
               } else if (checked) {
@@ -97,13 +154,13 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
               const entryBadge = getProviderBadgeInfo(entry.source, state.providers);
 
               return `
-                <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${entry.archiveMissing ? 'is-disabled' : ''}">
+                <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${rowDisabled ? 'is-disabled' : ''}" ${entry.policyBlocked ? `title="${escapeHTML(entry.policyEval?.error || '')}"` : ''}>
                   <input
                     type="checkbox"
                     class="bundle-runner-check"
                     data-runner-key="${escapeHTML(entry.key)}"
                     ${checked ? 'checked' : ''}
-                    ${entry.archiveMissing || isStarting ? 'disabled' : ''}
+                    ${rowDisabled || isStarting ? 'disabled' : ''}
                   >
                   <span class="bundle-item-order">#${entry.order}</span>
                   <div class="bundle-runner-info">
@@ -247,7 +304,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     if (action === 'select-all') {
       selectedKeys.clear();
       for (const it of evaluation.items) {
-        if (!it.archiveMissing) selectedKeys.add(it.key);
+        if (!it.archiveMissing && !it.policyBlocked) selectedKeys.add(it.key);
       }
       render();
       return;
@@ -278,7 +335,9 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     }
 
     if (action === 'start') {
-      const selectedEntries = evaluation.items.filter((it) => selectedKeys.has(it.key) && !it.archiveMissing);
+      const selectedEntries = evaluation.items.filter(
+        (it) => selectedKeys.has(it.key) && !it.archiveMissing && !it.policyBlocked
+      );
       if (selectedEntries.length === 0 || state.isBundleInstallRunning) return;
 
       const saveMode = state.settings.archiveSaveMode || 'ask';

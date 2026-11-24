@@ -5,7 +5,7 @@ import { buildRemotePackageItem, canDownloadOnline, getProviderBadgeInfo } from 
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
-import { getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
+import { evaluateItemPolicy, getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
 import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } from './archive-target-modal.js';
@@ -133,10 +133,14 @@ function buildNvmUseButtonHtml(item, { large = false } = {}) {
   return `<button type="button" class="btn ${sizeCls}btn-local" data-detail-action="nvm-use">✅ Als aktive Node-Version setzen (nvm use ${escapeHTML(pkgVer)})</button>`;
 }
 
-function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) {
+function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, policyEval = null }) {
   const buttons = [];
   const provLabel = provMeta.label || 'Paketmanager';
   const canProviderInstall = provMeta.canInstall && Boolean(getEffectivePackageId(item));
+  const blockedByPolicy = Boolean(policyEval && !policyEval.allowed);
+  const blockedAttr = blockedByPolicy
+    ? `disabled title="${escapeHTML(policyEval.error || 'Durch Zugriffsrichtlinie blockiert')}"`
+    : '';
 
   if (item.origin === 'remote') {
     const installLabel =
@@ -146,7 +150,7 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
           ? `🔄 Erneut über ${provLabel} installieren`
           : '⬇️ Jetzt installieren';
     buttons.push(
-      `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(installLabel)}</button>`
+      `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install" ${blockedAttr}>${escapeHTML(installLabel)}</button>`
     );
 
     const nvmBtn = buildNvmUseButtonHtml(item);
@@ -170,7 +174,7 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
     }
     if (canProviderInstall && st.hasWebUpdate) {
       buttons.push(
-        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install" ${blockedAttr}>⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
       );
     } else if (!nvmBtn && item.validInstallPath) {
       buttons.push(
@@ -185,8 +189,10 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
     const onlineReady = canDownloadOnline(item);
 
     if (hero) {
+      const heroBlockedAttr =
+        blockedByPolicy && (hero.action === 'install-file' || hero.action === 'install-fresh') ? blockedAttr : '';
       buttons.push(
-        `<button type="button" class="btn btn-lg ${hero.cls}" data-detail-action="${hero.action}" data-file="${escapeHTML(hero.file || '')}" data-version="${escapeHTML(hero.version || '')}">${escapeHTML(hero.label)}</button>`
+        `<button type="button" class="btn btn-lg ${hero.cls}" data-detail-action="${hero.action}" data-file="${escapeHTML(hero.file || '')}" data-version="${escapeHTML(hero.version || '')}" ${heroBlockedAttr}>${escapeHTML(hero.label)}</button>`
       );
     } else if (canProviderInstall) {
       const provBtnLabel =
@@ -196,7 +202,7 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
             ? `⬆️ Ueber ${provLabel} aktualisieren`
             : `⬇️ Ueber ${provLabel} installieren`;
       buttons.push(
-        `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(provBtnLabel)}</button>`
+        `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install" ${blockedAttr}>${escapeHTML(provBtnLabel)}</button>`
       );
     }
     const nvmBtn = buildNvmUseButtonHtml(item);
@@ -233,13 +239,52 @@ function buildInstallModeToggleHtml({
   selectedMode,
   isSilentLocked,
   lockTooltip,
+  policyEval = null,
 }) {
   const hasInstallAction =
     item.origin === 'remote' ||
     (item.origin === 'pc' && canProviderInstall && st.hasWebUpdate) ||
     (item.inArchive && (item.lastFiles?.length > 0 || hasFreshDownload || canDownloadOnline(item)));
 
+  if (policyEval?.adwareConflict) {
+    return `
+      <div class="policy-conflict-banner" role="alert">
+        <strong>🚫 Ausführung durch Zugriffsrichtlinie blockiert</strong>
+        <span>${escapeHTML(policyEval.error)}</span>
+      </div>
+    `;
+  }
+
+  if (policyEval && !policyEval.allowed) {
+    return `
+      <div class="policy-conflict-banner" role="alert">
+        <strong>🔒 Durch Zugriffsrichtlinie gesperrt</strong>
+        <span>${escapeHTML(policyEval.error)}</span>
+      </div>
+    `;
+  }
+
   if (!hasInstallAction) return '';
+
+  if (policyEval?.silentOnly) {
+    return `
+      <div class="detail-install-mode-bar" id="detailInstallModeBar">
+        <span class="detail-install-mode-label">Installationsmodus:</span>
+        <div class="detail-mode-toggle" role="group" aria-label="Installationsmodus">
+          <button
+            type="button"
+            class="detail-mode-btn active"
+            data-detail-install-mode="silent"
+            aria-pressed="true"
+            title="Zugriffsrichtlinie erzwingt stille Ausführung"
+          >
+            ⚡ Silent
+          </button>
+        </div>
+        <span class="policy-silent-lock-pill" title="Interaktive Ausführung durch Zugriffsrichtlinie deaktiviert">🔒 Richtlinie: Nur Silent</span>
+      </div>
+    `;
+  }
 
   const isSilent = !isSilentLocked && selectedMode === 'silent';
   const silentTitle = isSilentLocked ? lockTooltip : 'Setup möglichst ohne Rückfragen im Hintergrund ausführen';
@@ -440,7 +485,8 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
   `;
 }
 
-function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive }) {
+function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive, policyEval = null }) {
+  const blockedByPolicy = Boolean(policyEval && !policyEval.allowed);
   const originLabel =
     item.origin === 'both'
       ? 'PC & Archiv'
@@ -474,7 +520,7 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
           <span class="detail-archive-label">Setup-Datei:</span>
           ${selectorHtml}
           <div class="detail-archive-btns">
-            <button type="button" class="btn btn-ghost" data-detail-action="run-selected">▶️ Ausführen</button>
+            <button type="button" class="btn btn-ghost" data-detail-action="run-selected" ${blockedByPolicy ? `disabled title="${escapeHTML(policyEval?.error || 'Durch Zugriffsrichtlinie blockiert')}"` : ''}>▶️ Ausführen</button>
             <button type="button" class="btn btn-ghost" data-detail-action="copy-selected">💾 Auf PC kopieren</button>
           </div>
         </div>
@@ -746,8 +792,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const hasPackageProfile = Boolean(effectivePkgId) && provMeta.canShow;
   const matchedArchive = item.matchedArchiveItem || null;
   const metaSource = item.inArchive ? item : matchedArchive || item;
+  const primaryAction =
+    item.origin === 'remote'
+      ? item.isInstalled && st.hasWebUpdate
+        ? 'update'
+        : 'install'
+      : item.isInstalled
+        ? 'update'
+        : 'install';
+  const policyEval = evaluateItemPolicy(item, primaryAction);
   const initialModeState = resolveDetailInstallMode(metaSource.installMode || item.installMode);
-  let selectedInstallMode = initialModeState.selected;
+  let selectedInstallMode = policyEval.silentOnly && !policyEval.adwareConflict ? 'silent' : initialModeState.selected;
   const isSilentLocked = initialModeState.silentLocked;
   const canUninstall = isCanUninstall(item, provMeta, effectivePkgId);
   const onlineReady = canDownloadOnline(item);
@@ -890,7 +945,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       <section class="tab-panel" data-detail-panel="overview" ${initialTab === 'overview' ? '' : 'hidden'}>
         ${buildVersionGridHtml(item, st, { matchedArchive })}
         ${postDownloadBanner}
-        ${buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive })}
+        ${buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, policyEval })}
         ${buildInstallModeToggleHtml({
           item,
           st,
@@ -899,6 +954,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           selectedMode: selectedInstallMode,
           isSilentLocked,
           lockTooltip: initialModeState.lockTooltip,
+          policyEval,
         })}
         ${buildArchiveSaveChoiceHtml(item, st, { effectivePm, effectivePkgId, canArchiveDownload, matchedArchive })}
         ${pinnedNotice}
@@ -917,7 +973,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       </section>
 
       <section class="tab-panel" data-detail-panel="archive-tech" ${initialTab === 'archive-tech' ? '' : 'hidden'}>
-        ${buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive })}
+        ${buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive, policyEval })}
       </section>
     </div>
 
@@ -1175,7 +1231,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
   const runInstallerFlow = async (filePath, targetVersion) => {
     if (!filePath) return;
-    const useSilent = !isSilentLocked && selectedInstallMode === 'silent';
+    if (!policyEval.allowed) {
+      showToast(policyEval.error || 'Ausführung durch Zugriffsrichtlinie blockiert.', {
+        type: 'error',
+        duration: 6000,
+      });
+      return;
+    }
+    const useSilent = policyEval.silentOnly ? true : !isSilentLocked && selectedInstallMode === 'silent';
     showToast(`Starte Setup für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`, { type: 'info' });
     const res = await window.electronAPI.executeInstaller({
       itemId: item.id,
@@ -1184,6 +1247,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       targetVersion: targetVersion || null,
       allowSilent: useSilent,
       silent: useSilent,
+      action: primaryAction,
     });
 
     if (res.alreadyRunning) {
@@ -1231,6 +1295,13 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
   const runProviderInstallFlow = async (btn) => {
     if (!canProviderInstall) return;
+    if (!policyEval.allowed) {
+      showToast(policyEval.error || 'Ausführung durch Zugriffsrichtlinie blockiert.', {
+        type: 'error',
+        duration: 6000,
+      });
+      return;
+    }
     const archiveCheck = modal.querySelector('#detailAlsoSaveArchive');
     const shouldSaveToArchive = archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
 
@@ -1243,7 +1314,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       }
     }
 
-    const useSilent = !isSilentLocked && selectedInstallMode === 'silent';
+    const useSilent = policyEval.silentOnly ? true : !isSilentLocked && selectedInstallMode === 'silent';
     btn.disabled = true;
     const origText = btn.textContent;
     btn.textContent = item.isInstalled ? '⏳ Aktualisiere...' : '⏳ Installiere...';
@@ -1333,6 +1404,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     if (modeBtn instanceof HTMLElement) {
       const requested = modeBtn.dataset.detailInstallMode;
       if (isSilentLocked && requested === 'silent') return;
+      if (policyEval.silentOnly && requested === 'interactive') return;
       if (requested === 'interactive' || requested === 'silent') {
         selectedInstallMode = requested;
         modal.querySelectorAll('[data-detail-install-mode]').forEach((b) => {
