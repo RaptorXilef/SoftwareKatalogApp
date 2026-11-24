@@ -1,11 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import {
+  getArchiveRootLabel,
+  isNormalizedPathInsideDir,
+  normalizeArchivePaths,
+  resolvePrimaryReachableRoot,
+} from '../shared/multi-archive-logic.js';
 import { normalizeStartTab } from '../shared/unified-packages.js';
 
 const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions'];
 
 const DEFAULT_CONFIG = {
+  archivePaths: ['../software'],
   targetPath: '../software',
   jsonPath: 'catalog.json',
   customScriptPath: '', // Leer = eingebauter Scanner unter src/scanner/scanner.mjs bzw. resources/
@@ -51,8 +58,44 @@ export function getDataFolder() {
 }
 
 /**
+ * Prüft ob ein Verzeichnis auf dem System erreichbar/vorhanden ist.
+ * @param {string} absPath
+ * @returns {boolean}
+ */
+export function isArchiveRootReachable(absPath) {
+  if (!absPath) return false;
+  try {
+    return fs.existsSync(absPath) && fs.statSync(absPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ermittelt Live-Status (absoluter Pfad, Label, Online) zu einem rohen Archiv-Pfad.
+ * @param {string} rawPath
+ * @param {number} [index]
+ */
+export function inspectArchiveRootPath(rawPath, index = 0) {
+  const appFolder = getAppFolder();
+  const cleanRaw = String(rawPath || '').trim();
+  const absPath = cleanRaw
+    ? path.isAbsolute(cleanRaw)
+      ? path.normalize(cleanRaw)
+      : path.resolve(appFolder, cleanRaw)
+    : '';
+  return {
+    rawPath: cleanRaw,
+    absPath,
+    index,
+    label: getArchiveRootLabel(cleanRaw, index),
+    online: isArchiveRootReachable(absPath),
+  };
+}
+
+/**
  * Einmalige Migration: Verschiebt alte config.json / catalog.json aus dem
- * Hauptordner sauber nach data/, damit bestehende NAS-Setups weiterlaufen.
+ * Hauptordner sauber nach data/, damit bestehende Archiv-Setups weiterlaufen.
  */
 function migrateLegacyFiles(appFolder, dataDir) {
   if (migrationChecked) return;
@@ -85,12 +128,16 @@ export function getConfig() {
   const configPath = path.join(dataDir, 'config.json');
   const statePath = path.join(app.getPath('userData'), 'state.json');
 
+  /** @type {Record<string, any>} */
+  const rawConfig = {};
   const config = { ...DEFAULT_CONFIG };
   const state = { ...DEFAULT_STATE };
 
   if (fs.existsSync(configPath)) {
     try {
-      Object.assign(config, JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      Object.assign(rawConfig, parsed);
+      Object.assign(config, parsed);
     } catch (e) {
       console.error('Fehler beim Lesen der data/config.json:', e);
     }
@@ -110,10 +157,13 @@ export function getConfig() {
     }
   }
 
-  // targetPath bleibt relativ zum appFolder (z.B. ../software)
-  const absTargetPath = path.isAbsolute(config.targetPath)
-    ? config.targetPath
-    : path.resolve(appFolder, config.targetPath);
+  // Multi-Root Migration & Prioritätsnormalisierung (targetPath bleibt Alias auf archivePaths[0])
+  const archivePaths = normalizeArchivePaths(rawConfig.archivePaths || rawConfig.targetPath ? rawConfig : config);
+  const targetPath = archivePaths[0];
+  const archiveRootsStatus = archivePaths.map((rawP, idx) => inspectArchiveRootPath(rawP, idx));
+  const absArchivePaths = archiveRootsStatus.map((r) => r.absPath);
+  const primaryAbsTargetPath = absArchivePaths[0];
+  const absTargetPath = resolvePrimaryReachableRoot(absArchivePaths, isArchiveRootReachable) || primaryAbsTargetPath;
 
   // jsonPath liegt standardmäßig im data/-Ordner
   const absJsonPath = path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(dataDir, config.jsonPath);
@@ -138,10 +188,15 @@ export function getConfig() {
     dataDir,
     statePath,
     absTargetPath,
+    primaryAbsTargetPath,
+    absArchivePaths,
+    archiveRootsStatus,
     absJsonPath,
     absScriptPath,
     ...config,
     ...state,
+    archivePaths,
+    targetPath,
     archiveSaveMode,
     startTab,
     enabledProviders,
@@ -152,13 +207,33 @@ export function saveConfig(newSettings) {
   const dataDir = getDataFolder();
   const configPath = path.join(dataDir, 'config.json');
   const statePath = path.join(app.getPath('userData'), 'state.json');
-  const merged = { ...getConfig(), ...newSettings };
+  const current = getConfig();
+  const merged = { ...current, ...newSettings };
+
+  // Synchronisiere archivePaths und legacy Alias targetPath
+  if (Array.isArray(newSettings?.archivePaths)) {
+    const normalized = normalizeArchivePaths({ archivePaths: newSettings.archivePaths });
+    merged.archivePaths = normalized;
+    merged.targetPath = normalized[0];
+  } else if (typeof newSettings?.targetPath === 'string' && newSettings.targetPath.trim()) {
+    const rest = Array.isArray(current.archivePaths) ? current.archivePaths.slice(1) : [];
+    const normalized = normalizeArchivePaths({ archivePaths: [newSettings.targetPath, ...rest] });
+    merged.archivePaths = normalized;
+    merged.targetPath = normalized[0];
+  } else {
+    const normalized = normalizeArchivePaths(merged);
+    merged.archivePaths = normalized;
+    merged.targetPath = normalized[0];
+  }
 
   const ignoreKeys = new Set([
     'appFolder',
     'dataDir',
     'statePath',
     'absTargetPath',
+    'primaryAbsTargetPath',
+    'absArchivePaths',
+    'archiveRootsStatus',
     'absJsonPath',
     'absScriptPath',
     'scriptPath', // Altlast aus alter config.json nicht mehr mitschleppen
@@ -181,19 +256,20 @@ export function saveConfig(newSettings) {
 
 function isPathInsideBase(targetPath, baseDir) {
   if (!targetPath || !baseDir) return false;
-  const ensureSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
-  let resolvedTarget = ensureSlash(path.resolve(targetPath));
-  let resolvedBase = ensureSlash(path.resolve(baseDir));
-  if (process.platform === 'win32') {
-    resolvedTarget = resolvedTarget.toLowerCase();
-    resolvedBase = resolvedBase.toLowerCase();
-  }
-  return resolvedTarget.startsWith(resolvedBase);
+  return isNormalizedPathInsideDir(path.resolve(targetPath), path.resolve(baseDir), {
+    platform: process.platform,
+  });
+}
+
+export function isInsideAnyArchiveDir(targetPath) {
+  if (!targetPath) return false;
+  const { absArchivePaths } = getConfig();
+  const resolved = path.resolve(targetPath);
+  return absArchivePaths.some((rootDir) => isPathInsideBase(resolved, rootDir));
 }
 
 export function isInsideTargetDir(targetPath) {
-  const { absTargetPath } = getConfig();
-  return isPathInsideBase(targetPath, absTargetPath);
+  return isInsideAnyArchiveDir(targetPath);
 }
 
 export function getIconCacheDir() {

@@ -1,7 +1,15 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  buildSoftwareMergeKeys,
+  getArchiveRootLabel,
+  isNormalizedPathInsideDir,
+  mergeMultiRootCatalogEntries,
+  normalizeArchivePaths,
+  normalizePathKey,
+} from '../shared/multi-archive-logic.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = process.env.SK_APP_DIR ? path.resolve(process.env.SK_APP_DIR) : path.resolve(__dirname, '../..');
@@ -28,9 +36,19 @@ async function asyncPool(limit, tasks) {
   return Promise.all(results);
 }
 
+function isDirReachable(absPath) {
+  if (!absPath) return false;
+  try {
+    return existsSync(absPath) && statSync(absPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 async function loadConfig() {
   const configPath = path.join(DATA_DIR, 'config.json');
   const config = {
+    archivePaths: ['../software'],
     targetPath: '../software',
     jsonPath: 'catalog.json',
     scanNested: false,
@@ -46,12 +64,22 @@ async function loadConfig() {
     }
   }
 
-  const resolvedTarget = path.isAbsolute(config.targetPath)
-    ? config.targetPath
-    : path.resolve(APP_DIR, config.targetPath);
+  const normalizedPaths = normalizeArchivePaths(config);
+  const roots = normalizedPaths.map((rawPath, index) => ({
+    index,
+    rawPath,
+    absPath: path.isAbsolute(rawPath) ? path.normalize(rawPath) : path.resolve(APP_DIR, rawPath),
+    label: getArchiveRootLabel(rawPath, index),
+  }));
+
   const resolvedJson = path.isAbsolute(config.jsonPath) ? config.jsonPath : path.resolve(DATA_DIR, config.jsonPath);
 
-  return { ...config, ROOT_DIR: resolvedTarget, OUTPUT_FILE: resolvedJson };
+  return {
+    ...config,
+    ROOTS: roots,
+    ROOT_DIR: roots[0].absPath,
+    OUTPUT_FILE: resolvedJson,
+  };
 }
 
 /**
@@ -79,7 +107,7 @@ async function getFolderSignature(softwareDir) {
   return Math.floor(maxMtime);
 }
 
-async function parseSoftwareMetadata(softwareDir, metaDir, config) {
+async function parseSoftwareMetadata(softwareDir, metaDir, config, rootInfo) {
   let customName = '';
   let description = '';
   let iconPath = null;
@@ -302,17 +330,42 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   const scanMtime = await getFolderSignature(softwareDir);
   const toRel = (p) => (p ? path.relative(APP_DIR, p) : null);
 
+  const relSoftwarePath = toRel(softwareDir);
+  const relLastFiles = lastFiles.map(toRel);
+  const effectiveRoot = rootInfo || {
+    index: 0,
+    rawPath: config.targetPath || '../software',
+    absPath: config.ROOT_DIR,
+    label: getArchiveRootLabel(config.targetPath || '../software', 0),
+  };
+  const lastFileSources = {};
+  for (const relF of relLastFiles) {
+    lastFileSources[relF] = {
+      rootIndex: effectiveRoot.index,
+      rootLabel: effectiveRoot.label,
+      rootPath: effectiveRoot.rawPath,
+      offline: false,
+    };
+  }
+
   return {
-    id: Buffer.from(toRel(softwareDir)).toString('base64url'),
+    id: Buffer.from(relSoftwarePath).toString('base64url'),
     name: customName || path.basename(softwareDir),
-    path: toRel(softwareDir),
+    path: relSoftwarePath,
+    primaryPath: relSoftwarePath,
+    archiveRootIndex: effectiveRoot.index,
+    archiveRootPath: effectiveRoot.rawPath,
+    archiveRootAbsPath: effectiveRoot.absPath,
+    archiveRootLabel: effectiveRoot.label,
+    archiveOffline: false,
     description,
     icon: toRel(iconPath),
     screenshots: screenshots.map(toRel),
     os,
     mainCategory,
     subCategories,
-    lastFiles: lastFiles.map(toRel),
+    lastFiles: relLastFiles,
+    lastFileSources,
     hasPinnedLast,
     searchNames,
     installPaths,
@@ -344,7 +397,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config) {
   };
 }
 
-async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, maxDepth = 6, nestedDepth = 0) {
+async function scanDirectory(currentDir, cacheMap, config, rootInfo, currentDepth = 0, maxDepth = 6, nestedDepth = 0) {
   if (currentDepth > maxDepth) return [];
 
   process.stdout.write(`SCAN_DIR:${currentDir}\n`);
@@ -356,17 +409,25 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
 
     if (metaEntry) {
       let currentItem;
-      const cached = cacheMap.get(currentDir);
+      const cacheKey = normalizePathKey(currentDir);
+      const cached = cacheMap.get(cacheKey);
 
       if (!IS_FULL_RESCAN && cached) {
         // Smart-Check: Nur neu parsen, wenn sich Ordner, _last oder meta.json verändert haben
         const currentSig = await getFolderSignature(currentDir);
         currentItem =
           cached.scanMtime && cached.scanMtime === currentSig
-            ? cached
-            : await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name), config);
+            ? {
+                ...cached,
+                archiveRootIndex: rootInfo.index,
+                archiveRootPath: rootInfo.rawPath,
+                archiveRootAbsPath: rootInfo.absPath,
+                archiveRootLabel: rootInfo.label,
+                archiveOffline: false,
+              }
+            : await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name), config, rootInfo);
       } else {
-        currentItem = await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name), config);
+        currentItem = await parseSoftwareMetadata(currentDir, path.join(currentDir, metaEntry.name), config, rootInfo);
       }
 
       let results = [currentItem];
@@ -378,6 +439,7 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
               path.join(currentDir, dir.name),
               cacheMap,
               config,
+              rootInfo,
               currentDepth + 1,
               maxDepth,
               nestedDepth + 1
@@ -391,7 +453,15 @@ async function scanDirectory(currentDir, cacheMap, config, currentDepth = 0, max
 
     const tasks = subDirs.map(
       (dir) => () =>
-        scanDirectory(path.join(currentDir, dir.name), cacheMap, config, currentDepth + 1, maxDepth, nestedDepth)
+        scanDirectory(
+          path.join(currentDir, dir.name),
+          cacheMap,
+          config,
+          rootInfo,
+          currentDepth + 1,
+          maxDepth,
+          nestedDepth
+        )
     );
     const results = await asyncPool(8, tasks);
     return results.flat();
@@ -408,31 +478,112 @@ async function writeCatalogAtomic(outputFile, list) {
   await fs.rename(tmpFile, outputFile);
 }
 
+function resolveRootForDir(absDir, roots) {
+  const matched = roots.find((r) => isNormalizedPathInsideDir(absDir, r.absPath));
+  return matched || roots[0];
+}
+
+function buildCacheMapFromCatalog(oldData) {
+  /** @type {Map<string, any>} */
+  const cacheMap = new Map();
+  for (const item of oldData) {
+    if (!item?.path) continue;
+    const primaryAbs = path.resolve(APP_DIR, item.primaryPath || item.path);
+    if (!item.hasMultipleArchiveRoots && !item.archiveOffline) {
+      cacheMap.set(normalizePathKey(primaryAbs), item);
+    }
+  }
+  return cacheMap;
+}
+
+async function runSingleScan(config) {
+  const metaDir = path.join(SINGLE_TARGET, META_FOLDER_NAME);
+  let existingList = [];
+  if (existsSync(config.OUTPUT_FILE)) {
+    try {
+      existingList = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
+    } catch {
+      existingList = [];
+    }
+  }
+
+  if (!existsSync(metaDir)) {
+    return;
+  }
+
+  const targetRoot = resolveRootForDir(SINGLE_TARGET, config.ROOTS);
+  const parsed = await parseSoftwareMetadata(SINGLE_TARGET, metaDir, config, targetRoot);
+  const targetKey = normalizePathKey(SINGLE_TARGET);
+  const parsedKeys = buildSoftwareMergeKeys(parsed);
+
+  const unrelatedEntries = [];
+  const relatedExisting = [];
+
+  for (const item of existingList) {
+    const itemPrimaryKey = normalizePathKey(path.resolve(APP_DIR, item.primaryPath || item.path || ''));
+    const hasAltMatch = Array.isArray(item.alternatePaths)
+      ? item.alternatePaths.some((a) => normalizePathKey(path.resolve(APP_DIR, a.path || '')) === targetKey)
+      : false;
+    const itemKeys = buildSoftwareMergeKeys(item);
+    const pkgMatch = parsedKeys.packageKey && itemKeys.packageKey && parsedKeys.packageKey === itemKeys.packageKey;
+    const nameMatch = parsedKeys.nameKey && itemKeys.nameKey && parsedKeys.nameKey === itemKeys.nameKey;
+
+    if (itemPrimaryKey === targetKey || hasAltMatch || pkgMatch || nameMatch) {
+      relatedExisting.push(item);
+    } else {
+      unrelatedEntries.push(item);
+    }
+  }
+
+  // Bei Multi-Root-Kollisionen: andere erreichbare Wurzeln dieses Programms neu parsen, Offline-Wurzeln aus Cache bewahren
+  /** @type {Map<number, any[]>} */
+  const scannedByRoot = new Map([[targetRoot.index, [parsed]]]);
+  const offlineIndices = new Set();
+
+  for (const oldItem of relatedExisting) {
+    const candidateSources = [
+      { path: oldItem.primaryPath || oldItem.path, rootIndex: oldItem.archiveRootIndex ?? 0 },
+      ...(Array.isArray(oldItem.alternatePaths) ? oldItem.alternatePaths : []),
+    ];
+
+    for (const src of candidateSources) {
+      if (!src?.path) continue;
+      const absOther = path.resolve(APP_DIR, src.path);
+      if (normalizePathKey(absOther) === targetKey) continue;
+
+      const rInfo = config.ROOTS[src.rootIndex] || resolveRootForDir(absOther, config.ROOTS);
+      if (!isDirReachable(rInfo.absPath)) {
+        offlineIndices.add(rInfo.index);
+        continue;
+      }
+
+      const otherMeta = path.join(absOther, META_FOLDER_NAME);
+      if (existsSync(otherMeta)) {
+        const otherParsed = await parseSoftwareMetadata(absOther, otherMeta, config, rInfo);
+        if (!scannedByRoot.has(rInfo.index)) scannedByRoot.set(rInfo.index, []);
+        scannedByRoot.get(rInfo.index).push(otherParsed);
+      }
+    }
+  }
+
+  const mergedGroup = mergeMultiRootCatalogEntries(scannedByRoot, {
+    existingEntries: relatedExisting,
+    offlineRootIndices: Array.from(offlineIndices),
+    roots: config.ROOTS,
+  });
+
+  const nextList = [...unrelatedEntries, ...mergedGroup];
+  await writeCatalogAtomic(config.OUTPUT_FILE, nextList);
+  console.log(`SINGLE_OK:${mergedGroup[0]?.id || parsed.id}`);
+}
+
 async function run() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const config = await loadConfig();
 
   // Blitzschneller Einzelordner-Rescan (z. B. direkt nach Web-Download)
   if (SINGLE_TARGET) {
-    const metaDir = path.join(SINGLE_TARGET, META_FOLDER_NAME);
-    let existingList = [];
-    if (existsSync(config.OUTPUT_FILE)) {
-      try {
-        existingList = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
-      } catch {
-        existingList = [];
-      }
-    }
-
-    const relTarget = path.relative(APP_DIR, SINGLE_TARGET);
-    if (existsSync(metaDir)) {
-      const parsed = await parseSoftwareMetadata(SINGLE_TARGET, metaDir, config);
-      const idx = existingList.findIndex((i) => i.path === relTarget || i.id === parsed.id);
-      if (idx !== -1) existingList[idx] = parsed;
-      else existingList.push(parsed);
-      await writeCatalogAtomic(config.OUTPUT_FILE, existingList);
-      console.log(`SINGLE_OK:${parsed.id}`);
-    }
+    await runSingleScan(config);
     return;
   }
 
@@ -455,37 +606,78 @@ async function run() {
 
   try {
     await fs.writeFile(LOCK_FILE, Date.now().toString(), 'utf-8');
-    process.stdout.write(`SCAN_START:${config.ROOT_DIR}\n`);
+    process.stdout.write(`SCAN_START:${config.ROOTS.map((r) => r.label).join(', ')}\n`);
 
     const startTime = Date.now();
-    const cacheMap = new Map();
-
+    let oldData = [];
     if (existsSync(config.OUTPUT_FILE)) {
       try {
-        const oldData = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
-        for (const item of oldData) {
-          cacheMap.set(path.resolve(APP_DIR, item.path), item);
-        }
+        oldData = JSON.parse(await fs.readFile(config.OUTPUT_FILE, 'utf-8'));
       } catch (e) {
         console.error(`Fehler beim Laden des alten Katalogs: ${e.message}`);
       }
     }
 
-    let softwareList = [];
+    const cacheMap = buildCacheMapFromCatalog(oldData);
+    /** @type {Map<number, any[]>} */
+    const scannedByRoot = new Map();
+    const offlineRootIndices = [];
 
     if (IS_UPDATE) {
-      for (const [absPath] of cacheMap.entries()) {
-        if (existsSync(absPath)) {
-          process.stdout.write(`SCAN_DIR:${absPath}\n`);
-          const metaPath = path.join(absPath, META_FOLDER_NAME);
+      // Nur bekannte Einträge aus erreichbaren Wurzeln aktualisieren
+      for (const root of config.ROOTS) {
+        if (!isDirReachable(root.absPath)) {
+          console.log(`SCAN_OFFLINE:${JSON.stringify({ index: root.index, path: root.rawPath, label: root.label })}`);
+          offlineRootIndices.push(root.index);
+          continue;
+        }
+        scannedByRoot.set(root.index, []);
+      }
+
+      const seenDirs = new Set();
+      for (const item of oldData) {
+        const candidates = [
+          { path: item.primaryPath || item.path, rootIndex: item.archiveRootIndex ?? 0 },
+          ...(Array.isArray(item.alternatePaths) ? item.alternatePaths : []),
+        ];
+        for (const cand of candidates) {
+          if (!cand?.path) continue;
+          const absDir = path.resolve(APP_DIR, cand.path);
+          const dKey = normalizePathKey(absDir);
+          if (seenDirs.has(dKey)) continue;
+          seenDirs.add(dKey);
+
+          const root = config.ROOTS[cand.rootIndex] || resolveRootForDir(absDir, config.ROOTS);
+          if (offlineRootIndices.includes(root.index)) continue;
+          if (!existsSync(absDir)) continue;
+
+          process.stdout.write(`SCAN_DIR:${absDir}\n`);
+          const metaPath = path.join(absDir, META_FOLDER_NAME);
           if (existsSync(metaPath)) {
-            softwareList.push(await parseSoftwareMetadata(absPath, metaPath, config));
+            const parsed = await parseSoftwareMetadata(absDir, metaPath, config, root);
+            if (!scannedByRoot.has(root.index)) scannedByRoot.set(root.index, []);
+            scannedByRoot.get(root.index).push(parsed);
           }
         }
       }
     } else {
-      softwareList = await scanDirectory(config.ROOT_DIR, cacheMap, config);
+      for (const root of config.ROOTS) {
+        if (!isDirReachable(root.absPath)) {
+          console.log(`SCAN_OFFLINE:${JSON.stringify({ index: root.index, path: root.rawPath, label: root.label })}`);
+          offlineRootIndices.push(root.index);
+          continue;
+        }
+        process.stdout.write(`SCAN_ROOT:${root.rawPath}\n`);
+        const entries = await scanDirectory(root.absPath, cacheMap, config, root);
+        scannedByRoot.set(root.index, entries);
+      }
     }
+
+    const softwareList = mergeMultiRootCatalogEntries(scannedByRoot, {
+      existingEntries: oldData,
+      offlineRootIndices,
+      roots: config.ROOTS,
+    });
 
     await writeCatalogAtomic(config.OUTPUT_FILE, softwareList);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);

@@ -16,11 +16,11 @@ import { downloadWebUpdate } from './web-updater.js';
 export { buildAutoIdFolderName };
 
 /**
- * Prüft vor dem Schreiben, ob der Zielordner im Archiv liegt und ob bereits `_metadata/` existiert.
+ * Prüft vor dem Schreiben, ob der Zielordner in einem konfigurierten Archiv liegt und ob bereits `_metadata/` existiert.
  */
 export function checkArchiveTargetCollision(targetDir) {
-  const { absTargetPath } = getConfig();
-  return inspectArchiveTargetCollision(targetDir, absTargetPath);
+  const { absArchivePaths } = getConfig();
+  return inspectArchiveTargetCollision(targetDir, absArchivePaths);
 }
 
 /**

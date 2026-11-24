@@ -63,6 +63,8 @@ export async function runArchiveScan(mode = 'smart') {
     let fullError = '';
     let buffer = '';
     let dirCount = 0;
+    /** @type {Array<{ index: number, path: string, label: string }>} */
+    const offlineRoots = [];
     const expected = lastCounts[mode] || 0;
 
     child.stdout.on('data', (chunk) => {
@@ -74,6 +76,16 @@ export async function runArchiveScan(mode = 'smart') {
         const line = rawLine.trim();
         if (line.startsWith('SCAN_START:')) {
           job.update(2, `Durchsuche ${line.replace('SCAN_START:', '').trim()}...`);
+        } else if (line.startsWith('SCAN_ROOT:')) {
+          job.update(null, `Scanne Archiv: ${line.replace('SCAN_ROOT:', '').trim()}...`);
+        } else if (line.startsWith('SCAN_OFFLINE:')) {
+          try {
+            const info = JSON.parse(line.replace('SCAN_OFFLINE:', '').trim());
+            offlineRoots.push(info);
+            job.update(null, `Quelle offline (übersprungen): ${info.label || info.path}`);
+          } catch {
+            // Ignorieren
+          }
         } else if (line.startsWith('SCAN_DIR:')) {
           dirCount++;
           const currentDir = line.replace('SCAN_DIR:', '').trim();
@@ -101,8 +113,12 @@ export async function runArchiveScan(mode = 'smart') {
 
       if (code === 0) {
         if (dirCount > 0) lastCounts[mode] = dirCount;
-        job.finish('done', `Archiv aktualisiert (${dirCount} Ordner geprüft)`);
-        resolve({ success: true });
+        const offlineNote =
+          offlineRoots.length > 0
+            ? ` · ${offlineRoots.length} offline (${offlineRoots.map((r) => r.label || r.path).join(', ')})`
+            : '';
+        job.finish('done', `Archiv aktualisiert (${dirCount} Ordner geprüft${offlineNote})`);
+        resolve({ success: true, offlineRoots });
       } else if (fullError.includes('LOCKED')) {
         job.finish('error', 'Archiv wird gerade von einem anderen PC gescannt.', { autoRemoveMs: 5000 });
         resolve({ success: false, error: 'LOCKED' });

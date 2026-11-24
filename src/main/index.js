@@ -27,11 +27,10 @@ import {
   restoreBackup,
   saveMetaJson,
 } from './catalog-service.js';
-import { getAppFolder, getConfig, saveConfig } from './config.js';
+import { getAppFolder, getConfig, inspectArchiveRootPath, saveConfig } from './config.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
-import { cancelAllQueue, cancelQueueItem, enqueueUpdates, getQueueState, reorderQueue } from './update-queue.js';
 import {
   checkProviderAvailability,
   clearProviderCache,
@@ -46,6 +45,7 @@ import {
   uninstallPackage,
 } from './providers/registry.js';
 import { runArchiveScan, scanSingleFolder } from './scanner-bridge.js';
+import { cancelAllQueue, cancelQueueItem, enqueueUpdates, getQueueState, reorderQueue } from './update-queue.js';
 import {
   checkAllWebVersions,
   checkSingleWebSource,
@@ -271,6 +271,7 @@ function registerIpcHandlers() {
   // Einstellungen, Backup & Reset
   handleIpc('get-app-info', () => ({ version: app.getVersion() }));
   handleIpc('get-settings', () => getConfig());
+  handleIpc('check-archive-path', (_e, rawPath, index = 0) => inspectArchiveRootPath(rawPath, index));
   handleIpc('save-settings', (_e, settings) => {
     try {
       saveConfig(settings);
@@ -280,7 +281,7 @@ function registerIpcHandlers() {
     }
   });
   handleIpc('select-dir', async (_e, opts = {}) => {
-    const defaultPath = opts?.defaultToArchive ? getConfig().absTargetPath : opts?.defaultPath || undefined;
+    const defaultPath = opts?.defaultPath || (opts?.defaultToArchive ? getConfig().absTargetPath : undefined);
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: opts?.title || 'Ordner auswählen',
       defaultPath,

@@ -43,6 +43,7 @@ function runPowerShell(script, { signal = null, asTempFile = false } = {}) {
       args = ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded];
     }
 
+    /** @type {any} */
     const child = spawn('powershell.exe', args);
     let stdout = '';
     let stderr = '';

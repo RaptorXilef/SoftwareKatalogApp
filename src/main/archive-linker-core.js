@@ -46,20 +46,28 @@ export function readExistingMetaSummary(metaFilePath) {
 /**
  * Prüft vor dem Schreiben, ob der Zielordner im Archiv liegt und ob bereits `_metadata/` existiert.
  */
-export function inspectArchiveTargetCollision(targetDir, archiveRootDir) {
+export function inspectArchiveTargetCollision(targetDir, archiveRootDirs) {
   if (!targetDir) {
     return { valid: false, error: 'Kein Zielordner angegeben.' };
   }
 
+  const rootList = (Array.isArray(archiveRootDirs) ? archiveRootDirs : [archiveRootDirs]).filter(
+    (r) => typeof r === 'string' && r.trim().length > 0
+  );
+  if (rootList.length === 0) {
+    return { valid: false, error: 'Kein Archiv-Verzeichnis konfiguriert.' };
+  }
+
   const resolvedDir = path.resolve(targetDir);
-  if (!isPathInsideDir(resolvedDir, archiveRootDir)) {
+  const matchingRoot = rootList.find((rootDir) => isPathInsideDir(resolvedDir, rootDir));
+  if (!matchingRoot) {
     return {
       valid: false,
-      error: 'Sicherheitsverletzung: Zielordner liegt außerhalb des konfigurierten Archiv-Verzeichnisses.',
+      error: 'Sicherheitsverletzung: Zielordner liegt außerhalb der konfigurierten Archiv-Verzeichnisse.',
     };
   }
 
-  const resolvedRoot = path.resolve(archiveRootDir);
+  const resolvedRoot = path.resolve(matchingRoot);
   const isSameAsRoot =
     process.platform === 'win32'
       ? resolvedDir.toLowerCase() === resolvedRoot.toLowerCase()
@@ -67,7 +75,7 @@ export function inspectArchiveTargetCollision(targetDir, archiveRootDir) {
   if (isSameAsRoot) {
     return {
       valid: false,
-      error: 'Bitte einen Unterordner innerhalb des Archivs wählen (nicht das Archiv-Stammverzeichnis selbst).',
+      error: 'Bitte einen Unterordner innerhalb eines Archivs wählen (nicht das Archiv-Stammverzeichnis selbst).',
     };
   }
 
@@ -183,7 +191,8 @@ export function buildLinkedMetaObject({
 }
 
 export function writeLinkedMetaToTarget({
-  archiveRootDir,
+  archiveRootDir = '',
+  archiveRootDirs = null,
   targetDir = '',
   saveMode = 'ask',
   collisionMode = 'create',
@@ -226,7 +235,8 @@ export function writeLinkedMetaToTarget({
     };
   }
 
-  const collision = inspectArchiveTargetCollision(resolvedTargetDir, archiveRootDir);
+  const allowedRoots = Array.isArray(archiveRootDirs) && archiveRootDirs.length > 0 ? archiveRootDirs : archiveRootDir;
+  const collision = inspectArchiveTargetCollision(resolvedTargetDir, allowedRoots);
   if (!collision.valid) {
     return { success: false, error: collision.error };
   }

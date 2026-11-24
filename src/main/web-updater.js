@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserWindow, dialog, session } from 'electron';
+import { resolveBestArchivePath } from '../shared/multi-archive-logic.js';
 import { buildArchiveFilename, extractVersion } from '../shared/version.js';
 import { persistWebVersion, writeCatalogAtomic } from './catalog-service.js';
 import { getConfig } from './config.js';
@@ -164,6 +165,7 @@ export async function checkSingleWebSource(
       sourceType ||
       (resolvedWingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
 
+    /** @type {any} */
     let result = { success: false, error: 'Keine Online-Quelle konfiguriert.' };
 
     if (effectiveType === 'winget') {
@@ -594,7 +596,17 @@ export async function downloadWebUpdate(
   { saveIntoLastFolder = false, useJob = true, signal = null, onProgress = null } = {}
 ) {
   const cfg = getConfig();
-  const baseTargetDir = saveIntoLastFolder ? path.join(item.path, '_last') : item.path;
+  const targetSoftwareDir = resolveBestArchivePath(item, {
+    archiveRoots: cfg.absArchivePaths,
+    pathExists: (p) => fs.existsSync(p),
+  });
+  if (!targetSoftwareDir) {
+    return {
+      success: false,
+      error: 'Kein erreichbarer Archiv-Pfad für diese Software verfügbar (Archiv-Quelle offline).',
+    };
+  }
+  const baseTargetDir = saveIntoLastFolder ? path.join(targetSoftwareDir, '_last') : targetSoftwareDir;
   if (!fs.existsSync(baseTargetDir)) fs.mkdirSync(baseTargetDir, { recursive: true });
 
   let partFilePath = null;
@@ -746,7 +758,7 @@ export async function downloadWebUpdate(
       partFilePath = null;
 
       reportProgress(99, 'Aktualisiere Katalogeintrag...');
-      await scanSingleFolder(item.path);
+      await scanSingleFolder(targetSoftwareDir);
       job?.finish('done', `Gespeichert: ${path.basename(targetFinalPath)}`);
       return { success: true, filePath: targetFinalPath, version: knownVersion };
     }
@@ -807,7 +819,7 @@ export async function downloadWebUpdate(
           if (state === 'completed') {
             const savedPath = dlItem.getSavePath();
             reportProgress(99, 'Aktualisiere Katalogeintrag...');
-            await scanSingleFolder(item.path);
+            await scanSingleFolder(targetSoftwareDir);
             job?.finish('done', `Gespeichert: ${path.basename(savedPath)}`);
             done({ success: true, filePath: savedPath, version: knownVersion });
           } else {
@@ -960,6 +972,7 @@ export async function fetchChangelog(item) {
   }
 
   try {
+    /** @type {any} */
     let payload = { success: false, error: 'Für diese Quelle sind keine Changelogs verfügbar.' };
 
     if (sourceType === 'github' && item.webVersionUrl) {

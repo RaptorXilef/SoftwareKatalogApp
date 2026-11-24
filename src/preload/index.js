@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Einstellungen, Backup & Self-Update
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  checkArchivePath: (rawPath, index) => ipcRenderer.invoke('check-archive-path', rawPath, index),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   selectDir: (opts) => ipcRenderer.invoke('select-dir', opts),
   selectFile: (filters, returnAbsolute = false) => ipcRenderer.invoke('select-file', filters, returnAbsolute),

@@ -1,9 +1,53 @@
+import { getArchiveRootLabel, normalizeArchivePaths, normalizePathKey } from '../../shared/multi-archive-logic.js';
 import { normalizeStartTab } from '../../shared/unified-packages.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
+
+function getInputEl(root, selector) {
+  const el = root.querySelector(selector);
+  return el instanceof HTMLInputElement ? el : null;
+}
+
+function getSelectEl(root, selector) {
+  const el = root.querySelector(selector);
+  return el instanceof HTMLSelectElement ? el : null;
+}
+
+function renderArchiveRootsListHtml(archiveItems) {
+  if (!Array.isArray(archiveItems) || archiveItems.length === 0) {
+    return '<div class="path-empty">Keine Archiv-Pfade konfiguriert.</div>';
+  }
+
+  const canDelete = archiveItems.length > 1;
+  return archiveItems
+    .map((entry, idx) => {
+      const rankLabel = idx === 0 ? '#1 Primär' : `#${idx + 1}`;
+      const statusCls = entry.online ? 'is-online' : 'is-offline';
+      const statusText = entry.online ? '🟢 Online' : '🔴 Offline';
+      const absHint = entry.absPath && entry.absPath !== entry.rawPath ? ` (${entry.absPath})` : '';
+
+      return `
+        <div class="archive-path-row" data-archive-idx="${idx}" draggable="${archiveItems.length > 1 ? 'true' : 'false'}">
+          <span class="archive-drag-handle" title="Per Drag & Drop verschieben" aria-hidden="true">⋮⋮</span>
+          <span class="archive-rank-pill ${idx === 0 ? 'is-primary' : ''}">${escapeHTML(rankLabel)}</span>
+          <span class="archive-status-pill ${statusCls}" title="${entry.online ? 'Verzeichnis erreichbar' : 'Verzeichnis aktuell nicht erreichbar'}">${statusText}</span>
+          <span class="archive-path-text" title="${escapeHTML(`${entry.rawPath}${absHint}`)}">
+            <strong class="archive-path-name">${escapeHTML(entry.label || getArchiveRootLabel(entry.rawPath, idx))}</strong>
+            <code class="archive-path-raw">${escapeHTML(entry.rawPath)}</code>
+          </span>
+          <div class="archive-path-actions">
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="up" data-archive-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Priorität erhöhen">↑</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="down" data-archive-idx="${idx}" ${idx === archiveItems.length - 1 ? 'disabled' : ''} title="Priorität verringern">↓</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-remove="${idx}" ${canDelete ? '' : 'disabled'} title="${canDelete ? 'Archiv-Pfad entfernen' : 'Mindestens ein Archiv-Pfad ist erforderlich'}">🗑️</button>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
 
 export async function renderSettingsModal() {
   state.currentModalId = null;
@@ -30,6 +74,21 @@ export async function renderSettingsModal() {
   const startTab = normalizeStartTab(s.startTab);
   const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
   const expiredCacheEntries = Number(cacheStats?.expiredEntries) || 0;
+
+  const initialArchivePaths = normalizeArchivePaths(s);
+  const initialStatusMap = new Map(
+    (Array.isArray(s.archiveRootsStatus) ? s.archiveRootsStatus : []).map((st) => [st.rawPath, st])
+  );
+  /** @type {Array<{ rawPath: string, absPath: string, label: string, online: boolean }>} */
+  const archiveItems = initialArchivePaths.map((rawPath, idx) => {
+    const st = initialStatusMap.get(rawPath);
+    return {
+      rawPath,
+      absPath: st?.absPath || rawPath,
+      label: st?.label || getArchiveRootLabel(rawPath, idx),
+      online: Boolean(st?.online),
+    };
+  });
 
   const providerCheckboxes = providers
     .map((p) => {
@@ -126,15 +185,20 @@ export async function renderSettingsModal() {
         <p class="panel-hint">Platzhalter: <code>{Name}</code>, <code>{Version}</code>, <code>{Arch}</code>, <code>{Ext}</code></p>
       </section>
 
-      <!-- 2. Archiv & Scanner -->
+      <!-- 3. Archiv & Scanner -->
       <section class="settings-section">
         <h3>📂 Archiv & Scanner</h3>
         <div class="form-field">
-          <span>Software-Verzeichnis (Archiv / Lokal)</span>
-          <div class="input-action-row">
-            <input type="text" id="cfgTarget" value="${escapeHTML(s.targetPath || '../software')}" readonly>
-            <button type="button" class="btn btn-ghost" data-settings-action="browse-target">Ordner wählen</button>
+          <div class="field-header-row">
+            <span>Archiv-Pfade (Priorität von oben nach unten)</span>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="add-archive-path">➕ Archiv-Pfad hinzufügen</button>
           </div>
+          <div id="archivePathsList" class="archive-paths-list">
+            ${renderArchiveRootsListHtml(archiveItems)}
+          </div>
+          <p class="panel-hint">
+            Eintrag #1 hat höchste Priorität. Duplikate über mehrere Archiv-Orte werden automatisch zusammengeführt; nicht erreichbare Quellen bleiben im Cache erhalten.
+          </p>
         </div>
 
         <div class="form-grid-2">
@@ -154,7 +218,7 @@ export async function renderSettingsModal() {
         </label>
       </section>
 
-      <!-- 3. Darstellung & Filter -->
+      <!-- 4. Darstellung & Filter -->
       <section class="settings-section">
         <h3>🎨 Darstellung & Versionsvergleich</h3>
         <div class="form-grid-2">
@@ -183,7 +247,7 @@ export async function renderSettingsModal() {
         </div>
       </section>
 
-      <!-- 4. App-Updates & Info -->
+      <!-- 5. App-Updates & Info -->
       <section class="settings-section">
         <h3>🚀 App-Updates & Über</h3>
         <div class="form-grid-2">
@@ -212,7 +276,7 @@ export async function renderSettingsModal() {
         </div>
       </section>
 
-      <!-- 5. Wartung & Backup (eingeklappt) -->
+      <!-- 6. Wartung & Backup (eingeklappt) -->
       <details class="advanced-box">
         <summary>🛠️ Wartung, Backup & Zurücksetzen</summary>
         <div class="inline-btn-group">
@@ -240,9 +304,71 @@ export async function renderSettingsModal() {
 
   overlay.hidden = false;
 
+  const refreshArchivePathsUi = () => {
+    const listEl = modal.querySelector('#archivePathsList');
+    if (listEl) {
+      listEl.innerHTML = renderArchiveRootsListHtml(archiveItems);
+    }
+  };
+
+  // Drag & Drop zum Umsortieren der Archiv-Priorität
+  const listEl = modal.querySelector('#archivePathsList');
+  let draggedIdx = -1;
+  if (listEl instanceof HTMLElement) {
+    listEl.addEventListener('dragstart', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const row = e.target.closest('.archive-path-row');
+      if (!(row instanceof HTMLElement)) return;
+      draggedIdx = parseInt(row.dataset.archiveIdx || '-1', 10);
+      row.classList.add('is-dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(draggedIdx));
+      }
+    });
+
+    listEl.addEventListener('dragover', (e) => {
+      if (draggedIdx < 0 || !(e.target instanceof Element)) return;
+      const row = e.target.closest('.archive-path-row');
+      if (!(row instanceof HTMLElement)) return;
+      e.preventDefault();
+      listEl.querySelectorAll('.archive-path-row').forEach((el) => {
+        el.classList.remove('is-drag-over');
+      });
+      row.classList.add('is-drag-over');
+    });
+
+    listEl.addEventListener('dragleave', (e) => {
+      if (!(e.target instanceof Element)) return;
+      const row = e.target.closest('.archive-path-row');
+      if (row instanceof HTMLElement) row.classList.remove('is-drag-over');
+    });
+
+    listEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (!(e.target instanceof Element)) return;
+      const targetRow = e.target.closest('.archive-path-row');
+      const targetIdx = targetRow instanceof HTMLElement ? parseInt(targetRow.dataset.archiveIdx || '-1', 10) : -1;
+      if (draggedIdx >= 0 && targetIdx >= 0 && draggedIdx !== targetIdx) {
+        const [moved] = archiveItems.splice(draggedIdx, 1);
+        archiveItems.splice(targetIdx, 0, moved);
+        refreshArchivePathsUi();
+      }
+      draggedIdx = -1;
+    });
+
+    listEl.addEventListener('dragend', () => {
+      draggedIdx = -1;
+      listEl.querySelectorAll('.archive-path-row').forEach((el) => {
+        el.classList.remove('is-dragging', 'is-drag-over');
+      });
+    });
+  }
+
   // Live-Vorschau für Dateinamen-Schema
   const updatePreview = () => {
-    const pattern = modal.querySelector('#cfgFilenamePattern')?.value || '{Name}_v{Version}{Arch}{Ext}';
+    const patternInput = getInputEl(modal, '#cfgFilenamePattern');
+    const pattern = patternInput?.value || '{Name}_v{Version}{Arch}{Ext}';
     const preview = buildArchiveFilename({
       softwareName: 'VLC Media Player',
       version: '3.0.21',
@@ -272,8 +398,35 @@ export async function renderSettingsModal() {
   });
 
   modal.onclick = async (e) => {
+    if (!(e.target instanceof Element)) return;
+
+    const moveBtn = e.target.closest('[data-archive-move]');
+    if (moveBtn instanceof HTMLButtonElement) {
+      const idx = parseInt(moveBtn.dataset.archiveIdx || '-1', 10);
+      const dir = moveBtn.dataset.archiveMove;
+      if (dir === 'up' && idx > 0) {
+        [archiveItems[idx - 1], archiveItems[idx]] = [archiveItems[idx], archiveItems[idx - 1]];
+        refreshArchivePathsUi();
+      } else if (dir === 'down' && idx >= 0 && idx < archiveItems.length - 1) {
+        [archiveItems[idx], archiveItems[idx + 1]] = [archiveItems[idx + 1], archiveItems[idx]];
+        refreshArchivePathsUi();
+      }
+      return;
+    }
+
+    const removeBtn = e.target.closest('[data-archive-remove]');
+    if (removeBtn instanceof HTMLButtonElement) {
+      if (archiveItems.length <= 1) return;
+      const idx = parseInt(removeBtn.dataset.archiveRemove || '-1', 10);
+      if (idx >= 0 && idx < archiveItems.length) {
+        archiveItems.splice(idx, 1);
+        refreshArchivePathsUi();
+      }
+      return;
+    }
+
     const installAppBtn = e.target.closest('[data-install-app-url]');
-    if (installAppBtn) {
+    if (installAppBtn instanceof HTMLButtonElement) {
       installAppBtn.disabled = true;
       closeModal();
       showToast('App-Update wird im Hintergrund geladen...', { type: 'info' });
@@ -288,22 +441,22 @@ export async function renderSettingsModal() {
     }
 
     const releaseBtn = e.target.closest('[data-open-release]');
-    if (releaseBtn) {
+    if (releaseBtn instanceof HTMLElement) {
       window.electronAPI.openUrl(releaseBtn.dataset.openRelease);
       return;
     }
 
     // Zwei-Klick-Bestätigung für destruktive Wartungsaktionen (kein confirm()!)
     const dangerBtn = e.target.closest('[data-danger-action]');
-    if (dangerBtn) {
+    if (dangerBtn instanceof HTMLButtonElement) {
       if (dangerBtn.dataset.armed !== 'true') {
         dangerBtn.dataset.armed = 'true';
-        dangerBtn.dataset.origText = dangerBtn.textContent;
+        dangerBtn.dataset.origText = dangerBtn.textContent || '';
         dangerBtn.textContent = '⚠️ Wirklich ausführen?';
         setTimeout(() => {
           if (dangerBtn.dataset.armed === 'true') {
             dangerBtn.dataset.armed = 'false';
-            dangerBtn.textContent = dangerBtn.dataset.origText;
+            dangerBtn.textContent = dangerBtn.dataset.origText || '';
           }
         }, 4000);
         return;
@@ -326,30 +479,46 @@ export async function renderSettingsModal() {
       }
 
       dangerBtn.disabled = false;
-      dangerBtn.textContent = dangerBtn.dataset.origText;
+      dangerBtn.textContent = dangerBtn.dataset.origText || '';
       return;
     }
 
     const btn = e.target.closest('[data-settings-action]');
-    if (!btn) return;
+    if (!(btn instanceof HTMLElement)) return;
     const act = btn.dataset.settingsAction;
 
     if (act === 'close') closeModal();
     else if (act === 'open-github') window.electronAPI.openUrl('https://github.com/RaptorXilef/SoftwareKatalogApp');
     else if (act === 'open-data-dir') window.electronAPI.openPath(s.dataDir);
     else if (act === 'open-state') window.electronAPI.openPath(s.statePath);
-    else if (act === 'browse-target') {
-      const dir = await window.electronAPI.selectDir();
-      if (dir) modal.querySelector('#cfgTarget').value = dir;
+    else if (act === 'add-archive-path') {
+      const dir = await window.electronAPI.selectDir({ title: 'Archiv-Pfad hinzufügen' });
+      if (!dir) return;
+      const newKey = normalizePathKey(dir);
+      const duplicate = archiveItems.some(
+        (item) => normalizePathKey(item.rawPath) === newKey || normalizePathKey(item.absPath) === newKey
+      );
+      if (duplicate) {
+        showToast('Dieser Archiv-Pfad ist bereits in der Liste enthalten.', { type: 'info' });
+        return;
+      }
+      const checked = await window.electronAPI.checkArchivePath(dir, archiveItems.length);
+      archiveItems.push({
+        rawPath: dir,
+        absPath: checked?.absPath || dir,
+        label: checked?.label || getArchiveRootLabel(dir, archiveItems.length),
+        online: checked?.online ?? true,
+      });
+      refreshArchivePathsUi();
     } else if (act === 'clear-provider-cache') {
-      btn.disabled = true;
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
       const res = await window.electronAPI.clearProviderCache();
       if (res?.success) {
         const countEl = modal.querySelector('#providerCacheCount');
         if (countEl) countEl.textContent = '0 Einträge gespeichert';
         showToast('Provider-Cache wurde geleert.', { type: 'success' });
       } else {
-        btn.disabled = false;
+        if (btn instanceof HTMLButtonElement) btn.disabled = false;
         showToast('Cache konnte nicht geleert werden.', { type: 'error' });
       }
     } else if (act === 'backup-create') {
@@ -366,39 +535,45 @@ export async function renderSettingsModal() {
         showToast(res.error, { type: 'error' });
       }
     } else if (act === 'save') {
-      const checkedCats = Array.from(modal.querySelectorAll('input[name="hiddenCatCheck"]:checked')).map(
-        (cb) => cb.value
-      );
-      const checkedProviders = Array.from(modal.querySelectorAll('input[name="enabledProviderCheck"]:checked')).map(
-        (cb) => cb.value
-      );
-      const autoSave = modal.querySelector('#cfgAutoSave').checked;
-      const startTabEl = modal.querySelector('#cfgStartTab');
+      const checkedCats = Array.from(modal.querySelectorAll('input[name="hiddenCatCheck"]:checked'))
+        .filter((cb) => cb instanceof HTMLInputElement)
+        .map((cb) => cb.value);
+      const checkedProviders = Array.from(modal.querySelectorAll('input[name="enabledProviderCheck"]:checked'))
+        .filter((cb) => cb instanceof HTMLInputElement)
+        .map((cb) => cb.value);
+
+      const autoSave = Boolean(getInputEl(modal, '#cfgAutoSave')?.checked);
+      const startTabEl = getSelectEl(modal, '#cfgStartTab');
+      const saveModeEl = getSelectEl(modal, '#cfgArchiveSaveMode');
+      const updateIntervalEl = getSelectEl(modal, '#cfgUpdateInterval');
+      const nextArchivePaths = archiveItems.map((entry) => entry.rawPath);
+
       const newSettings = {
         enabledProviders: checkedProviders,
-        archiveSaveMode: modal.querySelector('#cfgArchiveSaveMode')?.value || 'ask',
-        targetPath: modal.querySelector('#cfgTarget').value,
-        scanNested: modal.querySelector('#cfgScanNested').checked,
-        nestedDepth: parseInt(modal.querySelector('#cfgNestedDepth').value, 10) || 1,
+        archiveSaveMode: saveModeEl?.value || 'ask',
+        archivePaths: nextArchivePaths,
+        targetPath: nextArchivePaths[0] || '../software',
+        scanNested: Boolean(getInputEl(modal, '#cfgScanNested')?.checked),
+        nestedDepth: parseInt(getInputEl(modal, '#cfgNestedDepth')?.value || '1', 10) || 1,
         visibleHiddenCats: checkedCats,
-        updateInterval: parseInt(modal.querySelector('#cfgUpdateInterval').value, 10),
-        autoExtensions: modal
-          .querySelector('#cfgAutoExt')
-          .value.split(',')
+        updateInterval: parseInt(updateIntervalEl?.value || '24', 10),
+        autoExtensions: (getInputEl(modal, '#cfgAutoExt')?.value || '.exe, .msi, .zip')
+          .split(',')
           .map((x) => x.trim())
           .filter(Boolean)
           .map((x) => (x.startsWith('.') ? x : `.${x}`)),
-        newBadgeDays: parseInt(modal.querySelector('#cfgNewBadgeDays').value, 10) || 0,
-        versionCompareDepth: parseInt(modal.querySelector('#cfgVersionDepth').value, 10) || 3,
-        startTab: normalizeStartTab(startTabEl instanceof HTMLSelectElement ? startTabEl.value : 'updates'),
+        newBadgeDays: parseInt(getInputEl(modal, '#cfgNewBadgeDays')?.value || '0', 10) || 0,
+        versionCompareDepth: parseInt(getInputEl(modal, '#cfgVersionDepth')?.value || '3', 10) || 3,
+        startTab: normalizeStartTab(startTabEl?.value || 'updates'),
         autoSaveDownloads: autoSave,
         askSaveDialog: !autoSave,
-        keepOriginalNameIfVersioned: modal.querySelector('#cfgKeepOriginal').checked,
-        filenamePattern: modal.querySelector('#cfgFilenamePattern').value.trim() || '{Name}_v{Version}{Arch}{Ext}',
+        keepOriginalNameIfVersioned: Boolean(getInputEl(modal, '#cfgKeepOriginal')?.checked),
+        filenamePattern: getInputEl(modal, '#cfgFilenamePattern')?.value.trim() || '{Name}_v{Version}{Arch}{Ext}',
       };
 
+      const oldArchivePaths = normalizeArchivePaths(s);
       const needsRescan =
-        s.targetPath !== newSettings.targetPath ||
+        oldArchivePaths.join('|') !== newSettings.archivePaths.join('|') ||
         (s.autoExtensions || []).join(',') !== newSettings.autoExtensions.join(',');
 
       const res = await window.electronAPI.saveSettings(newSettings);

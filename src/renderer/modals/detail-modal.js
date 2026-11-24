@@ -1,4 +1,5 @@
 import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
+import { formatMultiRootFileLabel } from '../../shared/multi-archive-logic.js';
 import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
@@ -384,12 +385,19 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
     let filesBarHtml = '<p class="muted">Keine Setup-Datei im Archiv-Ordner gefunden.</p>';
     if (item.lastFiles?.length > 0) {
       const firstFile = item.lastFiles[0];
+      const fileSourceIndices = new Set(
+        Object.values(item.lastFileSources || {}).map((s) => Number(s?.rootIndex ?? 0))
+      );
+      const showRootPrefix = Boolean(item.hasMultipleArchiveRoots || fileSourceIndices.size > 1);
       const selectorHtml =
         item.lastFiles.length > 1
           ? `<select id="detailFileSelect" class="detail-file-select">${item.lastFiles
-              .map((f, idx) => `<option value="${idx}">${escapeHTML(getBaseName(f))}</option>`)
+              .map(
+                (f, idx) =>
+                  `<option value="${idx}">${escapeHTML(formatMultiRootFileLabel(f, item.lastFileSources, showRootPrefix))}</option>`
+              )
               .join('')}</select>`
-          : `<span class="detail-file-name" title="${escapeHTML(getBaseName(firstFile))}">${escapeHTML(getBaseName(firstFile))}</span>`;
+          : `<span class="detail-file-name" title="${escapeHTML(firstFile)}">${escapeHTML(formatMultiRootFileLabel(firstFile, item.lastFileSources, showRootPrefix))}</span>`;
 
       filesBarHtml = `
         <div class="detail-archive-bar">
@@ -453,7 +461,23 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
 
   const techRows = [`<div class="tech-row"><span>Herkunft</span><strong>${escapeHTML(originLabel)}</strong></div>`];
   if (item.path) {
-    techRows.push(`<div class="tech-row"><span>Archiv-Ordner</span><code>${escapeHTML(item.path)}</code></div>`);
+    const primaryRootLabel = item.archiveRootLabel
+      ? ` (#${(item.archiveRootIndex ?? 0) + 1} ${item.archiveRootLabel})`
+      : '';
+    const offlineTag = item.archiveOffline ? ' [Offline-Cache]' : '';
+    techRows.push(
+      `<div class="tech-row"><span>Primärer Archiv-Ordner${escapeHTML(primaryRootLabel)}${escapeHTML(offlineTag)}</span><code>${escapeHTML(item.path)}</code></div>`
+    );
+  }
+  if (Array.isArray(item.alternatePaths) && item.alternatePaths.length > 0) {
+    const altHtml = item.alternatePaths
+      .map(
+        (alt) =>
+          `[#${(alt.rootIndex ?? 0) + 1} ${alt.rootLabel || 'Archiv'}${alt.offline ? ' (offline)' : ''}] ${alt.path}`
+      )
+      .map(escapeHTML)
+      .join('<br>');
+    techRows.push(`<div class="tech-row"><span>Weitere Archiv-Orte</span><code>${altHtml}</code></div>`);
   }
   if (effectivePm) {
     techRows.push(`<div class="tech-row"><span>Paketmanager</span><code>${escapeHTML(effectivePm)}</code></div>`);
@@ -547,7 +571,7 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
   const staleNoticeHtml = isStale
     ? `
       <div class="pkg-stale-notice">
-        ⚠️ Offline-Modus: Live-Abruf fehlgeschlagen – zeige zwischengespeicherten Steckbrief${formattedTime ? ` (Stand: ${escapeHTML(formattedTime)})` : ''}.
+        ⚠️ Offline-Modus: Live-Abruf fehlgeschlagen - zeige zwischengespeicherten Steckbrief${formattedTime ? ` (Stand: ${escapeHTML(formattedTime)})` : ''}.
       </div>
     `
     : '';
@@ -674,6 +698,13 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     : '';
   const inArchiveRemoteChip =
     item.origin === 'remote' && matchedArchive ? '<span class="discover-status-badge">Im Archiv</span>' : '';
+  const offlineArchiveChip = item.archiveOffline
+    ? '<span class="card-chip chip-install-protected" title="Die zugehörige Archiv-Quelle ist aktuell nicht erreichbar (zwischengespeicherte Daten)">🔴 Archiv offline</span>'
+    : '';
+  const multiRootChip =
+    Array.isArray(item.alternatePaths) && item.alternatePaths.length > 0
+      ? `<span class="card-chip" title="Zusammengeführt aus ${1 + item.alternatePaths.length} Archiv-Orten">🗄️ ${1 + item.alternatePaths.length} Orte</span>`
+      : '';
 
   const headerMeta = [];
   if (item.mainCategory) headerMeta.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
@@ -743,6 +774,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
             ${statusBadge ? `<span class="status-pill ${statusBadge.cls}">${escapeHTML(statusBadge.label)}</span>` : ''}
             ${originChip}
             ${inArchiveRemoteChip}
+            ${offlineArchiveChip}
+            ${multiRootChip}
             ${newChip}
             ${typeChip}
             ${keepChip}
@@ -820,7 +853,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     const refreshBtn = modal.querySelector('#btnRefreshPkgProfile');
     if (!bodyEl) return;
 
-    if (refreshBtn) refreshBtn.disabled = true;
+    if (refreshBtn instanceof HTMLButtonElement) refreshBtn.disabled = true;
     if (badgeEl) badgeEl.textContent = forceRefresh ? 'Aktualisiere...' : 'Lade...';
     if (forceRefresh) {
       bodyEl.innerHTML = '<span class="muted">⏳ Frage aktuelle Paketdaten von Winget ab...</span>';
@@ -829,7 +862,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     const res = await window.electronAPI.showPackage(effectivePm, effectivePkgId, { forceRefresh });
     if (!isStillActive()) return;
 
-    if (refreshBtn) refreshBtn.disabled = false;
+    if (refreshBtn instanceof HTMLButtonElement) refreshBtn.disabled = false;
 
     if (res?.success && res.package) {
       loadedPkgProfile = res.package;
@@ -994,10 +1027,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
   const switchDetailTab = (tabName) => {
     modal.querySelectorAll('[data-detail-tab]').forEach((b) => {
-      b.classList.toggle('active', b.dataset.detailTab === tabName);
+      if (b instanceof HTMLElement) {
+        b.classList.toggle('active', b.dataset.detailTab === tabName);
+      }
     });
     modal.querySelectorAll('[data-detail-panel]').forEach((p) => {
-      p.hidden = p.dataset.detailPanel !== tabName;
+      if (p instanceof HTMLElement) {
+        p.hidden = p.dataset.detailPanel !== tabName;
+      }
     });
     if (tabName === 'changelog') {
       loadChangelog();
@@ -1022,7 +1059,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
   const getSelectedArchiveFile = () => {
     const sel = modal.querySelector('#detailFileSelect');
-    const idx = sel ? parseInt(sel.value, 10) : 0;
+    const idx = sel instanceof HTMLSelectElement ? parseInt(sel.value, 10) : 0;
     return item.lastFiles?.[idx] || item.lastFiles?.[0] || null;
   };
 
@@ -1061,7 +1098,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   };
 
   const runWebDownloadFlow = async () => {
-    const saveIntoLastFolder = Boolean(modal.querySelector('#detailSaveIntoLast')?.checked);
+    const saveLastEl = modal.querySelector('#detailSaveIntoLast');
+    const saveIntoLastFolder = saveLastEl instanceof HTMLInputElement ? saveLastEl.checked : false;
     const res = await window.electronAPI.downloadWebUpdate(item, { saveIntoLastFolder });
 
     if (res.alreadyRunning) {
@@ -1084,7 +1122,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const runProviderInstallFlow = async (btn) => {
     if (!isWingetPkg) return;
     const archiveCheck = modal.querySelector('#detailAlsoSaveArchive');
-    const shouldSaveToArchive = Boolean(archiveCheck?.checked);
+    const shouldSaveToArchive = archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
 
     let archiveTargetSpec = null;
     if (shouldSaveToArchive) {
@@ -1152,38 +1190,41 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   };
 
   modal.onclick = async (e) => {
+    if (!(e.target instanceof Element)) return;
+
     const anchor = e.target.closest('a[href]');
-    if (anchor) {
+    if (anchor instanceof HTMLAnchorElement) {
       e.preventDefault();
       window.electronAPI.openUrl(anchor.href);
       return;
     }
 
     const urlBtn = e.target.closest('[data-open-url]');
-    if (urlBtn) {
+    if (urlBtn instanceof HTMLElement) {
       window.electronAPI.openUrl(urlBtn.dataset.openUrl);
       return;
     }
 
     const thumb = e.target.closest('[data-lightbox-idx]');
-    if (thumb) {
-      openLightbox(item.id, parseInt(thumb.dataset.lightboxIdx, 10));
+    if (thumb instanceof HTMLElement) {
+      openLightbox(item.id, parseInt(thumb.dataset.lightboxIdx || '0', 10));
       return;
     }
 
     const tabBtn = e.target.closest('[data-detail-tab]');
-    if (tabBtn) {
+    if (tabBtn instanceof HTMLElement) {
       switchDetailTab(tabBtn.dataset.detailTab);
       return;
     }
 
     const modeBtn = e.target.closest('[data-detail-install-mode]');
-    if (modeBtn) {
+    if (modeBtn instanceof HTMLElement) {
       const requested = modeBtn.dataset.detailInstallMode;
       if (isSilentLocked && requested === 'silent') return;
       if (requested === 'interactive' || requested === 'silent') {
         selectedInstallMode = requested;
         modal.querySelectorAll('[data-detail-install-mode]').forEach((b) => {
+          if (!(b instanceof HTMLElement)) return;
           const active = b.dataset.detailInstallMode === selectedInstallMode;
           b.classList.toggle('active', active);
           b.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -1193,7 +1234,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     }
 
     const btn = e.target.closest('[data-detail-action]');
-    if (!btn) return;
+    if (!(btn instanceof HTMLElement)) return;
     const action = btn.dataset.detailAction;
 
     if (action === 'close') {
@@ -1219,9 +1260,9 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     } else if (action === 'copy-selected') {
       const file = getSelectedArchiveFile();
       if (!file) return;
-      btn.disabled = true;
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
       const res = await window.electronAPI.copyFilesToPc([file]);
-      btn.disabled = false;
+      if (btn instanceof HTMLButtonElement) btn.disabled = false;
       if (res.success) showToast(`Gespeichert unter: ${res.dest}`, { type: 'success' });
       else if (res.error) showToast(`Kopierfehler: ${res.error}`, { type: 'error' });
     } else if (action === 'provider-install') {
@@ -1238,19 +1279,19 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     } else if (action === 'uninstall') {
       if (btn.dataset.armed !== 'true') {
         btn.dataset.armed = 'true';
-        btn.dataset.origText = btn.textContent;
+        btn.dataset.origText = btn.textContent || '';
         btn.textContent = '⚠️ Wirklich deinstallieren?';
         setTimeout(() => {
           if (btn.dataset.armed === 'true') {
             btn.dataset.armed = 'false';
-            btn.textContent = btn.dataset.origText;
+            btn.textContent = btn.dataset.origText || '';
           }
         }, 4000);
         return;
       }
 
       btn.dataset.armed = 'false';
-      btn.disabled = true;
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
       btn.textContent = '⏳ Deinstalliere...';
 
       const res = await window.electronAPI.uninstallSoftware({
@@ -1263,7 +1304,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         silent: false,
       });
 
-      btn.disabled = false;
+      if (btn instanceof HTMLButtonElement) btn.disabled = false;
       btn.textContent = btn.dataset.origText || '🗑️ Deinstallieren';
 
       if (res?.alreadyRunning) {

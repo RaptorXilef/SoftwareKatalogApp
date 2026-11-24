@@ -477,7 +477,7 @@ export function renderUpdatesBatchBar(entries = null) {
   `;
 
   const chkAll = bar.querySelector('#chkSelectAllUpdates');
-  if (chkAll) {
+  if (chkAll instanceof HTMLInputElement) {
     chkAll.indeterminate = someSelected;
   }
 }

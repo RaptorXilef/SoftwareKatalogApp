@@ -48,8 +48,9 @@ export function openNestedDialog({ html, onAction, defaultAction = 'cancel' }) {
     };
 
     dialog.onclick = (e) => {
+      if (!(e.target instanceof Element)) return;
       const btn = e.target.closest('[data-dialog-action]');
-      if (!btn) return;
+      if (!(btn instanceof HTMLElement)) return;
       const action = btn.dataset.dialogAction;
       const result = onAction ? onAction(action) : action;
       if (result !== undefined) {
@@ -122,6 +123,15 @@ export function showArchiveCollisionModal({ targetDir, existingMeta = null, soft
  * Warnt im In-App-Dialog, wenn der gewählte Ordner außerhalb des Archiv-Stammverzeichnisses liegt.
  */
 export function showOutsideArchiveDialog({ targetDir, error = '' }) {
+  const configuredRoots =
+    Array.isArray(state.settings.absArchivePaths) && state.settings.absArchivePaths.length > 0
+      ? state.settings.absArchivePaths
+      : [state.settings.absTargetPath || state.settings.targetPath].filter(Boolean);
+  const rootsHtml =
+    configuredRoots.length > 0
+      ? `<div class="tech-row"><span>Erlaubte Archiv-Pfade</span><code>${configuredRoots.map(escapeHTML).join('<br>')}</code></div>`
+      : '';
+
   return openNestedDialog({
     defaultAction: 'cancel',
     html: `
@@ -131,8 +141,8 @@ export function showOutsideArchiveDialog({ targetDir, error = '' }) {
       </div>
 
       <div class="modal-body collision-warning-body">
-        <p>${escapeHTML(error || 'Der gewählte Ordner liegt nicht innerhalb des konfigurierten Archiv-Verzeichnisses.')}</p>
-        ${targetDir ? `<div class="collision-meta-card"><div class="tech-row"><span>Gewählt</span><code>${escapeHTML(targetDir)}</code></div></div>` : ''}
+        <p>${escapeHTML(error || 'Der gewählte Ordner liegt nicht innerhalb eines konfigurierten Archiv-Verzeichnisses.')}</p>
+        ${targetDir || rootsHtml ? `<div class="collision-meta-card">${targetDir ? `<div class="tech-row"><span>Gewählt</span><code>${escapeHTML(targetDir)}</code></div>` : ''}${rootsHtml}</div>` : ''}
       </div>
 
       <div class="modal-footer">

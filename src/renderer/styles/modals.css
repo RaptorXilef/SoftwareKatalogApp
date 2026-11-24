@@ -2481,3 +2481,103 @@
     color: var(--color-warn);
   }
 }
+
+/* Multi-Root Archive Paths in Settings */
+.archive-paths-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.archive-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+
+  &.is-dragging {
+    opacity: 0.55;
+  }
+
+  &.is-drag-over {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  }
+}
+
+.archive-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 13px;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.archive-rank-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+
+  &.is-primary {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+}
+
+.archive-status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+
+  &.is-online {
+    background: color-mix(in srgb, var(--color-ok) 15%, transparent);
+    color: var(--color-ok);
+  }
+
+  &.is-offline {
+    background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+    color: var(--color-danger);
+  }
+}
+
+.archive-path-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.archive-path-name {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.archive-path-raw {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-path-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}

@@ -121,8 +121,9 @@ async function checkAppUpdateInBackground() {
 function setupGridEvents() {
   const grid = document.getElementById('grid');
   grid?.addEventListener('change', (e) => {
+    if (!(e.target instanceof Element)) return;
     const chk = e.target.closest('.card-select-checkbox');
-    if (!chk) return;
+    if (!(chk instanceof HTMLInputElement)) return;
     const pkgId = chk.dataset.selectUpdateId;
     if (!pkgId) return;
     if (chk.checked) state.selectedUpdateIds.add(pkgId);
@@ -132,13 +133,14 @@ function setupGridEvents() {
   });
 
   grid?.addEventListener('click', async (e) => {
+    if (!(e.target instanceof Element)) return;
     if (e.target.closest('.card-select-wrap')) {
       e.stopPropagation();
       return;
     }
 
     const favBtn = e.target.closest('.fav-btn');
-    if (favBtn) {
+    if (favBtn instanceof HTMLElement) {
       e.stopPropagation();
       await toggleFavorite(favBtn.dataset.favId);
       renderCatalogGrid();
@@ -146,7 +148,7 @@ function setupGridEvents() {
     }
 
     const card = e.target.closest('.card');
-    if (card) {
+    if (card instanceof HTMLElement) {
       openDetailModal(card.dataset.id);
     }
   });
@@ -238,8 +240,9 @@ function setupUpdatesBatchBar() {
   if (!bar) return;
 
   bar.addEventListener('change', (e) => {
+    if (!(e.target instanceof Element)) return;
     const chk = e.target.closest('#chkSelectAllUpdates');
-    if (!chk) return;
+    if (!(chk instanceof HTMLInputElement)) return;
     const entries = getVisibleUpdateEntries();
     if (chk.checked) {
       for (const entry of entries) {
@@ -252,8 +255,9 @@ function setupUpdatesBatchBar() {
   });
 
   bar.addEventListener('click', async (e) => {
+    if (!(e.target instanceof Element)) return;
     const btn = e.target.closest('button');
-    if (!btn || state.isBatchActionRunning) return;
+    if (!(btn instanceof HTMLButtonElement) || state.isBatchActionRunning) return;
 
     if (btn.id === 'btnBatchDownloadArchive') {
       const pendingItems = getPendingArchiveWebUpdateItems();
@@ -307,7 +311,7 @@ function setupGlobalDragAndDrop() {
     if (state.activeTab !== 'archive') return;
     if (!document.getElementById('modalOverlay').hidden) return;
     if (!document.getElementById('dialogOverlay')?.hidden) return;
-    if (e.target.closest('.media-dropzone')) return;
+    if (e.target instanceof Element && e.target.closest('.media-dropzone')) return;
     dragDepth++;
     if (overlay) overlay.hidden = false;
   });
@@ -374,7 +378,10 @@ function setupKeyboardShortcuts() {
     }
 
     const active = document.activeElement;
-    const isTyping = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA' || active?.isContentEditable;
+    const isTyping =
+      active?.tagName === 'INPUT' ||
+      active?.tagName === 'TEXTAREA' ||
+      (active instanceof HTMLElement && active.isContentEditable);
 
     if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !isTyping)) {
       e.preventDefault();
@@ -385,13 +392,13 @@ function setupKeyboardShortcuts() {
       } else {
         searchInput?.focus();
       }
-    } else if (e.key === 'Escape' && active === searchInput) {
+    } else if (e.key === 'Escape' && active === searchInput && searchInput instanceof HTMLInputElement) {
       searchInput.value = '';
       state.searchQuery = '';
       if (clearBtn) clearBtn.hidden = true;
       searchInput.blur();
       renderCatalogGrid();
-    } else if (e.key === 'Escape' && active === discoverInput) {
+    } else if (e.key === 'Escape' && active === discoverInput && discoverInput instanceof HTMLInputElement) {
       discoverInput.value = '';
       state.discoverQuery = '';
       if (clearDiscoverBtn) clearDiscoverBtn.hidden = true;

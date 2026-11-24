@@ -352,6 +352,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
 /**
  * Erstellt ein vereinheitlichtes Paket-Objekt für Remote-Suchergebnisse (`origin: 'remote'`),
  * verknüpft es optional mit bereits vorhandenen Archiv- oder PC-Einträgen.
+ * @param {{ providerId?: string, packageId?: string, summary?: Record<string, any>, providerName?: string, existingPackages?: any[] }} [options]
  */
 export function buildRemotePackageItem({
   providerId = 'winget',

@@ -13,12 +13,38 @@ export function loadCatalogWithLiveStatus() {
     return data.map((item) => {
       const absPath = item.path ? path.resolve(appFolder, item.path) : '';
       const resolvedIcon = item.icon ? path.resolve(appFolder, item.icon) : null;
+
+      const rawSources = item.lastFileSources && typeof item.lastFileSources === 'object' ? item.lastFileSources : {};
+      /** @type {Record<string, any>} */
+      const resolvedLastFileSources = {};
+      const resolvedLastFiles = (item.lastFiles || []).map((f) => {
+        const absFile = path.resolve(appFolder, f);
+        if (rawSources[f]) {
+          resolvedLastFileSources[absFile] = rawSources[f];
+        } else if (rawSources[absFile]) {
+          resolvedLastFileSources[absFile] = rawSources[absFile];
+        }
+        return absFile;
+      });
+
+      const resolvedAlternatePaths = Array.isArray(item.alternatePaths)
+        ? item.alternatePaths.map((alt) => ({
+            ...alt,
+            path: alt?.path ? path.resolve(appFolder, alt.path) : '',
+          }))
+        : [];
+
       const enriched = {
         ...item,
         path: absPath,
+        primaryPath: item.primaryPath ? path.resolve(appFolder, item.primaryPath) : absPath,
+        alternatePaths: resolvedAlternatePaths,
         icon: resolvedIcon && fs.existsSync(resolvedIcon) ? resolvedIcon : null,
         screenshots: (item.screenshots || []).map((s) => path.resolve(appFolder, s)),
-        lastFiles: (item.lastFiles || []).map((f) => path.resolve(appFolder, f)),
+        lastFiles: resolvedLastFiles,
+        lastFileSources: resolvedLastFileSources,
+        archiveOffline: Boolean(item.archiveOffline),
+        hasMultipleArchiveRoots: Boolean(item.hasMultipleArchiveRoots),
         isInstalled: false,
         validInstallPath: null,
         installedVersion: installedVersions?.[item.id] ?? null,
@@ -59,8 +85,9 @@ export function persistWebVersion(itemId, webVersion) {
   if (!item) return false;
 
   item.webVersion = webVersion;
-  const metaPath = path.join(appFolder, item.path, '_metadata', 'meta.json');
-  if (fs.existsSync(metaPath)) {
+  const absItemDir = item.path ? path.resolve(appFolder, item.path) : '';
+  const metaPath = absItemDir ? path.join(absItemDir, '_metadata', 'meta.json') : '';
+  if (metaPath && fs.existsSync(metaPath)) {
     try {
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
       meta.webVersion = webVersion;
@@ -208,8 +235,9 @@ export async function resetAllPaths(type) {
     let modified = 0;
 
     for (const item of catData) {
-      const metaPath = path.join(appFolder, item.path, '_metadata', 'meta.json');
-      if (fs.existsSync(metaPath)) {
+      const absItemDir = item.path ? path.resolve(appFolder, item.path) : '';
+      const metaPath = absItemDir ? path.join(absItemDir, '_metadata', 'meta.json') : '';
+      if (metaPath && fs.existsSync(metaPath)) {
         const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
         if (type === 'auto') {
           meta.autoPaths = [];
@@ -244,6 +272,9 @@ export async function createBackup() {
     delete cfg.dataDir;
     delete cfg.statePath;
     delete cfg.absTargetPath;
+    delete cfg.primaryAbsTargetPath;
+    delete cfg.absArchivePaths;
+    delete cfg.archiveRootsStatus;
     delete cfg.absJsonPath;
     delete cfg.absScriptPath;
     fs.writeFileSync(filePath, JSON.stringify(cfg, null, 2), 'utf-8');
