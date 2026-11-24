@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.24.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.24.0...v1.24.1) (2026-11-24)
+
+### 🐛 Bug Fixes
+
+* **providers:** resolve NVM/MS-Store updates, app display names, and live card icons ([c95394d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c95394d387116742d7eee48b898027a7439edf1f))
+
 ## [1.24.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.23.0...v1.24.0) (2026-11-24)
 
 ### 🚀 Features
