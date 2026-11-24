@@ -1,21 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, Menu, nativeImage, Tray } from 'electron';
-import { formatTrayTooltip } from '../shared/background-update-logic.js';
+import { buildTrayMenuDescriptors, formatTrayTooltip } from '../shared/background-update-logic.js';
 import { getAppFolder } from './config.js';
 
 /** @type {Tray | null} */
 let tray = null;
 
-/** @type {{ onOpenWindow?: () => void, onCheckUpdatesNow?: () => void, onToggleAutoUpdatePaused?: () => void, onQuitApp?: () => void }} */
+/** @type {{ onOpenWindow?: () => void, onCheckUpdatesNow?: () => void, onToggleAutoUpdatePaused?: () => void, onOpenSettings?: () => void, onQuitApp?: () => void }} */
 let trayHandlers = {};
 
 let trayState = {
+  appVersion: '',
   updateCount: 0,
   isChecking: false,
   autoUpdateEnabled: false,
   autoUpdatePaused: false,
   isElevated: false,
+  settingsLocked: false,
 };
 
 /**
@@ -42,34 +44,28 @@ export function resolveTrayIconPath() {
 }
 
 function buildTrayMenu() {
-  const checkLabel = trayState.isChecking ? '⏳ Prüfe auf Updates...' : '🔄 Jetzt auf Updates prüfen';
+  const descriptors = buildTrayMenuDescriptors(trayState);
+  /** @type {Record<string, () => void>} */
+  const actionMap = {
+    'open-window': () => trayHandlers.onOpenWindow?.(),
+    'check-updates': () => trayHandlers.onCheckUpdatesNow?.(),
+    'toggle-auto-update': () => trayHandlers.onToggleAutoUpdatePaused?.(),
+    'open-settings': () => trayHandlers.onOpenSettings?.(),
+    quit: () => trayHandlers.onQuitApp?.(),
+  };
+
   /** @type {Electron.MenuItemConstructorOptions[]} */
-  const template = [
-    {
-      label: '📂 Software Katalog öffnen',
-      click: () => trayHandlers.onOpenWindow?.(),
-    },
-    {
-      label: checkLabel,
-      enabled: !trayState.isChecking,
-      click: () => trayHandlers.onCheckUpdatesNow?.(),
-    },
-  ];
-
-  if (trayState.autoUpdateEnabled) {
-    template.push({
-      label: trayState.autoUpdatePaused ? '⚡ Auto-Update fortsetzen' : '⚡ Auto-Update pausieren',
-      click: () => trayHandlers.onToggleAutoUpdatePaused?.(),
-    });
-  }
-
-  template.push(
-    { type: 'separator' },
-    {
-      label: '🚪 Vollständig beenden',
-      click: () => trayHandlers.onQuitApp?.(),
+  const template = descriptors.map((entry) => {
+    if (entry.type === 'separator') {
+      return { type: 'separator' };
     }
-  );
+    const handler = actionMap[entry.actionId];
+    return {
+      label: entry.label,
+      enabled: entry.enabled,
+      ...(handler && entry.enabled ? { click: handler } : {}),
+    };
+  });
 
   return Menu.buildFromTemplate(template);
 }
@@ -86,6 +82,7 @@ function refreshTrayUi() {
  *   onOpenWindow?: () => void,
  *   onCheckUpdatesNow?: () => void,
  *   onToggleAutoUpdatePaused?: () => void,
+ *   onOpenSettings?: () => void,
  *   onQuitApp?: () => void,
  * }} [handlers]
  * @param {Partial<typeof trayState>} [initialState]

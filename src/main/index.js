@@ -154,6 +154,11 @@ const startedInTray = hasTrayStartupArg(process.argv);
 let mainWindow = null;
 let isQuitting = false;
 let pendingNavTab = null;
+let pendingOpenSettings = false;
+
+function isSettingsLockedByAuth(authStatus) {
+  return Boolean(authStatus?.enabled && !authStatus?.isAuthenticated);
+}
 
 function createWindow({ showOnReady = true } = {}) {
   const windowOptions = {
@@ -191,7 +196,7 @@ function createWindow({ showOnReady = true } = {}) {
   });
 
   mainWindow.on('close', (event) => {
-    if (!isQuitting && isTrayActive() && getConfig().minimizeToTrayOnClose === true) {
+    if (!isQuitting && isTrayActive() && getConfig().minimizeToTrayOnClose !== false) {
       event.preventDefault();
       mainWindow?.hide();
     }
@@ -202,16 +207,22 @@ function createWindow({ showOnReady = true } = {}) {
   });
 }
 
-function showMainWindow({ targetTab = null } = {}) {
+function showMainWindow({ targetTab = null, openSettings = false } = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     pendingNavTab = targetTab || null;
+    pendingOpenSettings = Boolean(openSettings);
     createWindow({ showOnReady: true });
-    if (pendingNavTab && mainWindow) {
+    if ((pendingNavTab || pendingOpenSettings) && mainWindow) {
       const targetWin = mainWindow;
       targetWin.webContents.once('did-finish-load', () => {
-        if (pendingNavTab && !targetWin.isDestroyed()) {
+        if (targetWin.isDestroyed()) return;
+        if (pendingNavTab) {
           targetWin.webContents.send('navigate-tab', pendingNavTab);
           pendingNavTab = null;
+        }
+        if (pendingOpenSettings) {
+          targetWin.webContents.send('open-settings', 'general');
+          pendingOpenSettings = false;
         }
       });
     }
@@ -227,6 +238,9 @@ function showMainWindow({ targetTab = null } = {}) {
   mainWindow.focus();
   if (targetTab) {
     mainWindow.webContents.send('navigate-tab', targetTab);
+  }
+  if (openSettings) {
+    mainWindow.webContents.send('open-settings', 'general');
   }
 }
 
@@ -589,6 +603,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     getAppFolderFn: getAppFolder,
     getDataFolderFn: getDataFolder,
     onStatusChange: (status) => {
+      updateTrayState({ settingsLocked: isSettingsLockedByAuth(status) });
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {
           win.webContents.send('auth-status-updated', status);
@@ -622,6 +637,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     }
 
     const initialCfg = getConfig();
+    const initialAuthStatus = getAuthStatus({ refreshDisk: true });
     try {
       initTrayService(
         {
@@ -632,14 +648,24 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           onToggleAutoUpdatePaused: () => {
             toggleAutoUpdatePaused();
           },
+          onOpenSettings: () => {
+            const authNow = getAuthStatus({ refreshDisk: true });
+            if (isSettingsLockedByAuth(authNow)) {
+              updateTrayState({ settingsLocked: true });
+              return;
+            }
+            showMainWindow({ openSettings: true });
+          },
           onQuitApp: () => quitApp(),
         },
         {
+          appVersion: app.getVersion(),
           updateCount: 0,
           isChecking: false,
           autoUpdateEnabled: Boolean(initialCfg.autoUpdateEnabled),
           autoUpdatePaused: false,
           isElevated: elevated,
+          settingsLocked: isSettingsLockedByAuth(initialAuthStatus),
         }
       );
     } catch (err) {
@@ -686,7 +712,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {
     const cfg = getConfig();
-    if (isTrayActive() && !isQuitting && (cfg.minimizeToTrayOnClose || cfg.backgroundCheckEnabled || startedInTray)) {
+    if (
+      isTrayActive() &&
+      !isQuitting &&
+      (cfg.minimizeToTrayOnClose !== false || cfg.backgroundCheckEnabled || startedInTray)
+    ) {
       return;
     }
     if (process.platform !== 'darwin') app.quit();

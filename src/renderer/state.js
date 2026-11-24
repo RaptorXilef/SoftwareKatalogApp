@@ -1,6 +1,12 @@
 import { createDefaultAccessPolicy, evaluatePackagePolicy, normalizeAccessPolicy } from '../shared/policy-logic.js';
 import { filterUsableProviders, isProviderUsableInUi } from '../shared/provider-lifecycle-logic.js';
-import { buildUnifiedPackages, computeTabCounts, getBaseName, getPackageStatus } from '../shared/unified-packages.js';
+import {
+  buildUnifiedPackages,
+  computeTabCounts,
+  getBaseName,
+  getPackageStatus,
+  normalizeDefaultSortModes,
+} from '../shared/unified-packages.js';
 
 export { getBaseName };
 
@@ -23,7 +29,7 @@ export const state = {
     installed: 'all',
   },
   sortModes: {
-    updates: 'updates',
+    updates: 'az',
     installed: 'az',
     archive: 'az',
   },
@@ -253,6 +259,10 @@ export function setActiveSortMode(mode) {
   if (state.activeTab in state.sortModes) {
     state.sortModes[state.activeTab] = mode;
   }
+}
+
+export function applyDefaultSortModesFromSettings(settings) {
+  state.sortModes = normalizeDefaultSortModes(settings?.defaultSortModes);
 }
 
 export function getActiveOriginFilter() {

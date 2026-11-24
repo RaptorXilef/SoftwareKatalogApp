@@ -1321,6 +1321,36 @@ export async function renderSettingsModal(initialTab = 'general') {
               <span>Versionsvergleich-Genauigkeit (Stellen, z. B. 3 = X.X.X)</span>
               <input type="number" id="cfgVersionDepth" value="${draftSettings.versionCompareDepth}" min="1" max="10">
             </label>
+            <label class="form-field">
+              <span>Standard-Sortierung: Updates</span>
+              <select id="cfgDefaultSortUpdates">
+                <option value="az" ${draftSettings.defaultSortModes.updates === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
+                <option value="updates" ${draftSettings.defaultSortModes.updates === 'updates' ? 'selected' : ''}>Updates zuerst</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.updates === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
+                <option value="update" ${draftSettings.defaultSortModes.updates === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Standard-Sortierung: Installiert</span>
+              <select id="cfgDefaultSortInstalled">
+                <option value="az" ${draftSettings.defaultSortModes.installed === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
+                <option value="updates" ${draftSettings.defaultSortModes.installed === 'updates' ? 'selected' : ''}>Updates zuerst</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.installed === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
+                <option value="update" ${draftSettings.defaultSortModes.installed === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>Standard-Sortierung: Archiv</span>
+              <select id="cfgDefaultSortArchive">
+                <option value="az" ${draftSettings.defaultSortModes.archive === 'az' ? 'selected' : ''}>A - Z (Standard)</option>
+                <option value="updates" ${draftSettings.defaultSortModes.archive === 'updates' ? 'selected' : ''}>Updates zuerst</option>
+                <option value="webarchive" ${draftSettings.defaultSortModes.archive === 'webarchive' ? 'selected' : ''}>Web neuer als Archiv</option>
+                <option value="update" ${draftSettings.defaultSortModes.archive === 'update' ? 'selected' : ''}>Archiv neuer als PC</option>
+                <option value="installed" ${draftSettings.defaultSortModes.archive === 'installed' ? 'selected' : ''}>Auf PC installiert</option>
+                <option value="newest" ${draftSettings.defaultSortModes.archive === 'newest' ? 'selected' : ''}>Zuletzt hinzugefügt</option>
+                <option value="updated" ${draftSettings.defaultSortModes.archive === 'updated' ? 'selected' : ''}>Zuletzt aktualisiert</option>
+              </select>
+            </label>
           </div>
         </section>
 
@@ -1599,6 +1629,11 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     draftSettings = createSettingsDraft({
       startTab: getSelectEl(modal, '#cfgStartTab')?.value || draftSettings.startTab,
+      defaultSortModes: {
+        updates: getSelectEl(modal, '#cfgDefaultSortUpdates')?.value || draftSettings.defaultSortModes.updates,
+        installed: getSelectEl(modal, '#cfgDefaultSortInstalled')?.value || draftSettings.defaultSortModes.installed,
+        archive: getSelectEl(modal, '#cfgDefaultSortArchive')?.value || draftSettings.defaultSortModes.archive,
+      },
       newBadgeDays: Number.isFinite(parsedNewDays) ? parsedNewDays : draftSettings.newBadgeDays,
       versionCompareDepth: Number.isFinite(parsedVersionDepth) ? parsedVersionDepth : draftSettings.versionCompareDepth,
       visibleHiddenCats: checkedCats,
@@ -2797,6 +2832,7 @@ export async function renderSettingsModal(initialTab = 'general') {
 
       await triggerCatalogReload({
         rescanInstalled: settingsChanged && plan.rescanInstalled,
+        applySortDefaults: settingsChanged && plan.sortDefaultsChanged,
       });
     }
   };

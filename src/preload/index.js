@@ -182,6 +182,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('navigate-tab', listener);
     return () => ipcRenderer.off('navigate-tab', listener);
   },
+  onOpenSettings: (cb) => {
+    const listener = (_event, tab) => cb(tab);
+    ipcRenderer.on('open-settings', listener);
+    return () => ipcRenderer.off('open-settings', listener);
+  },
   onBackgroundStatusUpdated: (cb) => {
     const listener = (_event, status) => cb(status);
     ipcRenderer.on('background-status-updated', listener);

@@ -15,7 +15,7 @@ import {
   normalizeEnabledProviders,
   normalizeProviderSettings,
 } from '../shared/provider-lifecycle-logic.js';
-import { normalizeStartTab } from '../shared/unified-packages.js';
+import { DEFAULT_SORT_MODES, normalizeDefaultSortModes, normalizeStartTab } from '../shared/unified-packages.js';
 
 const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions', 'notifiedUpdateVersions'];
 
@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = {
   newBadgeDays: 14,
   versionCompareDepth: 3,
   startTab: 'updates',
+  defaultSortModes: { ...DEFAULT_SORT_MODES },
   // Komfortable Download- & Benennungs-Defaults
   autoSaveDownloads: true, // Direkt im Software-Ordner speichern ohne Dialog
   askSaveDialog: false, // Optional immer "Speichern unter" öffnen
@@ -270,6 +271,7 @@ export function getConfig() {
   const validSaveModes = new Set(['ask', 'auto-id', 'none']);
   const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
   const startTab = normalizeStartTab(config.startTab);
+  const defaultSortModes = normalizeDefaultSortModes(config.defaultSortModes);
   const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
   const providerSettings = normalizeProviderSettings(config.providerSettings);
   const backgroundSettings = normalizeBackgroundSettings(config);
@@ -298,6 +300,7 @@ export function getConfig() {
     targetPath,
     archiveSaveMode,
     startTab,
+    defaultSortModes,
     enabledProviders,
     providerSettings,
   };
@@ -310,6 +313,7 @@ export function saveConfig(newSettings) {
   const current = getConfig();
   const merged = { ...current, ...newSettings };
   Object.assign(merged, normalizeBackgroundSettings(merged));
+  merged.defaultSortModes = normalizeDefaultSortModes(merged.defaultSortModes);
 
   if (newSettings?.enabledProviders !== undefined) {
     merged.enabledProviders = normalizeEnabledProviders(newSettings.enabledProviders);

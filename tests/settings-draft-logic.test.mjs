@@ -47,7 +47,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
     assert.equal(defaults.vcpkgRoot, '');
     assert.equal(defaults.updateInterval, 24);
     assert.equal(defaults.autoRequestAdminForBatch, false);
-    assert.equal(defaults.minimizeToTrayOnClose, false);
+    assert.equal(defaults.minimizeToTrayOnClose, true);
     assert.equal(defaults.autostartEnabled, false);
     assert.equal(defaults.autostartMode, 'normal');
     assert.equal(defaults.backgroundCheckEnabled, false);
@@ -56,6 +56,22 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
     assert.equal(defaults.autoUpdateEnabled, false);
     assert.equal(defaults.autoUpdateListType, 'all');
     assert.deepEqual(defaults.autoUpdateEntries, []);
+    assert.deepEqual(defaults.defaultSortModes, { updates: 'az', installed: 'az', archive: 'az' });
+
+    const customSortAndTrayOff = createSettingsDraft({
+      minimizeToTrayOnClose: false,
+      defaultSortModes: {
+        updates: 'updates',
+        installed: 'newest',
+        archive: 'updated',
+      },
+    });
+    assert.equal(customSortAndTrayOff.minimizeToTrayOnClose, false);
+    assert.deepEqual(customSortAndTrayOff.defaultSortModes, {
+      updates: 'updates',
+      installed: 'az',
+      archive: 'updated',
+    });
 
     const zeroValues = createSettingsDraft({
       newBadgeDays: 0,
@@ -144,7 +160,14 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, visibleHiddenCats: ['Beta'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoExtensions: ['.msi', '.exe'] }), true);
-    assert.equal(hasSettingsDraftChanges(initial, { ...initial, minimizeToTrayOnClose: true }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, minimizeToTrayOnClose: false }), true);
+    assert.equal(
+      hasSettingsDraftChanges(initial, {
+        ...initial,
+        defaultSortModes: { ...initial.defaultSortModes, updates: 'updates' },
+      }),
+      true
+    );
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autostartEnabled: true }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autostartMode: 'admin' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, backgroundCheckEnabled: true }), true);
@@ -199,6 +222,7 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     assert.equal(plan.vcpkgRootChanged, true);
     assert.equal(plan.rescanInstalled, true);
     assert.equal(plan.autostartChanged, false);
+    assert.equal(plan.sortDefaultsChanged, false);
     assert.equal(plan.backgroundChanged, false);
 
     const withBg = {
@@ -206,12 +230,15 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
       autostartEnabled: true,
       autostartMode: 'admin',
       autoUpdateEnabled: true,
+      defaultSortModes: { updates: 'updates', installed: 'az', archive: 'newest' },
     };
     const bgPlan = buildSettingsSavePlan(initial, withBg);
     assert.equal(bgPlan.autostartChanged, true);
+    assert.equal(bgPlan.sortDefaultsChanged, true);
     assert.equal(bgPlan.backgroundChanged, true);
     assert.equal(bgPlan.payload.autostartMode, 'admin');
     assert.equal(bgPlan.payload.autoUpdateEnabled, true);
+    assert.deepEqual(bgPlan.payload.defaultSortModes, { updates: 'updates', installed: 'az', archive: 'newest' });
   });
 
   it('loest keinen PC-Rescan aus wenn nur ein Provider deaktiviert wurde oder vcpkg aus ist', () => {

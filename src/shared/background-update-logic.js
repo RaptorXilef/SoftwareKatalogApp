@@ -33,7 +33,7 @@ const AUTO_UPDATE_LIST_TYPE_SET = new Set(AUTO_UPDATE_LIST_TYPES);
 
 /** @type {BackgroundSettings} */
 export const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
-  minimizeToTrayOnClose: false,
+  minimizeToTrayOnClose: true,
   autostartEnabled: false,
   autostartMode: 'normal',
   backgroundCheckEnabled: false,
@@ -181,7 +181,7 @@ export function removeAutoUpdateEntry(entries, matchType, value) {
 export function normalizeBackgroundSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   return {
-    minimizeToTrayOnClose: Boolean(src.minimizeToTrayOnClose),
+    minimizeToTrayOnClose: src.minimizeToTrayOnClose !== false,
     autostartEnabled: Boolean(src.autostartEnabled),
     autostartMode: normalizeAutostartMode(src.autostartMode),
     backgroundCheckEnabled: Boolean(src.backgroundCheckEnabled),
@@ -241,6 +241,61 @@ export function formatTrayTooltip({
     return `${base} (Auto-Update pausiert)`;
   }
   return base;
+}
+
+/**
+ * Erzeugt die Menue-Eintraege fuer das System-Tray-Kontextmenue.
+ * @param {{
+ *   appVersion?: string,
+ *   isChecking?: boolean,
+ *   autoUpdateEnabled?: boolean,
+ *   autoUpdatePaused?: boolean,
+ *   settingsLocked?: boolean,
+ * }} [options]
+ * @returns {Array<{ type: 'separator' } | { type: 'item', actionId: string, label: string, enabled: boolean }>}
+ */
+export function buildTrayMenuDescriptors({
+  appVersion = '',
+  isChecking = false,
+  autoUpdateEnabled = false,
+  autoUpdatePaused = false,
+  settingsLocked = false,
+} = {}) {
+  const cleanVer = String(appVersion || '').trim();
+  const versionLabel = cleanVer ? `Software Katalog v${cleanVer}` : 'Software Katalog';
+  /** @type {Array<{ type: 'separator' } | { type: 'item', actionId: string, label: string, enabled: boolean }>} */
+  const items = [
+    { type: 'item', actionId: 'version', label: versionLabel, enabled: false },
+    { type: 'separator' },
+    { type: 'item', actionId: 'open-window', label: '📂 Software Katalog öffnen', enabled: true },
+    {
+      type: 'item',
+      actionId: 'check-updates',
+      label: isChecking ? '⏳ Prüfe auf Updates...' : '🔄 Jetzt auf Updates prüfen',
+      enabled: !isChecking,
+    },
+  ];
+
+  if (autoUpdateEnabled) {
+    items.push({
+      type: 'item',
+      actionId: 'toggle-auto-update',
+      label: autoUpdatePaused ? '⚡ Auto-Update fortsetzen' : '⚡ Auto-Update pausieren',
+      enabled: true,
+    });
+  }
+
+  if (!settingsLocked) {
+    items.push({
+      type: 'item',
+      actionId: 'open-settings',
+      label: '⚙️ Einstellungen öffnen',
+      enabled: true,
+    });
+  }
+
+  items.push({ type: 'separator' }, { type: 'item', actionId: 'quit', label: '🚪 Vollständig beenden', enabled: true });
+  return items;
 }
 
 /**

@@ -41,6 +41,7 @@ import {
 import { ensureAdminAuthenticated, openLoginModal } from './modals/login-modal.js';
 import {
   applyAuthStatus,
+  applyDefaultSortModesFromSettings,
   evaluateItemPolicy,
   getItemById,
   getItemStatus,
@@ -108,7 +109,12 @@ async function runInstalledScan({ silent = false } = {}) {
   }
 }
 
-async function reloadUI({ preserveScroll = true, rescanInstalled = false, applyStartTab = false } = {}) {
+async function reloadUI({
+  preserveScroll = true,
+  rescanInstalled = false,
+  applyStartTab = false,
+  applySortDefaults = false,
+} = {}) {
   const y = window.scrollY;
   await Promise.all([
     refreshCatalogData(),
@@ -120,6 +126,9 @@ async function reloadUI({ preserveScroll = true, rescanInstalled = false, applyS
   renderAuthHeaderControls();
   if (applyStartTab) {
     state.activeTab = normalizeStartTab(state.settings.startTab);
+  }
+  if (applyStartTab || applySortDefaults) {
+    applyDefaultSortModesFromSettings(state.settings);
   }
   renderTagChips();
   renderActiveView();
@@ -1035,6 +1044,12 @@ async function bootstrap() {
         closeContextMenu();
         state.activeTab = normalizeStartTab(tab);
         renderActiveView();
+      });
+    }
+    if (typeof window.electronAPI?.onOpenSettings === 'function') {
+      window.electronAPI.onOpenSettings((tab) => {
+        closeContextMenu();
+        void openSettingsModal(tab || 'general');
       });
     }
     if (typeof window.electronAPI?.onBackgroundStatusUpdated === 'function') {

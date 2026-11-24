@@ -4,7 +4,9 @@ import { createAutostartService } from '../src/main/autostart-core.js';
 import { createBackgroundUpdater } from '../src/main/background-updater-core.js';
 import {
   AUTOSTART_TASK_NAME,
+  buildTrayMenuDescriptors,
   computeNotificationDelta,
+  DEFAULT_BACKGROUND_SETTINGS,
   evaluateAutoUpdateEligibility,
   filterAutoUpdateCandidates,
   formatTrayTooltip,
@@ -32,6 +34,38 @@ describe('background-update-logic: CLI-Flags, Tooltip & Normalisierung', () => {
     assert.equal(
       formatTrayTooltip({ updateCount: 2, autoUpdateEnabled: true, autoUpdatePaused: true }),
       'Software Katalog - 2 Updates verfuegbar (Auto-Update pausiert)'
+    );
+  });
+
+  it('setzt minimizeToTrayOnClose standardmaessig auf true und baut Tray-Menue mit Version & Einstellungen', () => {
+    assert.equal(DEFAULT_BACKGROUND_SETTINGS.minimizeToTrayOnClose, true);
+    assert.equal(normalizeBackgroundSettings({}).minimizeToTrayOnClose, true);
+    assert.equal(normalizeBackgroundSettings({ minimizeToTrayOnClose: false }).minimizeToTrayOnClose, false);
+
+    const unlockedMenu = buildTrayMenuDescriptors({
+      appVersion: '1.27.0',
+      isChecking: false,
+      autoUpdateEnabled: true,
+      autoUpdatePaused: false,
+      settingsLocked: false,
+    });
+    assert.equal(unlockedMenu[0].type, 'item');
+    if (unlockedMenu[0].type === 'item') {
+      assert.equal(unlockedMenu[0].label, 'Software Katalog v1.27.0');
+      assert.equal(unlockedMenu[0].enabled, false);
+    }
+    assert.equal(
+      unlockedMenu.some((item) => item.type === 'item' && item.actionId === 'open-settings'),
+      true
+    );
+
+    const lockedMenu = buildTrayMenuDescriptors({
+      appVersion: '1.27.0',
+      settingsLocked: true,
+    });
+    assert.equal(
+      lockedMenu.some((item) => item.type === 'item' && item.actionId === 'open-settings'),
+      false
     );
   });
 

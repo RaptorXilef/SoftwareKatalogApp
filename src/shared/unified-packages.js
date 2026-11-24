@@ -640,6 +640,15 @@ export function canDownloadOnline(item) {
 const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover']);
 export const DEFAULT_START_TAB = 'updates';
 
+const VALID_COMMON_SORT_MODES = new Set(['az', 'updates', 'webarchive', 'update']);
+const VALID_ARCHIVE_SORT_MODES = new Set(['az', 'updates', 'webarchive', 'update', 'installed', 'newest', 'updated']);
+
+export const DEFAULT_SORT_MODES = Object.freeze({
+  updates: 'az',
+  installed: 'az',
+  archive: 'az',
+});
+
 /**
  * Normalisiert den konfigurierten Start-Tab auf einen gültigen Tab-Namen (Fallback: 'updates').
  */
@@ -648,6 +657,37 @@ export function normalizeStartTab(tab) {
     .trim()
     .toLowerCase();
   return VALID_START_TABS.includes(clean) ? clean : DEFAULT_START_TAB;
+}
+
+/**
+ * Normalisiert den Sortiermodus fuer einen Katalog-Tab ('updates' | 'installed' | 'archive').
+ * @param {'updates' | 'installed' | 'archive' | string} tab
+ * @param {unknown} mode
+ * @returns {string}
+ */
+function normalizeSortModeForTab(tab, mode) {
+  const cleanTab = String(tab || '')
+    .trim()
+    .toLowerCase();
+  const cleanMode = String(mode || '')
+    .trim()
+    .toLowerCase();
+  const validSet = cleanTab === 'archive' ? VALID_ARCHIVE_SORT_MODES : VALID_COMMON_SORT_MODES;
+  return validSet.has(cleanMode) ? cleanMode : 'az';
+}
+
+/**
+ * Normalisiert die Standard-Sortierungen pro Tab (Standard: ueberall 'az').
+ * @param {Record<string, any> | null | undefined} [raw]
+ * @returns {{ updates: string, installed: string, archive: string }}
+ */
+export function normalizeDefaultSortModes(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    updates: normalizeSortModeForTab('updates', src.updates),
+    installed: normalizeSortModeForTab('installed', src.installed),
+    archive: normalizeSortModeForTab('archive', src.archive),
+  };
 }
 
 export function computeTabCounts(

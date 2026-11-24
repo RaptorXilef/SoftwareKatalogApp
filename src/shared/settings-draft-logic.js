@@ -1,7 +1,7 @@
 import { normalizeBackgroundSettings } from './background-update-logic.js';
 import { normalizeArchivePaths } from './multi-archive-logic.js';
 import { normalizeEnabledProviders, normalizeProviderSettings } from './provider-lifecycle-logic.js';
-import { normalizeStartTab } from './unified-packages.js';
+import { normalizeDefaultSortModes, normalizeStartTab } from './unified-packages.js';
 
 export const SETTINGS_TABS = Object.freeze([
   { id: 'general', label: '⚙️ Allgemein' },
@@ -121,6 +121,7 @@ function normalizeVisibleHiddenCats(raw) {
  *   autoUpdateEnabled: boolean,
  *   autoUpdateListType: 'all' | 'whitelist' | 'blacklist',
  *   autoUpdateEntries: import('./background-update-logic.js').AutoUpdateEntry[],
+ *   defaultSortModes: { updates: string, installed: string, archive: string },
  * }}
  */
 export function createSettingsDraft(rawSettings = {}) {
@@ -138,6 +139,7 @@ export function createSettingsDraft(rawSettings = {}) {
 
   return {
     startTab: normalizeStartTab(src.startTab),
+    defaultSortModes: normalizeDefaultSortModes(src.defaultSortModes),
     newBadgeDays: normalizeBoundedInt(src.newBadgeDays, 0, 365, 14),
     versionCompareDepth: normalizeBoundedInt(src.versionCompareDepth, 1, 10, 3),
     visibleHiddenCats: normalizeVisibleHiddenCats(src.visibleHiddenCats),
@@ -231,6 +233,9 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   if (initial.autoUpdateEnabled !== current.autoUpdateEnabled) return true;
   if (initial.autoUpdateListType !== current.autoUpdateListType) return true;
   if (JSON.stringify(initial.autoUpdateEntries) !== JSON.stringify(current.autoUpdateEntries)) return true;
+  if (initial.defaultSortModes.updates !== current.defaultSortModes.updates) return true;
+  if (initial.defaultSortModes.installed !== current.defaultSortModes.installed) return true;
+  if (initial.defaultSortModes.archive !== current.defaultSortModes.archive) return true;
 
   if (!areArraysEqual(initial.archivePaths, current.archivePaths)) return true;
   if (!areArraysEqual(initial.autoExtensions, current.autoExtensions)) return true;
@@ -273,6 +278,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     newBadgeDays: current.newBadgeDays,
     versionCompareDepth: current.versionCompareDepth,
     startTab: current.startTab,
+    defaultSortModes: current.defaultSortModes,
     autoSaveDownloads: current.autoSaveDownloads,
     askSaveDialog: !current.autoSaveDownloads,
     keepOriginalNameIfVersioned: current.keepOriginalNameIfVersioned,
@@ -300,6 +306,10 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
   const rescanInstalled = newlyEnabledProvider || (vcpkgRootChanged && current.enabledProviders.includes('vcpkg'));
   const autostartChanged =
     initial.autostartEnabled !== current.autostartEnabled || initial.autostartMode !== current.autostartMode;
+  const sortDefaultsChanged =
+    initial.defaultSortModes.updates !== current.defaultSortModes.updates ||
+    initial.defaultSortModes.installed !== current.defaultSortModes.installed ||
+    initial.defaultSortModes.archive !== current.defaultSortModes.archive;
   const backgroundChanged =
     autostartChanged ||
     initial.minimizeToTrayOnClose !== current.minimizeToTrayOnClose ||
@@ -318,6 +328,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     vcpkgRootChanged,
     rescanInstalled,
     autostartChanged,
+    sortDefaultsChanged,
     backgroundChanged,
   };
 }
