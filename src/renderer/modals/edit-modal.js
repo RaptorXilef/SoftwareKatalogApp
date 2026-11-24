@@ -4,6 +4,7 @@ import {
   sanitizeInnoInfFileName,
   sanitizeSilentArgs,
 } from '../../shared/installer-logic.js';
+import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getCatalogItemById, getItemById, state } from '../state.js';
 import { closestButton, closestEl, qs, qsa, qsButton, qsInput, qsSelect, qsTextarea } from '../utils/dom.js';
@@ -21,11 +22,54 @@ function getInstallModeDescription(mode) {
 }
 
 function detectInitialSourceType(item) {
-  if (item.webSourceType && item.webSourceType !== 'none') return item.webSourceType;
-  if (item.wingetId || (item.packageManager === 'winget' && item.packageId)) return 'winget';
+  const src = String(item.webSourceType || '')
+    .trim()
+    .toLowerCase();
+  if (src === 'github' || src === 'web') return src;
+  if (src === 'winget' || src === 'provider') return 'provider';
+  if (item.wingetId || (item.packageManager && item.packageManager !== 'archive' && item.packageId)) {
+    return 'provider';
+  }
   if (item.webVersionUrl?.toLowerCase().includes('github.com')) return 'github';
   if (item.webVersionUrl) return 'web';
   return 'none';
+}
+
+function getSelectableProviders(item) {
+  const usable = filterUsableProviders(state.providers, { excludeIds: ['archive', 'msi'] }).filter(
+    (p) => p.capabilities?.show || p.capabilities?.search
+  );
+  const existingPm = String(item.packageManager || (item.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  if (existingPm && existingPm !== 'archive' && existingPm !== 'msi' && !usable.some((p) => p.id === existingPm)) {
+    const raw = state.providers.find((p) => p.id === existingPm);
+    usable.push({
+      id: existingPm,
+      name: `${raw?.name || existingPm} (deaktiviert / nicht verfuegbar)`,
+      capabilities: raw?.capabilities || { show: true, search: true },
+    });
+  }
+  if (usable.length === 0) {
+    usable.push({
+      id: 'winget',
+      name: 'Winget',
+      capabilities: { show: true, search: true, supportsArchiveDownload: true },
+    });
+  }
+  return usable;
+}
+
+function getProviderHintText(providerId) {
+  const cleanId = String(providerId || '')
+    .trim()
+    .toLowerCase();
+  if (cleanId === 'winget') {
+    return 'Winget liefert die neueste Version, den direkten Installer-Link, eine SHA-256 Pruefsumme und Metadaten - ganz ohne HTML-Scraper.';
+  }
+  const prov = state.providers.find((p) => p.id === cleanId);
+  const label = prov?.name || cleanId || 'Paketmanager';
+  return `Prueft neue Versionen und Paket-Details direkt ueber ${label} (ohne HTML-Scraper).`;
 }
 
 export function renderEditModal(id, initialTab = 'general') {
@@ -49,7 +93,17 @@ export function renderEditModal(id, initialTab = 'general') {
     ...(item.installPaths || []).map((p) => ({ path: p, origin: 'manual' })),
   ];
   let currentSourceType = detectInitialSourceType(item);
-  const initialWingetId = item.wingetId || (item.packageManager === 'winget' ? item.packageId : '') || '';
+  const selectableProviders = getSelectableProviders(item);
+  const existingPm = String(item.packageManager || (item.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  let selectedPackageManager =
+    existingPm && existingPm !== 'archive' && existingPm !== 'msi'
+      ? existingPm
+      : selectableProviders.some((p) => p.id === 'winget')
+        ? 'winget'
+        : selectableProviders[0]?.id || 'winget';
+  const initialPackageId = item.packageId || item.wingetId || '';
   let currentInstallMode = normalizeInstallMode(item.installMode);
   let detectedInstallerType = '';
   let infExists = Boolean(item.innoInfExists);
@@ -58,7 +112,7 @@ export function renderEditModal(id, initialTab = 'general') {
   const currentAdwareWarning = detectAdwareSignals({
     name: item.name,
     fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
-    packageId: initialWingetId || item.packageId || '',
+    packageId: initialPackageId,
     publisher: itemPublisher,
   });
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
@@ -83,7 +137,7 @@ export function renderEditModal(id, initialTab = 'general') {
       <!-- TAB 1: ALLGEMEIN -->
       <section class="tab-panel" data-panel="general" ${initialTab === 'general' ? '' : 'hidden'}>
       <div class="autofill-bar">
-        <span class="muted">Beschreibung, Tags & Links automatisch aus der Online-Quelle (Winget / GitHub / Web) laden:</span>
+        <span class="muted">Beschreibung, Tags & Links automatisch aus der Online-Quelle (Paketmanager / GitHub / Web) laden:</span>
         <button type="button" class="btn btn-ghost" data-edit-action="autofill-fetch">✨ Infos automatisch laden</button>
       </div>
       <div id="autofillPreviewBox" class="autofill-preview" hidden></div>
@@ -157,24 +211,35 @@ export function renderEditModal(id, initialTab = 'general') {
           <span>Quelle für automatische Update-Prüfung</span>
           <div class="source-switcher" id="sourceSwitcher">
             <button type="button" class="source-opt ${currentSourceType === 'none' ? 'active' : ''}" data-source="none">Aus</button>
-            <button type="button" class="source-opt ${currentSourceType === 'winget' ? 'active' : ''}" data-source="winget">📦 Winget (Empfohlen)</button>
+            <button type="button" class="source-opt ${currentSourceType === 'provider' ? 'active' : ''}" data-source="provider">📦 Paketmanager (Empfohlen)</button>
             <button type="button" class="source-opt ${currentSourceType === 'github' ? 'active' : ''}" data-source="github">🐙 GitHub Releases</button>
             <button type="button" class="source-opt ${currentSourceType === 'web' ? 'active' : ''}" data-source="web">🌐 Webseite (Assistent)</button>
           </div>
         </div>
 
-        <!-- WINGET PANEL -->
-        <div class="source-panel" data-source-panel="winget" ${currentSourceType === 'winget' ? '' : 'hidden'}>
-          <p class="panel-hint">Winget liefert zuverlässig die neuste Version, den offiziellen Installer-Link und eine SHA-256 Prüfsumme - ganz ohne HTML-Scraper.</p>
+        <!-- PAKETMANAGER PANEL -->
+        <div class="source-panel" data-source-panel="provider" ${currentSourceType === 'provider' ? '' : 'hidden'}>
+          <p class="panel-hint" id="providerPanelHint">${escapeHTML(getProviderHintText(selectedPackageManager))}</p>
+          <label class="form-field">
+            <span>Paketmanager</span>
+            <select id="editPackageManager" class="provider-select-row">
+              ${selectableProviders
+                .map(
+                  (p) =>
+                    `<option value="${escapeHTML(p.id)}" ${p.id === selectedPackageManager ? 'selected' : ''}>${escapeHTML(p.name)}</option>`
+                )
+                .join('')}
+            </select>
+          </label>
           <div class="input-action-row">
-            <input type="text" id="wingetQueryInput" value="${escapeHTML(item.name)}" placeholder="Programm in Winget suchen...">
-            <button type="button" class="btn btn-primary" data-edit-action="search-winget">🔎 In Winget suchen</button>
+            <input type="text" id="providerQueryInput" value="${escapeHTML(item.name)}" placeholder="Programm im gewaehlten Paketmanager suchen...">
+            <button type="button" class="btn btn-primary" data-edit-action="search-provider">🔎 Suchen</button>
           </div>
-          <div id="wingetResults" class="winget-results" hidden></div>
+          <div id="providerResults" class="winget-results" hidden></div>
 
           <label class="form-field">
-            <span>Ausgewählte Winget-ID</span>
-            <input type="text" id="editWingetId" value="${escapeHTML(initialWingetId)}" placeholder="z. B. VideoLAN.VLC">
+            <span>Ausgewaehlte Paket-ID</span>
+            <input type="text" id="editPackageId" value="${escapeHTML(initialPackageId)}" placeholder="z. B. VideoLAN.VLC oder Paketname">
           </label>
         </div>
 
@@ -471,7 +536,7 @@ export function renderEditModal(id, initialTab = 'general') {
     const signal = detectAdwareSignals({
       name: qsInput(modal, '#editName')?.value.trim() || item.name,
       fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
-      packageId: qsInput(modal, '#editWingetId')?.value.trim() || item.packageId || '',
+      packageId: qsInput(modal, '#editPackageId')?.value.trim() || item.packageId || '',
       publisher: itemPublisher,
     });
     const warnBox = qs(modal, '#adwareWarningBox');
@@ -488,7 +553,13 @@ export function renderEditModal(id, initialTab = 'general') {
 
   modal.querySelector('#editInnoInfFile')?.addEventListener('input', updateInnoInfStatus);
   modal.querySelector('#editName')?.addEventListener('input', refreshAdwareBanner);
-  modal.querySelector('#editWingetId')?.addEventListener('input', refreshAdwareBanner);
+  modal.querySelector('#editPackageId')?.addEventListener('input', refreshAdwareBanner);
+  modal.querySelector('#providerQueryInput')?.addEventListener('keydown', (ev) => {
+    if (ev instanceof KeyboardEvent && ev.key === 'Enter') {
+      ev.preventDefault();
+      qsButton(modal, '[data-edit-action="search-provider"]')?.click();
+    }
+  });
 
   renderPathList();
   renderMediaSection();
@@ -561,6 +632,20 @@ export function renderEditModal(id, initialTab = 'general') {
   let savedSelectionRange = null;
 
   modal.onchange = (e) => {
+    if (e.target instanceof HTMLSelectElement && e.target.id === 'editPackageManager') {
+      selectedPackageManager = String(e.target.value || 'winget')
+        .trim()
+        .toLowerCase();
+      const hintEl = modal.querySelector('#providerPanelHint');
+      if (hintEl) hintEl.textContent = getProviderHintText(selectedPackageManager);
+      const resultsBox = modal.querySelector('#providerResults');
+      if (resultsBox instanceof HTMLElement) {
+        resultsBox.hidden = true;
+        resultsBox.innerHTML = '';
+      }
+      return;
+    }
+
     if (e.target instanceof HTMLSelectElement && e.target.id === 'installedAppsSelect') {
       const val = e.target.value;
       if (!val) return;
@@ -599,16 +684,17 @@ export function renderEditModal(id, initialTab = 'general') {
       return;
     }
 
-    // Winget-Treffer übernehmen
-    const wgPick = closestEl(e.target, '[data-winget-pick]');
-    if (wgPick) {
-      qsInput(modal, '#editWingetId').value = wgPick.dataset.wingetPick;
-      if (wgPick.dataset.wingetVer) {
-        qsInput(modal, '#editWebVersion').value = wgPick.dataset.wingetVer;
+    // Paketmanager-Treffer uebernehmen
+    const pkgPick = closestEl(e.target, '[data-provider-pick]');
+    if (pkgPick) {
+      const pickedId = pkgPick.dataset.providerPick || '';
+      qsInput(modal, '#editPackageId').value = pickedId;
+      if (pkgPick.dataset.providerVer) {
+        qsInput(modal, '#editWebVersion').value = pkgPick.dataset.providerVer;
       }
-      qs(modal, '#wingetResults').hidden = true;
+      qs(modal, '#providerResults').hidden = true;
       refreshAdwareBanner();
-      showToast(`Winget-ID "${wgPick.dataset.wingetPick}" übernommen.`, { type: 'success' });
+      showToast(`Paket-ID "${pickedId}" uebernommen.`, { type: 'success' });
       return;
     }
 
@@ -686,37 +772,44 @@ export function renderEditModal(id, initialTab = 'general') {
       return;
     }
 
-    // Winget-Suche
-    if (act === 'search-winget') {
-      const query = qsInput(modal, '#wingetQueryInput').value.trim();
-      const box = qs(modal, '#wingetResults');
+    // Live-Suche ueber gewaehlten Paketmanager
+    if (act === 'search-provider') {
+      const query = qsInput(modal, '#providerQueryInput').value.trim();
+      const box = qs(modal, '#providerResults');
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
       actionBtn.textContent = '⏳ Suche...';
 
-      const res = await window.electronAPI.searchWinget(query);
+      const res = await window.electronAPI.searchProviders(query, {
+        providerIds: [selectedPackageManager],
+        limit: 25,
+      });
       actionBtn.disabled = false;
       actionBtn.textContent = orig;
 
-      if (!res.success) {
-        showToast(res.error || 'Winget-Suche fehlgeschlagen.', { type: 'error' });
+      const providerRes = res?.byProvider?.[selectedPackageManager];
+      if (!res?.success || (providerRes && !providerRes.success)) {
+        showToast(providerRes?.error || res?.error || 'Paketmanager-Suche fehlgeschlagen.', { type: 'error' });
         return;
       }
 
+      const items = Array.isArray(providerRes?.results) ? providerRes.results : res.results || [];
       box.hidden = false;
-      if (!res.results?.length) {
-        box.innerHTML = `<div class="winget-empty">${escapeHTML(res.hint || 'Keine Treffer gefunden.')}</div>`;
+      if (!items.length) {
+        box.innerHTML = `<div class="winget-empty">${escapeHTML(providerRes?.hint || 'Keine Treffer gefunden.')}</div>`;
       } else {
-        box.innerHTML = res.results
-          .map(
-            (r) => `
-            <button type="button" class="winget-row" data-winget-pick="${escapeHTML(r.id)}" data-winget-ver="${escapeHTML(r.version)}">
-              <strong>${escapeHTML(r.name)}</strong>
-              <code>${escapeHTML(r.id)}</code>
-              <span class="muted">${escapeHTML(r.version)}</span>
+        box.innerHTML = items
+          .map((r) => {
+            const pid = r.packageId || r.id || '';
+            const verText = [r.version ? `v${r.version}` : '', r.bucket || ''].filter(Boolean).join(' · ');
+            return `
+            <button type="button" class="winget-row" data-provider-pick="${escapeHTML(pid)}" data-provider-ver="${escapeHTML(r.version || '')}">
+              <strong>${escapeHTML(r.name || pid)}</strong>
+              <code>${escapeHTML(pid)}</code>
+              <span class="muted">${escapeHTML(verText)}</span>
             </button>
-          `
-          )
+          `;
+          })
           .join('');
       }
       return;
@@ -783,13 +876,14 @@ export function renderEditModal(id, initialTab = 'general') {
     // Live-Test Online-Quelle (kein alert, direktes Inline-Feedback!)
     if (act === 'test-online') {
       const fb = modal.querySelector('#onlineTestFeedback');
-      const wingetIdVal = qsInput(modal, '#editWingetId').value.trim();
+      const pkgIdVal = qsInput(modal, '#editPackageId').value.trim();
+      const isProvider = currentSourceType === 'provider';
       const payload = {
         itemId: item.id,
-        sourceType: currentSourceType,
-        packageManager: currentSourceType === 'winget' ? 'winget' : '',
-        packageId: currentSourceType === 'winget' ? wingetIdVal : '',
-        wingetId: wingetIdVal,
+        sourceType: isProvider ? (selectedPackageManager === 'winget' ? 'winget' : 'provider') : currentSourceType,
+        packageManager: isProvider ? selectedPackageManager : '',
+        packageId: isProvider ? pkgIdVal : '',
+        wingetId: isProvider && selectedPackageManager === 'winget' ? pkgIdVal : '',
         githubAssetPattern: qsInput(modal, '#editGithubAssetPattern').value.trim(),
         url:
           currentSourceType === 'github'
@@ -898,7 +992,7 @@ export function renderEditModal(id, initialTab = 'general') {
       const res = await window.electronAPI.detectInstaller({
         filePath: targetFile,
         name: qsInput(modal, '#editName').value.trim() || item.name,
-        packageId: qsInput(modal, '#editWingetId')?.value.trim() || item.packageId || '',
+        packageId: qsInput(modal, '#editPackageId')?.value.trim() || item.packageId || '',
         publisher: itemPublisher,
       });
 
@@ -1062,12 +1156,13 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Auto-Fill abrufen (überschreibt nichts automatisch -> zeigt Checkliste!)
     if (act === 'autofill-fetch') {
-      const wingetIdVal = qsInput(modal, '#editWingetId').value.trim();
+      const pkgIdVal = qsInput(modal, '#editPackageId').value.trim();
+      const isProvider = currentSourceType === 'provider';
       const payload = {
-        sourceType: currentSourceType,
-        packageManager: currentSourceType === 'winget' ? 'winget' : '',
-        packageId: currentSourceType === 'winget' ? wingetIdVal : '',
-        wingetId: wingetIdVal,
+        sourceType: isProvider ? (selectedPackageManager === 'winget' ? 'winget' : 'provider') : currentSourceType,
+        packageManager: isProvider ? selectedPackageManager : '',
+        packageId: isProvider ? pkgIdVal : '',
+        wingetId: isProvider && selectedPackageManager === 'winget' ? pkgIdVal : '',
         url:
           currentSourceType === 'github'
             ? qsInput(modal, '#editGithubUrl').value.trim()
@@ -1224,12 +1319,16 @@ export function renderEditModal(id, initialTab = 'general') {
             ? qsInput(modal, '#editWebUrl').value.trim()
             : '';
 
-      const savedWingetId = currentSourceType === 'winget' ? qsInput(modal, '#editWingetId').value.trim() : '';
-      const hasNonWingetPkg = Boolean(item.packageManager && item.packageManager !== 'winget' && item.packageId);
-      const nextPackageManager =
-        currentSourceType === 'winget' && savedWingetId ? 'winget' : hasNonWingetPkg ? item.packageManager : '';
-      const nextPackageId =
-        currentSourceType === 'winget' && savedWingetId ? savedWingetId : hasNonWingetPkg ? item.packageId : '';
+      const isProviderSource = currentSourceType === 'provider';
+      const enteredPkgId = isProviderSource ? qsInput(modal, '#editPackageId').value.trim() : '';
+      const nextPackageManager = isProviderSource && enteredPkgId ? selectedPackageManager : '';
+      const nextPackageId = isProviderSource && enteredPkgId ? enteredPkgId : '';
+      const savedWingetId = nextPackageManager === 'winget' ? nextPackageId : '';
+      const nextWebSourceType = isProviderSource
+        ? nextPackageManager === 'winget'
+          ? 'winget'
+          : 'provider'
+        : currentSourceType;
 
       const payload = {
         name: qsInput(modal, '#editName').value.trim() || item.name,
@@ -1259,7 +1358,7 @@ export function renderEditModal(id, initialTab = 'general') {
         installMode: currentInstallMode,
         silentArgs: sanitizeSilentArgs(qsInput(modal, '#editSilentArgs')?.value || ''),
         innoInfFile: sanitizeInnoInfFileName(qsInput(modal, '#editInnoInfFile')?.value.trim() || ''),
-        webSourceType: currentSourceType,
+        webSourceType: nextWebSourceType,
         packageManager: nextPackageManager,
         packageId: nextPackageId,
         wingetId: savedWingetId,

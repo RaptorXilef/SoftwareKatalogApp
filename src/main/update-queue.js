@@ -17,17 +17,23 @@ function broadcastQueueState(snapshot) {
   }
 }
 
-async function saveUpdatedWingetPackageToArchive(entry, saveSpec, signal) {
+async function saveUpdatedPackageToArchive(entry, saveSpec, signal) {
   const cfg = getConfig();
   const mode = saveSpec?.saveMode || cfg.archiveSaveMode || 'none';
   if (mode === 'none') return { skipped: true };
+
+  const pkgPm = String(entry.packageManager || 'winget')
+    .trim()
+    .toLowerCase();
+  const provider = getProvider(pkgPm);
+  const canDownloadSetup = Boolean(provider?.capabilities?.supportsArchiveDownload);
 
   let targetDir = saveSpec?.targetDir || '';
   let collisionMode = saveSpec?.collisionMode || 'create';
 
   if (mode === 'auto-id' && !targetDir) {
     const check = await linkPackageToArchive({
-      packageManager: 'winget',
+      packageManager: pkgPm,
       packageId: entry.packageId,
       softwareName: entry.name,
       saveMode: 'auto-id',
@@ -41,7 +47,7 @@ async function saveUpdatedWingetPackageToArchive(entry, saveSpec, signal) {
       targetDir = check.targetDir;
       collisionMode = col.hasMetadata ? 'link' : 'create';
     } else if (check?.success && check.item) {
-      return downloadWebUpdate(check.item, { useJob: false, signal });
+      return canDownloadSetup ? downloadWebUpdate(check.item, { useJob: false, signal }) : check;
     } else {
       return check;
     }
@@ -52,13 +58,13 @@ async function saveUpdatedWingetPackageToArchive(entry, saveSpec, signal) {
   }
 
   return linkPackageToArchive({
-    packageManager: 'winget',
+    packageManager: pkgPm,
     packageId: entry.packageId,
     softwareName: entry.name,
     targetDir,
     saveMode: targetDir ? 'ask' : mode,
     collisionMode,
-    downloadSetup: true,
+    downloadSetup: canDownloadSetup,
     downloadUseJob: false,
     signal,
     metadata: entry,
@@ -106,6 +112,35 @@ async function executeQueueItem(entry, { signal, onProgress }) {
 
     if (entry.isInstalled || catItem.isInstalled) {
       if (!setupFile) {
+        const archivePm = String(catItem.packageManager || '')
+          .trim()
+          .toLowerCase();
+        const archivePkgId = String(catItem.packageId || catItem.wingetId || '').trim();
+        const archiveProv = archivePm ? getProvider(archivePm) : null;
+        if (archiveProv?.capabilities?.install && archivePkgId) {
+          onProgress?.(
+            null,
+            useSilent
+              ? `⚡ Aktualisiere still über ${archiveProv.name}...`
+              : `🖱️ Aktualisiere über ${archiveProv.name}...`
+          );
+          return typeof archiveProv.upgrade === 'function'
+            ? archiveProv.upgrade(archivePkgId, {
+                silent: useSilent,
+                targetVersion: entry.toVersion || catItem.webVersion || '',
+                itemName: catItem.name,
+                signal,
+                useJob: false,
+              })
+            : archiveProv.install(archivePkgId, {
+                upgrade: true,
+                silent: useSilent,
+                targetVersion: entry.toVersion || catItem.webVersion || '',
+                itemName: catItem.name,
+                signal,
+                useJob: false,
+              });
+        }
         return { success: false, error: 'Keine Setup-Datei im Archiv vorhanden.' };
       }
 
@@ -164,7 +199,7 @@ async function executeQueueItem(entry, { signal, onProgress }) {
       const saveMode = entry.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
       if (saveMode !== 'none') {
         onProgress?.(null, 'Speichere Setup im Archiv...');
-        await saveUpdatedWingetPackageToArchive(entry, entry.archiveSaveSpec, signal);
+        await saveUpdatedPackageToArchive(entry, entry.archiveSaveSpec, signal);
         if (signal?.aborted) return { success: false, canceled: true };
       }
     }

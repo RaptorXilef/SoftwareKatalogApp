@@ -6,6 +6,12 @@ import {
   parseChocoOutdatedOutput,
   parseChocoSearchOutput,
 } from '../../shared/choco-parser.js';
+import {
+  isValidSourceName,
+  isValidSourceUrl,
+  PROVIDER_SOURCE_TEMPLATES,
+  parseChocoSourceListOutput,
+} from '../../shared/provider-sources-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli, runElevatedPowerShell } from './cli-runner.js';
 import { createCliAvailabilityChecker, createPowerShellBootstrapRunner } from './manager-bootstrap.js';
@@ -96,6 +102,7 @@ export const chocoProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -330,5 +337,77 @@ export const chocoProvider = {
     const errMsg = (res.error || res.stderr || res.stdout || `Chocolatey-Fehlercode ${res.code}`).trim();
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
+  },
+
+  async listSources({ signal = null } = {}) {
+    const res = await runChoco(['source', 'list', '-r'], { signal, timeoutMs: 30000 });
+    if (res.aborted) return { success: false, canceled: true, sources: [] };
+    if (res.notFound || (res.code !== 0 && !res.stdout)) {
+      return {
+        success: false,
+        sources: [],
+        templates: PROVIDER_SOURCE_TEMPLATES.chocolatey,
+        requiresAdmin: true,
+        mode: 'cli',
+        error: res.error || res.stderr || 'Chocolatey-Quellen konnten nicht abgerufen werden.',
+      };
+    }
+
+    const sources = parseChocoSourceListOutput(res.stdout).map((src) => ({
+      ...src,
+      builtIn: false,
+    }));
+    return {
+      success: true,
+      mode: 'cli',
+      requiresAdmin: true,
+      sources,
+      templates: PROVIDER_SOURCE_TEMPLATES.chocolatey,
+      hint: 'Aenderungen an Chocolatey-Quellen erfordern Administratorrechte (UAC).',
+    };
+  },
+
+  async addSource({ name = '', url = '' } = {}, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    const cleanUrl = String(url || '').trim();
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Quellenname (erlaubt: Buchstaben, Ziffern, . _ -).' };
+    }
+    if (!isValidSourceUrl(cleanUrl)) {
+      return { success: false, error: 'Bitte eine gueltige HTTP/HTTPS-URL angeben.' };
+    }
+
+    const chocoScript = [
+      "$chocoBin = if (Get-Command choco -ErrorAction SilentlyContinue) { 'choco' } else { Join-Path ($env:ChocolateyInstall ?? 'C:\\ProgramData\\chocolatey') 'bin\\choco.exe' }",
+      `& $chocoBin 'source' 'add' '-n=${escapeSingleQuotedPs(cleanName)}' '-s=${escapeSingleQuotedPs(cleanUrl)}'`,
+    ].join('\n');
+
+    const res = await runElevatedPowerShell(chocoScript, { signal, timeoutMs: 2 * 60 * 1000 });
+    if (res.canceled || res.aborted) return { success: false, canceled: true };
+    if (res.code === 0) return { success: true };
+    return {
+      success: false,
+      error: (res.error || res.stderr || res.stdout || `Chocolatey-Quelle konnte nicht hinzugefuegt werden.`).trim(),
+    };
+  },
+
+  async removeSource(name, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Quellenname.' };
+    }
+
+    const chocoScript = [
+      "$chocoBin = if (Get-Command choco -ErrorAction SilentlyContinue) { 'choco' } else { Join-Path ($env:ChocolateyInstall ?? 'C:\\ProgramData\\chocolatey') 'bin\\choco.exe' }",
+      `& $chocoBin 'source' 'remove' '-n=${escapeSingleQuotedPs(cleanName)}'`,
+    ].join('\n');
+
+    const res = await runElevatedPowerShell(chocoScript, { signal, timeoutMs: 2 * 60 * 1000 });
+    if (res.canceled || res.aborted) return { success: false, canceled: true };
+    if (res.code === 0) return { success: true };
+    return {
+      success: false,
+      error: (res.error || res.stderr || res.stdout || `Chocolatey-Quelle konnte nicht entfernt werden.`).trim(),
+    };
   },
 };

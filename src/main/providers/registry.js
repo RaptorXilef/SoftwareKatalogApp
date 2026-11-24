@@ -27,6 +27,7 @@ const CAPABILITY_KEYS = [
   'install',
   'uninstall',
   'supportsArchiveDownload',
+  'manageSources',
 ];
 
 /**
@@ -352,6 +353,30 @@ export async function uninstallPackage(providerId, packageId, opts = {}) {
     return { success: false, error: `Provider "${providerId}" unterstützt keine Deinstallation.` };
   }
   return provider.uninstall(packageId, opts);
+}
+
+export async function listProviderSources(providerId, opts = {}) {
+  const provider = getProvider(providerId);
+  if (!provider?.capabilities.manageSources || typeof provider.listSources !== 'function') {
+    return { success: false, error: `Provider "${providerId}" unterstuetzt keine Quellen-Verwaltung.`, sources: [] };
+  }
+  return provider.listSources(opts);
+}
+
+export async function addProviderSource(providerId, sourceSpec = {}, opts = {}) {
+  const provider = getProvider(providerId);
+  if (!provider?.capabilities.manageSources || typeof provider.addSource !== 'function') {
+    return { success: false, error: `Provider "${providerId}" unterstuetzt keine Quellen-Verwaltung.` };
+  }
+  return provider.addSource(sourceSpec, opts);
+}
+
+export async function removeProviderSource(providerId, sourceName, opts = {}) {
+  const provider = getProvider(providerId);
+  if (!provider?.capabilities.manageSources || typeof provider.removeSource !== 'function') {
+    return { success: false, error: `Provider "${providerId}" unterstuetzt keine Quellen-Verwaltung.` };
+  }
+  return provider.removeSource(sourceName, opts);
 }
 
 export function getProviderCacheStats() {

@@ -27,6 +27,7 @@ import {
   openWingetMatcherModal,
 } from './modals/index.js';
 import {
+  getItemById,
   getItemStatus,
   refreshBundles,
   refreshCatalogData,
@@ -144,6 +145,39 @@ function setupGridEvents() {
       e.stopPropagation();
       await toggleFavorite(favBtn.dataset.favId);
       renderCatalogGrid();
+      return;
+    }
+
+    const archiveBtn = e.target.closest('.card-archive-btn');
+    if (archiveBtn instanceof HTMLElement) {
+      e.stopPropagation();
+      const item = getItemById(archiveBtn.dataset.cardArchiveId);
+      if (!item) return;
+      const pm = String(item.packageManager || (item.wingetId ? 'winget' : ''))
+        .trim()
+        .toLowerCase();
+      const pid = String(item.packageId || item.wingetId || '').trim();
+      const prov = pm ? state.providers.find((p) => p.id === pm) : null;
+      const supportsSetupDl = prov ? Boolean(prov.capabilities?.supportsArchiveDownload) : pm === 'winget';
+      await openArchiveLinkModal(
+        {
+          id: item.id,
+          packageManager: pm,
+          packageId: pid,
+          name: item.name,
+          version: item.webVersion || item.installedVersion || '',
+          shortDescription: item.shortDescription || '',
+          homepage: item.homepage || '',
+          icon: item.icon || '',
+          displayIcon: item.displayIcon || '',
+          installLocation: item.installLocation || '',
+          validInstallPath: item.validInstallPath || '',
+          uninstallString: item.uninstallString || '',
+          appxPackageFamilyName: item.appxPackageFamilyName || '',
+          installPaths: item.installLocation ? [item.installLocation] : [],
+        },
+        { downloadSetup: supportsSetupDl }
+      );
       return;
     }
 

@@ -5,6 +5,7 @@ import { renderBundleRunnerModal } from './bundle-runner-modal.js';
 import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
+import { openProviderSourcesModal } from './provider-sources-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
 
@@ -66,12 +67,19 @@ export function openProviderPackageModal(providerId, packageId, summary = {}, op
 
 export function openArchiveLinkModal(pkg, options = {}) {
   const defaultMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
+  const pm = String(pkg?.packageManager || pkg?.providerId || (pkg?.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  const provider = pm ? state.providers.find((p) => p.id === pm) : null;
+  const defaultDownloadSetup = provider ? Boolean(provider.capabilities?.supportsArchiveDownload) : pm === 'winget';
   return savePackageToArchive(pkg, {
     mode: options.mode || defaultMode,
-    downloadSetup: options.downloadSetup ?? true,
+    downloadSetup: options.downloadSetup ?? defaultDownloadSetup,
     onLinked: options.onLinked || null,
   });
 }
+
+export { openProviderSourcesModal };
 
 export function openWingetMatcherModal() {
   return renderWingetMatcherModal();

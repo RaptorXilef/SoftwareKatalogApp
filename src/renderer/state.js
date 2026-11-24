@@ -134,7 +134,13 @@ export function isItemNew(item) {
 }
 
 export function hasOnlineSource(item) {
-  return Boolean((item.webSourceType && item.webSourceType !== 'none') || item.wingetId || item.webVersionUrl);
+  const pm = String(item.packageManager || '')
+    .trim()
+    .toLowerCase();
+  const hasProviderLink = Boolean(pm && pm !== 'archive' && item.packageId);
+  return Boolean(
+    (item.webSourceType && item.webSourceType !== 'none') || item.wingetId || item.webVersionUrl || hasProviderLink
+  );
 }
 
 export function hasAnyLocalPath(item) {

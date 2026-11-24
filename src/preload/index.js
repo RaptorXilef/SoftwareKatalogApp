@@ -70,6 +70,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-install', providerId, packageId, opts),
   uninstallPackage: (providerId, packageId, opts) =>
     ipcRenderer.invoke('providers-uninstall', providerId, packageId, opts),
+  listProviderSources: (providerId) => ipcRenderer.invoke('providers-list-sources', providerId),
+  addProviderSource: (providerId, sourceSpec) => ipcRenderer.invoke('providers-add-source', providerId, sourceSpec),
+  removeProviderSource: (providerId, sourceName) =>
+    ipcRenderer.invoke('providers-remove-source', providerId, sourceName),
   getProviderCacheStats: () => ipcRenderer.invoke('providers-cache-stats'),
   clearProviderCache: () => ipcRenderer.invoke('providers-cache-clear'),
   inspectMsiFile: (filePath) => ipcRenderer.invoke('msi-inspect-file', filePath),

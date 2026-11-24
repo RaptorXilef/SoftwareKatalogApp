@@ -140,6 +140,7 @@ describe('provider-registry', () => {
       install: true,
       uninstall: false,
       supportsArchiveDownload: false,
+      manageSources: false,
     });
 
     const fetched = getProvider('  TESTPM ');

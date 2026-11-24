@@ -390,7 +390,9 @@ function renderCardHtml(item, st) {
 
   const favBtnHtml = item.inArchive
     ? `<button type="button" class="fav-btn ${isFav ? 'active' : ''}" data-fav-id="${escapeHTML(item.id)}" title="Favorit umschalten" aria-label="Favorit">★</button>`
-    : '';
+    : item.origin === 'pc'
+      ? `<button type="button" class="card-archive-btn" data-card-archive-id="${escapeHTML(item.id)}" title="Ins Archiv aufnehmen" aria-label="Ins Archiv aufnehmen">📥</button>`
+      : '';
 
   const selectHtml = isUpdatesTab
     ? `<label class="card-select-wrap" title="Für Massenaktion auswählen"><input type="checkbox" class="card-select-checkbox" data-select-update-id="${escapeHTML(item.id)}" ${isSelected ? 'checked' : ''}></label>`

@@ -1,3 +1,5 @@
+import { normalizeCustomSourcesList } from './provider-sources-parser.js';
+
 export const DEFAULT_ENABLED_PROVIDERS = Object.freeze(['winget', 'archive']);
 
 export const DEFAULT_PROVIDER_SETTINGS = Object.freeze({
@@ -62,6 +64,19 @@ export function normalizeProviderSettings(raw) {
     if (value === undefined) continue;
     if (typeof value === 'string') {
       cleaned[key] = value.trim();
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nextObj = { ...value };
+      if ('customSources' in nextObj) {
+        const normalizedSources = normalizeCustomSourcesList(nextObj.customSources);
+        if (normalizedSources.length > 0) {
+          nextObj.customSources = normalizedSources;
+        } else {
+          delete nextObj.customSources;
+        }
+      }
+      if (Object.keys(nextObj).length > 0) {
+        cleaned[key] = nextObj;
+      }
     } else {
       cleaned[key] = value;
     }

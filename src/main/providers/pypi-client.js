@@ -1,3 +1,4 @@
+import { normalizeSourceUrl } from '../../shared/provider-sources-parser.js';
 import {
   isValidPythonPackageName,
   normalizePythonPackageName,
@@ -5,12 +6,35 @@ import {
   parsePyPiSearchHtml,
   parsePyPiSimpleIndexHtml,
 } from '../../shared/python-parser.js';
-import { compareVersions } from '../../shared/version.js';
+import { compareVersions, extractVersion } from '../../shared/version.js';
 import { fetchRegistryJson } from './npm-registry-client.js';
 import { getWingetCache } from './winget-provider.js';
 
 const PYPI_BASE_URL = 'https://pypi.org';
 const DEFAULT_TIMEOUT_MS = 12000;
+
+function resolvePyPiUrls(indexUrl) {
+  const clean = normalizeSourceUrl(indexUrl);
+  if (!clean || clean === 'https://pypi.org/simple' || clean === 'https://pypi.org') {
+    return {
+      isCustom: false,
+      apiBase: PYPI_BASE_URL,
+      simpleBase: `${PYPI_BASE_URL}/simple`,
+    };
+  }
+  if (clean.toLowerCase().endsWith('/simple')) {
+    return {
+      isCustom: true,
+      apiBase: clean.slice(0, -7),
+      simpleBase: clean,
+    };
+  }
+  return {
+    isCustom: true,
+    apiBase: clean,
+    simpleBase: `${clean}/simple`,
+  };
+}
 
 async function fetchPyPiText(url, { signal = null, timeoutMs = 8000, accept = 'text/html,application/json' } = {}) {
   if (signal?.aborted) {
@@ -45,29 +69,73 @@ async function fetchPyPiText(url, { signal = null, timeoutMs = 8000, accept = 't
 /**
  * Ruft aktuelle Paketmetadaten direkt ueber die PyPI JSON API (`https://pypi.org/pypi/<pkg>/json`) ab.
  * @param {string} packageId
- * @param {{ signal?: AbortSignal | null, packageManager?: string }} [options]
+ * @param {{ signal?: AbortSignal | null, packageManager?: string, indexUrl?: string }} [options]
  */
-async function fetchPyPiPackageFresh(packageId, { signal = null, packageManager = 'pip' } = {}) {
+async function fetchPyPiPackageFresh(packageId, { signal = null, packageManager = 'pip', indexUrl = '' } = {}) {
   const cleanId = String(packageId || '').trim();
   if (!isValidPythonPackageName(cleanId)) {
     throw new Error(`Ungueltiger Python-Paketname: "${cleanId}".`);
   }
 
-  const url = `${PYPI_BASE_URL}/pypi/${encodeURIComponent(cleanId)}/json`;
-  const payload = await fetchRegistryJson(url, { signal, timeoutMs: DEFAULT_TIMEOUT_MS });
-  const parsed = parsePyPiPackageJson(payload, cleanId, { packageManager });
-  if (!parsed) {
-    throw new Error(`PyPI-Paket "${cleanId}" konnte nicht geparst werden.`);
+  const { isCustom, apiBase, simpleBase } = resolvePyPiUrls(indexUrl);
+  const jsonUrl = `${apiBase}/pypi/${encodeURIComponent(cleanId)}/json`;
+  try {
+    const payload = await fetchRegistryJson(jsonUrl, { signal, timeoutMs: DEFAULT_TIMEOUT_MS });
+    const parsed = parsePyPiPackageJson(payload, cleanId, { packageManager });
+    if (parsed) return parsed;
+  } catch (err) {
+    if (signal?.aborted || err?.name === 'AbortError' || !isCustom) {
+      throw err;
+    }
   }
-  return parsed;
+
+  if (isCustom) {
+    const norm = normalizePythonPackageName(cleanId);
+    const simplePkgUrl = `${simpleBase}/${encodeURIComponent(norm)}/`;
+    const simpleHtml = await fetchPyPiText(simplePkgUrl, {
+      signal,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      accept: 'text/html',
+    });
+    const versions = [];
+    const linkRe = /<a\b[^>]*>([^<]+)<\/a>/gi;
+    let m = linkRe.exec(simpleHtml);
+    while (m !== null) {
+      const ver = extractVersion(m[1]);
+      if (ver) versions.push(ver);
+      m = linkRe.exec(simpleHtml);
+    }
+    versions.sort((a, b) => compareVersions(b, a, 4));
+    return {
+      name: cleanId,
+      packageManager,
+      packageId: cleanId,
+      version: versions[0] || '',
+      publisher: '',
+      author: '',
+      shortDescription: `Paket aus Custom-Index (${simpleBase})`,
+      description: `Paket aus benutzerdefiniertem Python-Index: ${simplePkgUrl}`,
+      homepage: simplePkgUrl,
+      repositoryUrl: '',
+      license: '',
+      licenseUrl: '',
+      tags: [],
+      pypiUrl: simplePkgUrl,
+    };
+  }
+
+  throw new Error(`PyPI-Paket "${cleanId}" konnte nicht geparst werden.`);
 }
 
 /**
  * Liefert PyPI-Paketdetails ueber den 7-Tage-Offline-Cache (`userData/provider-cache.json`).
  * @param {string} packageId
- * @param {{ packageManager?: string, forceRefresh?: boolean, signal?: AbortSignal | null }} [options]
+ * @param {{ packageManager?: string, forceRefresh?: boolean, signal?: AbortSignal | null, indexUrl?: string }} [options]
  */
-export async function showPyPiPackage(packageId, { packageManager = 'pip', forceRefresh = false, signal = null } = {}) {
+export async function showPyPiPackage(
+  packageId,
+  { packageManager = 'pip', forceRefresh = false, signal = null, indexUrl = '' } = {}
+) {
   const cleanId = String(packageId || '').trim();
   if (!cleanId) {
     return {
@@ -80,11 +148,13 @@ export async function showPyPiPackage(packageId, { packageManager = 'pip', force
     };
   }
 
-  const cacheKey = `pypi:show:${normalizePythonPackageName(cleanId)}`;
+  const { isCustom, simpleBase } = resolvePyPiUrls(indexUrl);
+  const normId = normalizePythonPackageName(cleanId);
+  const cacheKey = isCustom ? `pypi:show:${simpleBase.toLowerCase()}:${normId}` : `pypi:show:${normId}`;
   const cache = getWingetCache();
   const res = await cache.getOrFetch(
     cacheKey,
-    () => fetchPyPiPackageFresh(cleanId, { signal, packageManager: 'pip' }),
+    () => fetchPyPiPackageFresh(cleanId, { signal, packageManager: 'pip', indexUrl }),
     { forceRefresh }
   );
 
@@ -112,14 +182,18 @@ export async function showPyPiPackage(packageId, { packageManager = 'pip', force
 /**
  * Durchsucht PyPI ueber direkte Paketpruefung + PyPI-Suche mit PEP-503-Simple-Fallback.
  * @param {string} query
- * @param {{ limit?: number, signal?: AbortSignal | null, packageManager?: string }} [options]
+ * @param {{ limit?: number, signal?: AbortSignal | null, packageManager?: string, indexUrl?: string }} [options]
  */
-export async function searchPyPiPackages(query, { limit = 25, signal = null, packageManager = 'pip' } = {}) {
+export async function searchPyPiPackages(
+  query,
+  { limit = 25, signal = null, packageManager = 'pip', indexUrl = '' } = {}
+) {
   const cleanQuery = String(query || '').trim();
   if (cleanQuery.length < 2) {
     return { success: false, results: [], error: 'Bitte mindestens 2 Zeichen eingeben.' };
   }
 
+  const { isCustom, simpleBase } = resolvePyPiUrls(indexUrl);
   const maxResults = Number.isFinite(limit) && limit > 0 ? Math.min(Math.max(Math.round(limit), 1), 50) : 25;
   /** @type {Array<Record<string, any>>} */
   const combined = [];
@@ -133,7 +207,7 @@ export async function searchPyPiPackages(query, { limit = 25, signal = null, pac
     combined.push({ ...entry, packageManager, source: packageManager });
   };
 
-  // 1. Direkte Exakt-Pruefung ueber die schnelle PyPI JSON API
+  // 1. Direkte Exakt-Pruefung ueber die schnelle PyPI JSON API (bzw. Custom Simple-Index)
   const directCandidates = [];
   if (isValidPythonPackageName(cleanQuery)) {
     directCandidates.push(cleanQuery);
@@ -143,22 +217,24 @@ export async function searchPyPiPackages(query, { limit = 25, signal = null, pac
     }
   }
 
-  const searchPromise = (async () => {
-    try {
-      const searchHtml = await fetchPyPiText(`${PYPI_BASE_URL}/search/?q=${encodeURIComponent(cleanQuery)}`, {
-        signal,
-        timeoutMs: 8000,
-        accept: 'text/html',
-      });
-      return parsePyPiSearchHtml(searchHtml, maxResults, { packageManager });
-    } catch (err) {
-      if (signal?.aborted || err?.name === 'AbortError') throw err;
-      return [];
-    }
-  })();
+  const searchPromise = isCustom
+    ? Promise.resolve([])
+    : (async () => {
+        try {
+          const searchHtml = await fetchPyPiText(`${PYPI_BASE_URL}/search/?q=${encodeURIComponent(cleanQuery)}`, {
+            signal,
+            timeoutMs: 8000,
+            accept: 'text/html',
+          });
+          return parsePyPiSearchHtml(searchHtml, maxResults, { packageManager });
+        } catch (err) {
+          if (signal?.aborted || err?.name === 'AbortError') throw err;
+          return [];
+        }
+      })();
 
   const directResults = await Promise.allSettled(
-    directCandidates.map((cand) => fetchPyPiPackageFresh(cand, { signal, packageManager }))
+    directCandidates.map((cand) => fetchPyPiPackageFresh(cand, { signal, packageManager, indexUrl }))
   );
 
   for (const outcome of directResults) {
@@ -191,11 +267,11 @@ export async function searchPyPiPackages(query, { limit = 25, signal = null, pac
     pushUnique(item);
   }
 
-  // 2. Simple-Fallback (PEP 503), falls /search/ (z. B. durch Bot-Schutz) keine Treffer liefert
+  // 2. Simple-Fallback (PEP 503), falls /search/ (oder Custom-Index) keine Treffer liefert
   if (combined.length === 0 && isValidPythonPackageName(cleanQuery)) {
     const norm = normalizePythonPackageName(cleanQuery);
     try {
-      const simpleHtml = await fetchPyPiText(`${PYPI_BASE_URL}/simple/${encodeURIComponent(norm)}/`, {
+      const simpleHtml = await fetchPyPiText(`${simpleBase}/${encodeURIComponent(norm)}/`, {
         signal,
         timeoutMs: 6000,
         accept: 'text/html',
@@ -227,11 +303,11 @@ export async function searchPyPiPackages(query, { limit = 25, signal = null, pac
 /**
  * Prueft installierte Python-Pakete mit begrenzter Nebenlaeufigkeit gegen PyPI.
  * @param {Array<{ packageId?: string, id?: string, name?: string, version?: string }>} installedPackages
- * @param {{ packageManager?: string, signal?: AbortSignal | null, concurrency?: number }} [options]
+ * @param {{ packageManager?: string, signal?: AbortSignal | null, concurrency?: number, indexUrl?: string }} [options]
  */
 export async function checkPyPiUpdates(
   installedPackages = [],
-  { packageManager = 'uv', signal = null, concurrency = 6 } = {}
+  { packageManager = 'uv', signal = null, concurrency = 6, indexUrl = '' } = {}
 ) {
   const list = Array.isArray(installedPackages) ? installedPackages.filter((p) => p?.packageId || p?.name) : [];
   if (list.length === 0) return [];
@@ -247,7 +323,7 @@ export async function checkPyPiUpdates(
 
     const task = (async () => {
       try {
-        const latest = await fetchPyPiPackageFresh(pkgId, { signal, packageManager });
+        const latest = await fetchPyPiPackageFresh(pkgId, { signal, packageManager, indexUrl });
         if (!latest?.version) return;
         const isOutdated = installedVer ? compareVersions(latest.version, installedVer, 4) > 0 : false;
         if (isOutdated) {

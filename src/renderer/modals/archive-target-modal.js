@@ -321,8 +321,10 @@ export async function savePackageToArchive(pkg, { mode = null, downloadSetup = t
   }
 
   const softwareName = String(pkg?.name || pkg?.packageId || 'Software').trim();
-  if (downloadSetup && (pkg?.packageId || pkg?.wingetId)) {
-    showToast(`Speichere ${softwareName} im Archiv...`, { type: 'info' });
+  if (pkg?.packageId || pkg?.wingetId) {
+    showToast(downloadSetup ? `Speichere ${softwareName} im Archiv...` : `Lege ${softwareName} im Archiv an...`, {
+      type: 'info',
+    });
   }
 
   return executeArchiveLink(pkg, targetSpec, { downloadSetup, onLinked });

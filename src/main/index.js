@@ -35,14 +35,17 @@ import { installProviderManager, uninstallProviderManager } from './providers/ma
 import { installLocalMsi, readMsiFileMetadata } from './providers/msi-provider.js';
 import { useNvmVersion } from './providers/nvm-provider.js';
 import {
+  addProviderSource,
   checkAllProvidersAvailability,
   checkProviderAvailability,
   clearProviderCache,
   getProviderCacheStats,
   initDefaultProviders,
   installPackage,
+  listProviderSources,
   listProvidersInfo,
   listUpgradesAcrossProviders,
+  removeProviderSource,
   searchAcrossProviders,
   setProviderEnabled,
   showPackage,
@@ -227,6 +230,9 @@ function registerIpcHandlers() {
   handleIpc('providers-uninstall', (_e, providerId, packageId, opts) =>
     uninstallPackage(providerId, packageId, opts || {})
   );
+  handleIpc('providers-list-sources', (_e, providerId) => listProviderSources(providerId));
+  handleIpc('providers-add-source', (_e, providerId, sourceSpec) => addProviderSource(providerId, sourceSpec || {}));
+  handleIpc('providers-remove-source', (_e, providerId, sourceName) => removeProviderSource(providerId, sourceName));
   handleIpc('providers-cache-stats', () => getProviderCacheStats());
   handleIpc('providers-cache-clear', () => clearProviderCache());
   handleIpc('msi-inspect-file', (_e, filePath) => readMsiFileMetadata(filePath));

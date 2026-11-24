@@ -13,6 +13,7 @@ import { closeModal, openEditModal, resetModalContent, triggerCatalogReload } fr
 
 const SOURCE_LABELS = {
   winget: 'Winget',
+  provider: 'Paketmanager',
   github: 'GitHub',
   web: 'Webseite',
 };
@@ -156,7 +157,7 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
       buttons.push(
         '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
       );
-    } else if (provMeta.supportsArchiveDownload && canProviderInstall) {
+    } else if (getEffectivePackageManager(item) !== 'archive' && getEffectivePackageId(item)) {
       buttons.push(
         '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
       );
@@ -186,6 +187,20 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
       buttons.push(
         `<button type="button" class="btn btn-lg ${hero.cls}" data-detail-action="${hero.action}" data-file="${escapeHTML(hero.file || '')}" data-version="${escapeHTML(hero.version || '')}">${escapeHTML(hero.label)}</button>`
       );
+    } else if (canProviderInstall) {
+      const provBtnLabel =
+        item.isInstalled && st.hasWebUpdate && st.webVersion
+          ? `⬆️ Ueber ${provLabel} aktualisieren (v${st.webVersion})`
+          : item.isInstalled
+            ? `⬆️ Ueber ${provLabel} aktualisieren`
+            : `⬇️ Ueber ${provLabel} installieren`;
+      buttons.push(
+        `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(provBtnLabel)}</button>`
+      );
+    }
+    const nvmBtn = buildNvmUseButtonHtml(item);
+    if (nvmBtn) {
+      buttons.push(nvmBtn);
     }
     if (item.isInstalled && item.validInstallPath && hero?.action !== 'launch-local') {
       buttons.push(
@@ -261,17 +276,32 @@ function buildInstallModeToggleHtml({
   `;
 }
 
-function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, canArchiveDownload, matchedArchive }) {
+function buildArchiveSaveChoiceHtml(item, st, { effectivePm, effectivePkgId, canArchiveDownload, matchedArchive }) {
   const hasProviderInstallBtn = item.origin === 'remote' || (item.origin === 'pc' && st.hasWebUpdate);
-  if (!hasProviderInstallBtn || !canArchiveDownload || item.inArchive || matchedArchive) return '';
+  if (
+    !hasProviderInstallBtn ||
+    !effectivePm ||
+    effectivePm === 'archive' ||
+    !effectivePkgId ||
+    item.inArchive ||
+    matchedArchive
+  ) {
+    return '';
+  }
 
   const saveMode = state.settings.archiveSaveMode || 'ask';
   const checked = saveMode === 'ask' || saveMode === 'auto-id';
-  let labelText = '🗄️ Setup-Datei bei Installation/Update zusätzlich im Archiv ablegen';
+  let labelText = canArchiveDownload
+    ? '🗄️ Setup-Datei bei Installation/Update zusätzlich im Archiv ablegen'
+    : '🗄️ Paket (Metadaten & Icon) zusaetzlich im Archiv aufnehmen';
   if (saveMode === 'auto-id') {
-    labelText = `🗄️ Setup-Datei automatisch im Archiv speichern (Ordner: ${effectivePkgId})`;
+    labelText = canArchiveDownload
+      ? `🗄️ Setup-Datei automatisch im Archiv speichern (Ordner: ${effectivePkgId})`
+      : `🗄️ Paket automatisch im Archiv aufnehmen (Ordner: ${effectivePkgId})`;
   } else if (saveMode === 'none') {
-    labelText = '🗄️ Setup-Datei zusätzlich im Archiv ablegen (Standard in Einstellungen: Aus)';
+    labelText = canArchiveDownload
+      ? '🗄️ Setup-Datei zusätzlich im Archiv ablegen (Standard in Einstellungen: Aus)'
+      : '🗄️ Paket zusaetzlich im Archiv aufnehmen (Standard in Einstellungen: Aus)';
   }
 
   return `
@@ -720,7 +750,9 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const isSilentLocked = initialModeState.silentLocked;
   const canUninstall = isCanUninstall(item, provMeta, effectivePkgId);
   const onlineReady = canDownloadOnline(item);
-  const supportsChangelog = (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) || isWingetPkg;
+  const supportsChangelog =
+    (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) ||
+    (Boolean(effectivePm) && effectivePm !== 'archive' && Boolean(effectivePkgId) && provMeta.canShow);
 
   const fallbackEmoji = item.origin === 'pc' ? '💻' : item.origin === 'remote' ? '🛍️' : '📦';
   const iconHtml = item.icon
@@ -867,7 +899,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           isSilentLocked,
           lockTooltip: initialModeState.lockTooltip,
         })}
-        ${buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, canArchiveDownload, matchedArchive })}
+        ${buildArchiveSaveChoiceHtml(item, st, { effectivePm, effectivePkgId, canArchiveDownload, matchedArchive })}
         ${pinnedNotice}
         ${packageProfileHtml}
         ${buildCustomMetaSectionHtml(metaSource, hasPackageProfile)}
@@ -1113,16 +1145,24 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const buildArchivePayloadFromItem = () => {
     const installPaths = item.installLocation ? [item.installLocation] : item.installPaths || [];
     return {
+      id: item.id || '',
       packageManager: effectivePm,
       packageId: effectivePkgId,
       name: loadedPkgProfile?.name || item.name,
       version: loadedPkgProfile?.version || st.webVersion || st.localVersion || '',
       description: loadedPkgProfile?.description || loadedPkgProfile?.shortDescription || item.shortDescription || '',
       tags: loadedPkgProfile?.tags || item.tags || [],
-      homepage: loadedPkgProfile?.homepage || '',
+      homepage: loadedPkgProfile?.homepage || item.homepage || '',
+      repositoryUrl: loadedPkgProfile?.repositoryUrl || '',
       releaseNotesUrl: loadedPkgProfile?.releaseNotesUrl || '',
       searchNames: item.name ? [item.name] : [],
       installPaths,
+      icon: item.icon || '',
+      displayIcon: item.displayIcon || '',
+      installLocation: item.installLocation || '',
+      validInstallPath: item.validInstallPath || '',
+      uninstallString: item.uninstallString || '',
+      appxPackageFamilyName: item.appxPackageFamilyName || '',
     };
   };
 
@@ -1191,8 +1231,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const runProviderInstallFlow = async (btn) => {
     if (!canProviderInstall) return;
     const archiveCheck = modal.querySelector('#detailAlsoSaveArchive');
-    const shouldSaveToArchive =
-      canArchiveDownload && archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
+    const shouldSaveToArchive = archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
 
     let archiveTargetSpec = null;
     if (shouldSaveToArchive) {
@@ -1241,7 +1280,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
     if (shouldSaveToArchive && archiveTargetSpec && !archiveTargetSpec.skipped) {
       const linkRes = await executeArchiveLink(buildArchivePayloadFromItem(), archiveTargetSpec, {
-        downloadSetup: true,
+        downloadSetup: canArchiveDownload,
       });
       await triggerCatalogReload({ rescanInstalled: true });
       if (linkRes?.success && linkRes.item?.id && isStillActive()) {

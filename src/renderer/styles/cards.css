@@ -168,6 +168,28 @@
   }
 }
 
+.card-archive-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0.72;
+  cursor: pointer;
+  padding: 3px 5px;
+  transition:
+    opacity 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+    border-color: var(--color-archive);
+    background: color-mix(in srgb, var(--color-archive) 14%, transparent);
+  }
+}
+
 .card-body {
   flex: 1;
   display: flex;

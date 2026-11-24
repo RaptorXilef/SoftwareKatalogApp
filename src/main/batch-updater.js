@@ -108,17 +108,23 @@ export async function batchDownloadArchiveUpdates(itemIds = null) {
   }
 }
 
-async function saveUpdatedWingetPackageToArchive(task, saveSpec, signal) {
+async function saveUpdatedPackageToArchive(task, saveSpec, signal) {
   const cfg = getConfig();
   const mode = saveSpec?.saveMode || cfg.archiveSaveMode || 'none';
   if (mode === 'none') return { skipped: true };
+
+  const pkgPm = String(task.packageManager || 'winget')
+    .trim()
+    .toLowerCase();
+  const provider = getProvider(pkgPm);
+  const canDownloadSetup = Boolean(provider?.capabilities?.supportsArchiveDownload);
 
   let targetDir = saveSpec?.targetDir || '';
   let collisionMode = saveSpec?.collisionMode || 'create';
 
   if (mode === 'auto-id' && !targetDir) {
     const check = await linkPackageToArchive({
-      packageManager: 'winget',
+      packageManager: pkgPm,
       packageId: task.packageId,
       softwareName: task.name,
       saveMode: 'auto-id',
@@ -132,7 +138,7 @@ async function saveUpdatedWingetPackageToArchive(task, saveSpec, signal) {
       targetDir = check.targetDir;
       collisionMode = col.hasMetadata ? 'link' : 'create';
     } else if (check?.success && check.item) {
-      return downloadWebUpdate(check.item, { useJob: false, signal });
+      return canDownloadSetup ? downloadWebUpdate(check.item, { useJob: false, signal }) : check;
     } else {
       return check;
     }
@@ -143,13 +149,13 @@ async function saveUpdatedWingetPackageToArchive(task, saveSpec, signal) {
   }
 
   return linkPackageToArchive({
-    packageManager: 'winget',
+    packageManager: pkgPm,
     packageId: task.packageId,
     softwareName: task.name,
     targetDir,
     saveMode: targetDir ? 'ask' : mode,
     collisionMode,
-    downloadSetup: true,
+    downloadSetup: canDownloadSetup,
     downloadUseJob: false,
     signal,
     metadata: task,
@@ -234,22 +240,49 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
         }
 
         if (task.isInstalled || catItem.isInstalled) {
+          let instRes = null;
           if (!setupFile) {
-            failed++;
-            results.push({ id: task.id, name: task.name, status: 'error', error: 'Keine Setup-Datei im Archiv.' });
-            continue;
+            const archivePm = String(catItem.packageManager || '')
+              .trim()
+              .toLowerCase();
+            const archivePkgId = String(catItem.packageId || catItem.wingetId || '').trim();
+            const archiveProv = archivePm ? getProvider(archivePm) : null;
+            if (archiveProv?.capabilities?.install && archivePkgId) {
+              job.update(basePct + 50 / validTasks.length, `${prefix}: Aktualisiere via ${archiveProv.name}...`);
+              instRes =
+                typeof archiveProv.upgrade === 'function'
+                  ? await archiveProv.upgrade(archivePkgId, {
+                      silent: false,
+                      targetVersion: task.toVersion || catItem.webVersion || '',
+                      itemName: catItem.name,
+                      signal: job.signal,
+                      useJob: false,
+                    })
+                  : await archiveProv.install(archivePkgId, {
+                      upgrade: true,
+                      silent: false,
+                      targetVersion: task.toVersion || catItem.webVersion || '',
+                      itemName: catItem.name,
+                      signal: job.signal,
+                      useJob: false,
+                    });
+            } else {
+              failed++;
+              results.push({ id: task.id, name: task.name, status: 'error', error: 'Keine Setup-Datei im Archiv.' });
+              continue;
+            }
+          } else {
+            job.update(basePct + 50 / validTasks.length, `${prefix}: Starte Installation...`);
+            instRes = await executeAndVerifyInstaller({
+              itemId: catItem.id,
+              itemName: catItem.name,
+              sourcePath: setupFile,
+              targetVersion: targetVersion || catItem.webVersion || null,
+              useJob: false,
+              allowSilent: Boolean(allowSilent),
+              onProgress: (_pct, detail) => job.update(basePct + 50 / validTasks.length, `${prefix}: ${detail}`),
+            });
           }
-
-          job.update(basePct + 50 / validTasks.length, `${prefix}: Starte Installation...`);
-          const instRes = await executeAndVerifyInstaller({
-            itemId: catItem.id,
-            itemName: catItem.name,
-            sourcePath: setupFile,
-            targetVersion: targetVersion || catItem.webVersion || null,
-            useJob: false,
-            allowSilent: Boolean(allowSilent),
-            onProgress: (_pct, detail) => job.update(basePct + 50 / validTasks.length, `${prefix}: ${detail}`),
-          });
 
           if (instRes?.success) {
             completed++;
@@ -321,7 +354,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
           const saveMode = task.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
           if (saveMode !== 'none') {
             job.update(basePct + 60 / validTasks.length, `${prefix}: Speichere Setup im Archiv...`);
-            await saveUpdatedWingetPackageToArchive(task, task.archiveSaveSpec, job.signal);
+            await saveUpdatedPackageToArchive(task, task.archiveSaveSpec, job.signal);
             if (job.signal.aborted) break;
           }
         }

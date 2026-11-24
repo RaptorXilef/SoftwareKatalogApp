@@ -2,6 +2,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import {
+  isValidSourceName,
+  isValidSourceUrl,
+  PROVIDER_SOURCE_TEMPLATES,
+  parseScoopBucketListOutput,
+} from '../../shared/provider-sources-parser.js';
+import {
   parseScoopExportJson,
   parseScoopInfoOutput,
   parseScoopSearchOutput,
@@ -102,6 +108,7 @@ export const scoopProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -310,5 +317,81 @@ export const scoopProvider = {
     const errMsg = (res.stderr || res.stdout || res.error || `Scoop-Fehlercode ${res.code}`).trim();
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
+  },
+
+  async listSources({ signal = null } = {}) {
+    const res = await runScoop(['bucket', 'list'], { signal, timeoutMs: 30000 });
+    if (res.aborted) return { success: false, canceled: true, sources: [] };
+    if (res.notFound || (res.code !== 0 && !res.stdout)) {
+      return {
+        success: false,
+        sources: [],
+        templates: PROVIDER_SOURCE_TEMPLATES.scoop,
+        requiresAdmin: false,
+        mode: 'cli',
+        error: res.error || res.stderr || 'Scoop-Buckets konnten nicht abgerufen werden.',
+      };
+    }
+
+    const sources = parseScoopBucketListOutput(res.stdout).map((bucket) => ({
+      ...bucket,
+      builtIn: false,
+    }));
+    return {
+      success: true,
+      mode: 'cli',
+      requiresAdmin: false,
+      sources,
+      templates: PROVIDER_SOURCE_TEMPLATES.scoop,
+      hint: 'Bekannte Scoop-Buckets wie "extras" oder "versions" koennen ohne URL per Klick hinzugefuegt werden.',
+    };
+  },
+
+  async addSource({ name = '', url = '' } = {}, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    const cleanUrl = String(url || '').trim();
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Bucket-Name (erlaubt: Buchstaben, Ziffern, . _ -).' };
+    }
+    if (cleanUrl && !isValidSourceUrl(cleanUrl)) {
+      return {
+        success: false,
+        error: 'Bitte eine gueltige HTTP/HTTPS-Repository-URL angeben (oder leer fuer bekannte Buckets).',
+      };
+    }
+
+    const args = cleanUrl ? ['bucket', 'add', cleanName, cleanUrl] : ['bucket', 'add', cleanName];
+    const res = await runScoop(args, { signal, timeoutMs: 120000 });
+    if (res.aborted) return { success: false, canceled: true };
+    if (res.code === 0) return { success: true };
+    return {
+      success: false,
+      error: (
+        res.stderr ||
+        res.stdout ||
+        res.error ||
+        `Scoop-Bucket "${cleanName}" konnte nicht hinzugefuegt werden.`
+      ).trim(),
+    };
+  },
+
+  async removeSource(name, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Bucket-Name.' };
+    }
+
+    const res = await runScoop(['bucket', 'rm', cleanName], { signal, timeoutMs: 45000 });
+    if (res.aborted) return { success: false, canceled: true };
+    if (res.code === 0) return { success: true };
+    return {
+      success: false,
+      error: (
+        res.stderr ||
+        res.stdout ||
+        res.error ||
+        `Scoop-Bucket "${cleanName}" konnte nicht entfernt werden.`
+      ).trim(),
+    };
   },
 };

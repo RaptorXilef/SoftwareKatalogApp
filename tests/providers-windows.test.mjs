@@ -560,6 +560,7 @@ describe('registry defaults for new Windows providers', () => {
       install: true,
       uninstall: true,
       supportsArchiveDownload: true,
+      manageSources: false,
     });
 
     const info = listProvidersInfo();

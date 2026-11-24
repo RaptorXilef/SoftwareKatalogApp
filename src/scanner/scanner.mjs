@@ -266,6 +266,7 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config, rootInfo) {
         // Automatische Ableitung für bestehende Einträge ohne webSourceType
         if (!webSourceType) {
           if (wingetId || packageManager === 'winget') webSourceType = 'winget';
+          else if (packageManager && packageManager !== 'archive' && packageId) webSourceType = 'provider';
           else if (webVersionUrl.toLowerCase().includes('github.com')) webSourceType = 'github';
           else if (webVersionUrl) webSourceType = 'web';
           else webSourceType = 'none';

@@ -7,11 +7,16 @@ import {
 } from '../../shared/npm-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli } from './cli-runner.js';
+import { createConfigSourceManager, getPrimaryCustomRegistryUrl } from './config-sources-helper.js';
 import { createCliAvailabilityChecker, createWingetBootstrapRunner } from './manager-bootstrap.js';
 import { searchNpmRegistry, showNpmRegistryPackage } from './npm-registry-client.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const npmSourceManager = createConfigSourceManager({
+  providerId: 'npm',
+  defaultSource: { name: 'npmjs', url: 'https://registry.npmjs.org' },
+});
 
 function getNpmExtraPaths() {
   const candidates = [];
@@ -59,6 +64,7 @@ export const npmProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -90,14 +96,23 @@ export const npmProvider = {
       return { success: false, results: [], error: 'Bitte mindestens 2 Zeichen eingeben.' };
     }
 
+    const customRegistry = getPrimaryCustomRegistryUrl('npm');
     try {
-      return await searchNpmRegistry(cleanQuery, { limit, signal, packageManager: 'npm' });
+      return await searchNpmRegistry(cleanQuery, {
+        limit,
+        signal,
+        packageManager: 'npm',
+        registryUrl: customRegistry,
+      });
     } catch (err) {
       if (signal?.aborted || err?.name === 'AbortError') {
         return { success: false, results: [], canceled: true };
       }
       // Fallback über CLI (z. B. bei benutzerdefinierter Registry / Proxy in .npmrc)
-      const res = await runNpm(['search', cleanQuery, '--json'], { signal, timeoutMs: 60000 });
+      const searchArgs = customRegistry
+        ? ['search', cleanQuery, '--json', '--registry', customRegistry]
+        : ['search', cleanQuery, '--json'];
+      const res = await runNpm(searchArgs, { signal, timeoutMs: 60000 });
       if (res.aborted) return { success: false, results: [], canceled: true };
       if (res.notFound || (res.code !== 0 && !res.stdout)) {
         return {
@@ -134,7 +149,11 @@ export const npmProvider = {
   },
 
   async listUpgrades({ signal = null } = {}) {
-    const res = await runNpm(['outdated', '-g', '--json'], { signal, timeoutMs: 60000 });
+    const customRegistry = getPrimaryCustomRegistryUrl('npm');
+    const args = customRegistry
+      ? ['outdated', '-g', '--json', '--registry', customRegistry]
+      : ['outdated', '-g', '--json'];
+    const res = await runNpm(args, { signal, timeoutMs: 60000 });
     if (res.aborted) return { success: false, upgrades: [], canceled: true };
     if (res.notFound) {
       return { success: false, upgrades: [], error: res.error || 'npm ist auf diesem PC nicht verfügbar.' };
@@ -154,7 +173,12 @@ export const npmProvider = {
   },
 
   async show(packageId, { forceRefresh = false, signal = null } = {}) {
-    return showNpmRegistryPackage(packageId, { packageManager: 'npm', forceRefresh, signal });
+    return showNpmRegistryPackage(packageId, {
+      packageManager: 'npm',
+      forceRefresh,
+      signal,
+      registryUrl: getPrimaryCustomRegistryUrl('npm'),
+    });
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {
@@ -185,7 +209,11 @@ export const npmProvider = {
     }
 
     const activeSignal = job ? job.signal : signal;
-    const res = await runNpm(['install', '-g', spec], { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const customRegistry = getPrimaryCustomRegistryUrl('npm');
+    const installArgs = customRegistry
+      ? ['install', '-g', '--registry', customRegistry, spec]
+      : ['install', '-g', spec];
+    const res = await runNpm(installArgs, { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
 
     if (activeSignal?.aborted || res.aborted) {
       job?.finish('canceled', 'npm-Aktion abgebrochen.', { autoRemoveMs: 3500 });
@@ -243,4 +271,6 @@ export const npmProvider = {
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
   },
+
+  ...npmSourceManager,
 };

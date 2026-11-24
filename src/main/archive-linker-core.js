@@ -113,6 +113,9 @@ function buildLinksObject(pkgMeta) {
   }
   const links = {};
   if (pkgMeta?.homepage) links.Homepage = pkgMeta.homepage;
+  if (pkgMeta?.repositoryUrl && pkgMeta.repositoryUrl !== pkgMeta.homepage) {
+    links.Repository = pkgMeta.repositoryUrl;
+  }
   if (pkgMeta?.releaseNotesUrl) links.Changelog = pkgMeta.releaseNotesUrl;
   return links;
 }
@@ -149,11 +152,11 @@ export function buildLinkedMetaObject({
     if (cleanPm && cleanPid) {
       nextMeta.packageManager = cleanPm;
       nextMeta.packageId = cleanPid;
-    }
-    if (cleanPm === 'winget' && cleanPid) {
-      nextMeta.wingetId = cleanPid;
+      if (cleanPm === 'winget') {
+        nextMeta.wingetId = cleanPid;
+      }
       if (!nextMeta.webSourceType || nextMeta.webSourceType === 'none') {
-        nextMeta.webSourceType = 'winget';
+        nextMeta.webSourceType = cleanPm === 'winget' ? 'winget' : 'provider';
       }
     }
     if (fetchedPkg?.version && !nextMeta.webVersion) {
@@ -184,7 +187,7 @@ export function buildLinkedMetaObject({
     installMode: 'interactive',
     silentArgs: '',
     innoInfFile: '',
-    webSourceType: cleanPm === 'winget' && cleanPid ? 'winget' : 'none',
+    webSourceType: cleanPm && cleanPid ? (cleanPm === 'winget' ? 'winget' : 'provider') : 'none',
     webVersion: fetchedPkg?.version || '',
     links: buildLinksObject(fetchedPkg),
   };

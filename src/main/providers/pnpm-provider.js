@@ -2,11 +2,16 @@ import path from 'node:path';
 import { isValidNpmPackageName, parsePnpmListJson } from '../../shared/npm-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli } from './cli-runner.js';
+import { createConfigSourceManager, getPrimaryCustomRegistryUrl } from './config-sources-helper.js';
 import { createCliAvailabilityChecker, createWingetBootstrapRunner } from './manager-bootstrap.js';
 import { checkNpmRegistryUpdates, searchNpmRegistry, showNpmRegistryPackage } from './npm-registry-client.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const pnpmSourceManager = createConfigSourceManager({
+  providerId: 'pnpm',
+  defaultSource: { name: 'npmjs', url: 'https://registry.npmjs.org' },
+});
 
 function getPnpmExtraPaths() {
   const candidates = [];
@@ -55,6 +60,7 @@ export const pnpmProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -82,7 +88,12 @@ export const pnpmProvider = {
 
   async search(query, { limit = 25, signal = null } = {}) {
     try {
-      return await searchNpmRegistry(query, { limit, signal, packageManager: 'pnpm' });
+      return await searchNpmRegistry(query, {
+        limit,
+        signal,
+        packageManager: 'pnpm',
+        registryUrl: getPrimaryCustomRegistryUrl('pnpm'),
+      });
     } catch (err) {
       if (signal?.aborted || err?.name === 'AbortError') {
         return { success: false, results: [], canceled: true };
@@ -114,13 +125,22 @@ export const pnpmProvider = {
     if (installed.canceled) return { success: false, upgrades: [], canceled: true };
     if (!installed.success) return { success: false, upgrades: [], error: installed.error };
 
-    const upgrades = await checkNpmRegistryUpdates(installed.packages, { packageManager: 'pnpm', signal });
+    const upgrades = await checkNpmRegistryUpdates(installed.packages, {
+      packageManager: 'pnpm',
+      signal,
+      registryUrl: getPrimaryCustomRegistryUrl('pnpm'),
+    });
     if (signal?.aborted) return { success: false, upgrades: [], canceled: true };
     return { success: true, upgrades };
   },
 
   async show(packageId, { forceRefresh = false, signal = null } = {}) {
-    return showNpmRegistryPackage(packageId, { packageManager: 'pnpm', forceRefresh, signal });
+    return showNpmRegistryPackage(packageId, {
+      packageManager: 'pnpm',
+      forceRefresh,
+      signal,
+      registryUrl: getPrimaryCustomRegistryUrl('pnpm'),
+    });
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {
@@ -151,7 +171,9 @@ export const pnpmProvider = {
     }
 
     const activeSignal = job ? job.signal : signal;
-    const res = await runPnpm(['add', '-g', spec], { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const customRegistry = getPrimaryCustomRegistryUrl('pnpm');
+    const installArgs = customRegistry ? ['add', '-g', '--registry', customRegistry, spec] : ['add', '-g', spec];
+    const res = await runPnpm(installArgs, { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
 
     if (activeSignal?.aborted || res.aborted) {
       job?.finish('canceled', 'pnpm-Aktion abgebrochen.', { autoRemoveMs: 3500 });
@@ -209,4 +231,6 @@ export const pnpmProvider = {
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
   },
+
+  ...pnpmSourceManager,
 };

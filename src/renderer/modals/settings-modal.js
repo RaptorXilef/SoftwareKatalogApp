@@ -7,6 +7,7 @@ import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
+import { openProviderSourcesModal } from './provider-sources-modal.js';
 
 let activeSettingsToken = 0;
 
@@ -121,14 +122,26 @@ export async function renderSettingsModal() {
               avail && !avail.available && p.canInstallManager && p.requiresAdminForBootstrap
             );
 
-            let actionHtml = '';
-            if (isBusy) {
-              actionHtml = '<button type="button" class="btn btn-ghost btn-xs" disabled>⏳ Läuft...</button>';
-            } else if (avail && !avail.available && p.canInstallManager) {
-              actionHtml = `<button type="button" class="btn btn-primary btn-xs" data-provider-install="${escapeHTML(p.id)}" title="Paketmanager direkt installieren">⬇️ Installieren</button>`;
-            } else if (avail?.available && p.canUninstallManager) {
-              actionHtml = `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="Paketmanager deinstallieren (2x klicken)">🗑️ Deinstallieren</button>`;
+            const actionBtns = [];
+            const isConfigSourceMgr = ['npm', 'bun', 'pnpm', 'pip', 'uv'].includes(p.id);
+            if (p.capabilities?.manageSources) {
+              const sourcesDisabled = isBusy || (!isConfigSourceMgr && Boolean(avail && !avail.available));
+              actionBtns.push(
+                `<button type="button" class="btn btn-ghost btn-xs" data-provider-sources="${escapeHTML(p.id)}" ${sourcesDisabled ? 'disabled' : ''} title="Bezugsquellen verwalten">🌐 Quellen verwalten</button>`
+              );
             }
+            if (isBusy) {
+              actionBtns.push('<button type="button" class="btn btn-ghost btn-xs" disabled>⏳ Läuft...</button>');
+            } else if (avail && !avail.available && p.canInstallManager) {
+              actionBtns.push(
+                `<button type="button" class="btn btn-primary btn-xs" data-provider-install="${escapeHTML(p.id)}" title="Paketmanager direkt installieren">⬇️ Installieren</button>`
+              );
+            } else if (avail?.available && p.canUninstallManager) {
+              actionBtns.push(
+                `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="Paketmanager deinstallieren (2x klicken)">🗑️ Deinstallieren</button>`
+              );
+            }
+            const actionHtml = actionBtns.join('');
 
             const extraSettingHtml =
               p.id === 'vcpkg'
@@ -538,6 +551,21 @@ export async function renderSettingsModal() {
 
   modal.onclick = async (e) => {
     if (!(e.target instanceof Element)) return;
+
+    const sourcesBtn = e.target.closest('[data-provider-sources]');
+    if (sourcesBtn instanceof HTMLButtonElement) {
+      const providerId = sourcesBtn.dataset.providerSources;
+      if (!providerId || busyProviderIds.has(providerId)) return;
+      const providerObj = providers.find((p) => p.id === providerId) || { id: providerId, name: providerId };
+      const res = await openProviderSourcesModal(providerObj);
+      if (modalToken !== activeSettingsToken) return;
+      if (res?.changed) {
+        const refreshedSettings = await window.electronAPI.getSettings();
+        if (modalToken !== activeSettingsToken) return;
+        s.providerSettings = refreshedSettings?.providerSettings || s.providerSettings;
+      }
+      return;
+    }
 
     const installProviderBtn = e.target.closest('[data-provider-install]');
     if (installProviderBtn instanceof HTMLButtonElement) {

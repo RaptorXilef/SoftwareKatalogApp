@@ -144,4 +144,36 @@ describe('archive-linker (Kollision, Link-Modus & auto-id)', () => {
     assert.equal(saved.wingetId, 'VideoLAN.VLC');
     assert.equal(saved.webVersion, '3.0.24');
   });
+
+  it('unterstuetzt generische Nicht-Winget-Provider mit webSourceType="provider" ohne wingetId', async () => {
+    const res = writeLinkedMetaToTarget({
+      archiveRootDir: archiveRoot,
+      saveMode: 'auto-id',
+      collisionMode: 'create',
+      packageManager: 'scoop',
+      packageId: 'extras/neovim',
+      softwareName: 'Neovim',
+      fetchedPkg: {
+        name: 'Neovim',
+        version: '0.10.2',
+        description: 'Vim-fork focused on extensibility and usability',
+        homepage: 'https://neovim.io/',
+        repositoryUrl: 'https://github.com/neovim/neovim',
+      },
+    });
+
+    assert.equal(res.success, true);
+    assert.equal(path.basename(res.targetDir), 'extras_neovim');
+    const saved = JSON.parse(await fs.promises.readFile(path.join(res.targetDir, '_metadata', 'meta.json'), 'utf-8'));
+    assert.equal(saved.name, 'Neovim');
+    assert.equal(saved.packageManager, 'scoop');
+    assert.equal(saved.packageId, 'extras/neovim');
+    assert.equal(saved.wingetId, '');
+    assert.equal(saved.webSourceType, 'provider');
+    assert.equal(saved.webVersion, '0.10.2');
+    assert.deepEqual(saved.links, {
+      Homepage: 'https://neovim.io/',
+      Repository: 'https://github.com/neovim/neovim',
+    });
+  });
 });

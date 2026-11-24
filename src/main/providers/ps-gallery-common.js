@@ -1,4 +1,10 @@
 import {
+  isValidSourceName,
+  isValidSourceUrl,
+  PROVIDER_SOURCE_TEMPLATES,
+  parsePowerShellRepositoriesJson,
+} from '../../shared/provider-sources-parser.js';
+import {
   isValidPsModuleName,
   parsePowerShellVersionOutput,
   parsePsGalleryODataAtomXml,
@@ -189,6 +195,7 @@ export function createPowerShellGalleryProvider({
       install: true,
       uninstall: true,
       supportsArchiveDownload: false,
+      manageSources: true,
     },
 
     async checkAvailability({ signal = null } = {}) {
@@ -525,6 +532,130 @@ export function createPowerShellGalleryProvider({
       const errMsg = (res.stderr || res.stdout || res.error || `${name}-Fehlercode ${res.code}`).trim();
       job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
       return { success: false, exitCode: res.code, error: errMsg };
+    },
+
+    async listSources({ signal = null } = {}) {
+      const listScript = preferPsResourceGet
+        ? `
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command Get-PSResourceRepository -ErrorAction SilentlyContinue) {
+            $repos = @(Get-PSResourceRepository | Select-Object Name,@{Name='Uri';Expression={[string]$_.Uri}},Trusted,Priority)
+          } else {
+            $repos = @(Get-PSRepository | Select-Object Name,SourceLocation,InstallationPolicy)
+          }
+          ConvertTo-Json -InputObject $repos -Depth 3 -Compress
+        `
+        : `
+          $ErrorActionPreference = 'Stop'
+          $repos = @(Get-PSRepository | Select-Object Name,SourceLocation,InstallationPolicy)
+          ConvertTo-Json -InputObject $repos -Depth 3 -Compress
+        `;
+
+      const res = await runRuntime(listScript, { signal, timeoutMs: 30000 });
+      if (res.aborted) return { success: false, canceled: true, sources: [] };
+      if (res.notFound || (res.code !== 0 && !res.stdout)) {
+        return {
+          success: false,
+          sources: [],
+          templates: PROVIDER_SOURCE_TEMPLATES[id] || [],
+          requiresAdmin: false,
+          mode: 'cli',
+          error: res.error || res.stderr || `${name}-Repositories konnten nicht gelesen werden.`,
+        };
+      }
+
+      const sources = parsePowerShellRepositoriesJson(res.stdout).map((repo) => ({
+        ...repo,
+        builtIn: false,
+      }));
+      return {
+        success: true,
+        mode: 'cli',
+        requiresAdmin: false,
+        sources,
+        templates: PROVIDER_SOURCE_TEMPLATES[id] || [],
+        hint: `Verwaltet Paketquellen direkt ueber ${preferPsResourceGet ? 'PSResourceGet / PowerShellGet' : 'PowerShellGet'} in ${name}.`,
+      };
+    },
+
+    async addSource({ name: sourceName = '', url = '' } = {}, { signal = null } = {}) {
+      const cleanName = String(sourceName || '').trim();
+      const cleanUrl = String(url || '').trim();
+      if (!isValidSourceName(cleanName)) {
+        return { success: false, error: 'Ungueltiger Repository-Name (erlaubt: Buchstaben, Ziffern, . _ -).' };
+      }
+      const isPsGalleryDefault = cleanName.toLowerCase() === 'psgallery' && !cleanUrl;
+      if (!isPsGalleryDefault && !isValidSourceUrl(cleanUrl)) {
+        return { success: false, error: 'Bitte eine gueltige HTTP/HTTPS-URL angeben.' };
+      }
+
+      const safeName = escapeSingleQuotedPs(cleanName);
+      const safeUrl = escapeSingleQuotedPs(cleanUrl);
+      const isPsGalleryName = cleanName.toLowerCase() === 'psgallery';
+
+      const psScript = preferPsResourceGet
+        ? `
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command Register-PSResourceRepository -ErrorAction SilentlyContinue) {
+            ${
+              isPsGalleryName
+                ? 'Register-PSResourceRepository -PSGallery -Trusted'
+                : `Register-PSResourceRepository -Name '${safeName}' -Uri '${safeUrl}' -Trusted`
+            }
+          } else {
+            ${
+              isPsGalleryName
+                ? 'Register-PSRepository -Default -InstallationPolicy Trusted'
+                : `Register-PSRepository -Name '${safeName}' -SourceLocation '${safeUrl}' -InstallationPolicy Trusted`
+            }
+          }
+        `
+        : `
+          $ErrorActionPreference = 'Stop'
+          ${
+            isPsGalleryName
+              ? 'Register-PSRepository -Default -InstallationPolicy Trusted'
+              : `Register-PSRepository -Name '${safeName}' -SourceLocation '${safeUrl}' -InstallationPolicy Trusted`
+          }
+        `;
+
+      const res = await runRuntime(psScript, { signal, timeoutMs: 45000 });
+      if (res.aborted) return { success: false, canceled: true };
+      if (res.code === 0) return { success: true };
+      return {
+        success: false,
+        error: (res.stderr || res.stdout || res.error || `${name}-Repository konnte nicht registriert werden.`).trim(),
+      };
+    },
+
+    async removeSource(sourceName, { signal = null } = {}) {
+      const cleanName = String(sourceName || '').trim();
+      if (!isValidSourceName(cleanName)) {
+        return { success: false, error: 'Ungueltiger Repository-Name.' };
+      }
+
+      const safeName = escapeSingleQuotedPs(cleanName);
+      const psScript = preferPsResourceGet
+        ? `
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command Unregister-PSResourceRepository -ErrorAction SilentlyContinue) {
+            Unregister-PSResourceRepository -Name '${safeName}'
+          } else {
+            Unregister-PSRepository -Name '${safeName}'
+          }
+        `
+        : `
+          $ErrorActionPreference = 'Stop'
+          Unregister-PSRepository -Name '${safeName}'
+        `;
+
+      const res = await runRuntime(psScript, { signal, timeoutMs: 45000 });
+      if (res.aborted) return { success: false, canceled: true };
+      if (res.code === 0) return { success: true };
+      return {
+        success: false,
+        error: (res.stderr || res.stdout || res.error || `${name}-Repository konnte nicht entfernt werden.`).trim(),
+      };
     },
   };
 }

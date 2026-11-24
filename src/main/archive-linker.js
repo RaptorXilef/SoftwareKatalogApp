@@ -11,6 +11,57 @@ import { getConfig } from './config.js';
 import { getProvider } from './providers/registry.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { downloadWebUpdate } from './web-updater.js';
+import { extractCachedAppIcon } from './windows-tools.js';
+
+const ICON_EXTS = new Set(['.png', '.ico', '.svg', '.webp', '.jpg', '.jpeg', '.gif', '.avif']);
+
+async function ensureArchiveIcon({ resolvedTargetDir, metaDir, nextMeta, fetchedPkg, metadata, cleanPm, cleanPid }) {
+  try {
+    const existingFiles = await fs.promises.readdir(metaDir);
+    if (existingFiles.some((f) => f.toLowerCase().startsWith('icon.'))) {
+      return;
+    }
+
+    const directIcon = typeof metadata?.icon === 'string' ? metadata.icon.trim() : '';
+    if (directIcon && fs.existsSync(directIcon)) {
+      const ext = path.extname(directIcon).toLowerCase();
+      if (ICON_EXTS.has(ext)) {
+        await fs.promises.copyFile(directIcon, path.join(metaDir, `icon${ext}`));
+        return;
+      }
+    }
+
+    const metaLinks =
+      nextMeta.links && typeof nextMeta.links === 'object' && !Array.isArray(nextMeta.links)
+        ? Object.entries(nextMeta.links).map(([label, url]) => ({ label, url }))
+        : [];
+
+    const iconRes = await extractCachedAppIcon({
+      id: metadata?.id || `${cleanPm || 'archive'}:${cleanPid || path.basename(resolvedTargetDir)}`,
+      name: nextMeta.name || '',
+      displayIcon: metadata?.displayIcon || '',
+      installLocation: metadata?.installLocation || '',
+      executablePath: metadata?.validInstallPath || metadata?.executablePath || metadata?.installPaths?.[0] || '',
+      uninstallString: metadata?.uninstallString || '',
+      packageManager: cleanPm,
+      packageId: cleanPid,
+      appxPackageFamilyName: metadata?.appxPackageFamilyName || '',
+      homepage: fetchedPkg?.homepage || metadata?.homepage || '',
+      webVersionUrl: nextMeta.webVersionUrl || '',
+      links: metaLinks,
+      allowOnlineFallback: true,
+    });
+
+    if (iconRes?.success && iconRes.iconPath && fs.existsSync(iconRes.iconPath)) {
+      const ext = path.extname(iconRes.iconPath).toLowerCase() || '.png';
+      if (ICON_EXTS.has(ext)) {
+        await fs.promises.copyFile(iconRes.iconPath, path.join(metaDir, `icon${ext}`));
+      }
+    }
+  } catch {
+    // Fehlgeschlagenes Icon darf die Archiv-Aufnahme nicht abbrechen
+  }
+}
 
 /**
  * Prüft vor dem Schreiben, ob der Zielordner in einem konfigurierten Archiv liegt und ob bereits `_metadata/` existiert.
@@ -160,6 +211,16 @@ export async function linkPackageToArchive({
 
   fs.writeFileSync(metaFile, JSON.stringify(nextMeta, null, 2), 'utf-8');
 
+  await ensureArchiveIcon({
+    resolvedTargetDir,
+    metaDir,
+    nextMeta,
+    fetchedPkg,
+    metadata,
+    cleanPm,
+    cleanPid,
+  });
+
   const scanRes = await scanSingleFolder(resolvedTargetDir);
   if (!scanRes.success) {
     return { success: false, error: scanRes.error || 'Einzelordner-Rescan fehlgeschlagen.' };
@@ -169,7 +230,9 @@ export async function linkPackageToArchive({
   let linkedItem = catalogItems.find((i) => path.resolve(i.path) === resolvedTargetDir) || null;
   let downloadResult = null;
 
-  if (effectiveDownloadSetup && linkedItem) {
+  const provider = cleanPm ? getProvider(cleanPm) : null;
+  const supportsArchiveDownload = Boolean(provider?.capabilities?.supportsArchiveDownload);
+  if (effectiveDownloadSetup && supportsArchiveDownload && linkedItem) {
     downloadResult = await downloadWebUpdate(linkedItem, {
       saveIntoLastFolder,
       useJob: downloadUseJob,

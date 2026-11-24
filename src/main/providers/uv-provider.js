@@ -3,11 +3,20 @@ import path from 'node:path';
 import { isValidPythonPackageName, parseUvToolListOutput, parseUvVersionOutput } from '../../shared/python-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli } from './cli-runner.js';
+import {
+  createConfigSourceManager,
+  getAdditionalCustomRegistryUrls,
+  getPrimaryCustomRegistryUrl,
+} from './config-sources-helper.js';
 import { createCliAvailabilityChecker, createWingetBootstrapRunner } from './manager-bootstrap.js';
 import { checkPyPiUpdates, searchPyPiPackages, showPyPiPackage } from './pypi-client.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const uvSourceManager = createConfigSourceManager({
+  providerId: 'uv',
+  defaultSource: { name: 'pypi', url: 'https://pypi.org/simple' },
+});
 
 function getUvExtraPaths() {
   const candidates = [
@@ -48,6 +57,7 @@ export const uvProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -75,7 +85,12 @@ export const uvProvider = {
   }),
 
   async search(query, { limit = 25, signal = null } = {}) {
-    return searchPyPiPackages(query, { limit, signal, packageManager: 'uv' });
+    return searchPyPiPackages(query, {
+      limit,
+      signal,
+      packageManager: 'uv',
+      indexUrl: getPrimaryCustomRegistryUrl('uv'),
+    });
   },
 
   async listInstalled({ signal = null } = {}) {
@@ -98,13 +113,22 @@ export const uvProvider = {
     if (installed.canceled) return { success: false, upgrades: [], canceled: true };
     if (!installed.success) return { success: false, upgrades: [], error: installed.error };
 
-    const upgrades = await checkPyPiUpdates(installed.packages, { packageManager: 'uv', signal });
+    const upgrades = await checkPyPiUpdates(installed.packages, {
+      packageManager: 'uv',
+      signal,
+      indexUrl: getPrimaryCustomRegistryUrl('uv'),
+    });
     if (signal?.aborted) return { success: false, upgrades: [], canceled: true };
     return { success: true, upgrades };
   },
 
   async show(packageId, { forceRefresh = false, signal = null } = {}) {
-    return showPyPiPackage(packageId, { packageManager: 'uv', forceRefresh, signal });
+    return showPyPiPackage(packageId, {
+      packageManager: 'uv',
+      forceRefresh,
+      signal,
+      indexUrl: getPrimaryCustomRegistryUrl('uv'),
+    });
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {
@@ -118,10 +142,15 @@ export const uvProvider = {
       return { success: false, error: 'Ungueltige Versionsangabe.' };
     }
 
-    const args =
+    const baseArgs =
       upgrade && !cleanVer
         ? ['tool', 'upgrade', cleanId]
         : ['tool', 'install', cleanVer ? `${cleanId}==${cleanVer}` : cleanId];
+    const primaryIndex = getPrimaryCustomRegistryUrl('uv');
+    const extraIndices = getAdditionalCustomRegistryUrls('uv');
+    const args = [...baseArgs];
+    if (primaryIndex) args.push('--index-url', primaryIndex);
+    for (const extra of extraIndices) args.push('--extra-index-url', extra);
 
     let job = null;
     if (useJob) {
@@ -199,4 +228,6 @@ export const uvProvider = {
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
   },
+
+  ...uvSourceManager,
 };

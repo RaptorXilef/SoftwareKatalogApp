@@ -9,6 +9,7 @@ import {
 } from '../../shared/npm-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli } from './cli-runner.js';
+import { createConfigSourceManager, getPrimaryCustomRegistryUrl } from './config-sources-helper.js';
 import {
   createCliAvailabilityChecker,
   createPowerShellBootstrapRunner,
@@ -18,6 +19,10 @@ import { checkNpmRegistryUpdates, searchNpmRegistry, showNpmRegistryPackage } fr
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const bunSourceManager = createConfigSourceManager({
+  providerId: 'bun',
+  defaultSource: { name: 'npmjs', url: 'https://registry.npmjs.org' },
+});
 
 function getBunInstallRoot() {
   return process.env.BUN_INSTALL ? path.resolve(process.env.BUN_INSTALL) : path.join(os.homedir(), '.bun');
@@ -70,6 +75,7 @@ export const bunProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   checkAvailability: createCliAvailabilityChecker({
@@ -100,7 +106,12 @@ export const bunProvider = {
 
   async search(query, { limit = 25, signal = null } = {}) {
     try {
-      return await searchNpmRegistry(query, { limit, signal, packageManager: 'bun' });
+      return await searchNpmRegistry(query, {
+        limit,
+        signal,
+        packageManager: 'bun',
+        registryUrl: getPrimaryCustomRegistryUrl('bun'),
+      });
     } catch (err) {
       if (signal?.aborted || err?.name === 'AbortError') {
         return { success: false, results: [], canceled: true };
@@ -138,13 +149,22 @@ export const bunProvider = {
     if (installed.canceled) return { success: false, upgrades: [], canceled: true };
     if (!installed.success) return { success: false, upgrades: [], error: installed.error };
 
-    const upgrades = await checkNpmRegistryUpdates(installed.packages, { packageManager: 'bun', signal });
+    const upgrades = await checkNpmRegistryUpdates(installed.packages, {
+      packageManager: 'bun',
+      signal,
+      registryUrl: getPrimaryCustomRegistryUrl('bun'),
+    });
     if (signal?.aborted) return { success: false, upgrades: [], canceled: true };
     return { success: true, upgrades };
   },
 
   async show(packageId, { forceRefresh = false, signal = null } = {}) {
-    return showNpmRegistryPackage(packageId, { packageManager: 'bun', forceRefresh, signal });
+    return showNpmRegistryPackage(packageId, {
+      packageManager: 'bun',
+      forceRefresh,
+      signal,
+      registryUrl: getPrimaryCustomRegistryUrl('bun'),
+    });
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {
@@ -175,7 +195,9 @@ export const bunProvider = {
     }
 
     const activeSignal = job ? job.signal : signal;
-    const res = await runBun(['add', '-g', spec], { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const customRegistry = getPrimaryCustomRegistryUrl('bun');
+    const installArgs = customRegistry ? ['add', '-g', '--registry', customRegistry, spec] : ['add', '-g', spec];
+    const res = await runBun(installArgs, { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
 
     if (activeSignal?.aborted || res.aborted) {
       job?.finish('canceled', 'Bun-Aktion abgebrochen.', { autoRemoveMs: 3500 });
@@ -233,4 +255,6 @@ export const bunProvider = {
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
   },
+
+  ...bunSourceManager,
 };

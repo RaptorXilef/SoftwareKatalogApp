@@ -193,15 +193,26 @@ export async function checkSingleWebSource(
       if (!resolvedWingetId) return { success: false, error: 'Keine Winget-ID angegeben.' };
       result = await fetchWingetInfo(resolvedWingetId, signal);
     } else if (effectiveType === 'provider') {
-      const prov = getProvider(resolvedPm);
-      if (!prov?.capabilities?.show || !resolvedPkgId) {
-        return { success: false, error: 'Provider unterstützt keine Online-Versionsprüfung.' };
+      if (!resolvedPm) return { success: false, error: 'Bitte zuerst einen Paketmanager auswaehlen.' };
+      if (!resolvedPkgId) return { success: false, error: 'Keine Paket-ID angegeben.' };
+      if (resolvedPm === 'winget') {
+        result = await fetchWingetInfo(resolvedPkgId, signal);
+      } else {
+        const prov = getProvider(resolvedPm);
+        if (!prov?.capabilities?.show) {
+          return { success: false, error: 'Provider unterstützt keine Online-Versionsprüfung.' };
+        }
+        const res = await prov.show(resolvedPkgId, { forceRefresh: true, signal });
+        result =
+          res.success && res.package?.version
+            ? {
+                success: true,
+                version: res.package.version,
+                downloadUrl: res.package.downloadUrl || '',
+                package: res.package,
+              }
+            : { success: false, error: res.error || `Paket "${resolvedPkgId}" nicht gefunden.` };
       }
-      const res = await prov.show(resolvedPkgId, { forceRefresh: true, signal });
-      result =
-        res.success && res.package?.version
-          ? { success: true, version: res.package.version, package: res.package }
-          : { success: false, error: res.error || `Paket "${resolvedPkgId}" nicht gefunden.` };
     } else if (effectiveType === 'github') {
       if (!url) return { success: false, error: 'Keine GitHub-URL angegeben.' };
       result = await fetchGitHubRelease(url, githubAssetPattern, signal);
@@ -261,12 +272,19 @@ export async function checkAllWebVersions() {
 
     let checked = 0;
     let updatedCount = 0;
-    const wingetItems = [];
+    const cliProviderIds = new Set(['winget', 'msstore', 'scoop', 'chocolatey', 'vcpkg', 'pwsh7', 'pwsh5']);
+    const cliItems = [];
     const httpItems = [];
 
     for (const item of itemsToCheck) {
-      const isWinget = item.webSourceType === 'winget' || (!item.webSourceType && Boolean(getEffectiveWingetId(item)));
-      if (isWinget) wingetItems.push(item);
+      const pm = String(item.packageManager || (getEffectiveWingetId(item) ? 'winget' : ''))
+        .trim()
+        .toLowerCase();
+      const isCli =
+        item.webSourceType === 'winget' ||
+        (!item.webSourceType && Boolean(getEffectiveWingetId(item))) ||
+        cliProviderIds.has(pm);
+      if (isCli) cliItems.push(item);
       else httpItems.push(item);
     }
 
@@ -319,8 +337,8 @@ export async function checkAllWebVersions() {
       await Promise.all(executing);
     };
 
-    // HTTP/GitHub schneller (6 parallel), Winget gedrosselt (2 parallel gegen Cache-Locks)
-    await Promise.all([runPool(httpItems, 6), runPool(wingetItems, 2)]);
+    // HTTP/GitHub schneller (6 parallel), CLI-Provider gedrosselt (2 parallel gegen Cache-/CLI-Locks)
+    await Promise.all([runPool(httpItems, 6), runPool(cliItems, 2)]);
 
     if (job.signal.aborted) {
       if (updatedCount > 0) writeCatalogAtomic(catData);
@@ -898,14 +916,30 @@ export async function fetchSoftwareMetadata({
   url = '',
 }) {
   try {
+    const resolvedPm = String(packageManager || '')
+      .trim()
+      .toLowerCase();
+    const resolvedPkgId = String(packageId || '').trim();
     const resolvedWingetId = getEffectiveWingetId({ packageManager, packageId, wingetId });
+    const hasGenericProvider = Boolean(
+      resolvedPm && resolvedPm !== 'winget' && resolvedPm !== 'archive' && resolvedPkgId
+    );
     const effective =
       sourceType ||
-      (resolvedWingetId ? 'winget' : url?.toLowerCase().includes('github.com') ? 'github' : url ? 'web' : 'none');
+      (resolvedWingetId
+        ? 'winget'
+        : hasGenericProvider
+          ? 'provider'
+          : url?.toLowerCase().includes('github.com')
+            ? 'github'
+            : url
+              ? 'web'
+              : 'none');
 
-    if (effective === 'winget') {
-      if (!resolvedWingetId) return { success: false, error: 'Bitte zuerst eine Winget-ID auswählen.' };
-      const res = await wingetProvider.show(resolvedWingetId, { preferGerman: true });
+    if (effective === 'winget' || (effective === 'provider' && resolvedPm === 'winget')) {
+      const targetWingetId = resolvedWingetId || resolvedPkgId;
+      if (!targetWingetId) return { success: false, error: 'Bitte zuerst eine Winget-ID auswählen.' };
+      const res = await wingetProvider.show(targetWingetId, { preferGerman: true });
       if (!res.success || !res.package) return { success: false, error: res.error || 'Winget-Paket nicht gefunden.' };
 
       const p = res.package;
@@ -922,6 +956,38 @@ export async function fetchSoftwareMetadata({
           tags: (p.tags || []).slice(0, 10),
           links,
           version: p.version,
+        },
+      };
+    }
+
+    if (effective === 'provider') {
+      if (!resolvedPm || !resolvedPkgId) {
+        return { success: false, error: 'Bitte zuerst einen Paketmanager und eine Paket-ID auswaehlen.' };
+      }
+      const prov = getProvider(resolvedPm);
+      if (!prov?.capabilities?.show) {
+        return { success: false, error: `Provider "${resolvedPm}" unterstuetzt keinen Metadaten-Abruf.` };
+      }
+      const res = await prov.show(resolvedPkgId, { preferGerman: true });
+      if (!res.success || !res.package) {
+        return { success: false, error: res.error || `Paket "${resolvedPkgId}" nicht gefunden.` };
+      }
+
+      const p = res.package;
+      const links = {};
+      if (p.homepage) links.Homepage = p.homepage;
+      if (p.repositoryUrl && p.repositoryUrl !== p.homepage) links.Repository = p.repositoryUrl;
+      if (p.releaseNotesUrl) links.Changelog = p.releaseNotesUrl;
+
+      return {
+        success: true,
+        sourceLabel: prov.name || resolvedPm,
+        metadata: {
+          name: p.name || '',
+          description: p.description || p.shortDescription || '',
+          tags: (p.tags || []).slice(0, 10),
+          links,
+          version: p.version || '',
         },
       };
     }
@@ -991,17 +1057,23 @@ const changelogCache = new Map();
 const CHANGELOG_TTL_MS = 30 * 60 * 1000;
 
 export async function fetchChangelog(item) {
+  const resolvedPm = String(item.packageManager || '')
+    .trim()
+    .toLowerCase();
+  const resolvedPkgId = String(item.packageId || '').trim();
   const resolvedWingetId = getEffectiveWingetId(item);
   const sourceType =
     item.webSourceType && item.webSourceType !== 'none'
       ? item.webSourceType
       : resolvedWingetId
         ? 'winget'
-        : item.webVersionUrl?.toLowerCase().includes('github.com')
-          ? 'github'
-          : 'none';
+        : resolvedPm && resolvedPm !== 'archive' && resolvedPkgId
+          ? 'provider'
+          : item.webVersionUrl?.toLowerCase().includes('github.com')
+            ? 'github'
+            : 'none';
 
-  const cacheKey = `${item.id}:${sourceType}:${resolvedWingetId || item.webVersionUrl || ''}`;
+  const cacheKey = `${item.id}:${sourceType}:${resolvedPm}:${resolvedWingetId || resolvedPkgId || item.webVersionUrl || ''}`;
   const cached = changelogCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CHANGELOG_TTL_MS) {
     return cached.data;
@@ -1064,6 +1136,63 @@ export async function fetchChangelog(item) {
         entries,
         externalUrl: p.releaseNotesUrl || p.homepage || '',
       };
+    } else if (sourceType === 'provider' && resolvedPm && resolvedPkgId) {
+      const prov = getProvider(resolvedPm);
+      if (prov?.capabilities?.show) {
+        const res = await prov.show(resolvedPkgId, { preferGerman: true });
+        if (!res.success || !res.package) {
+          return { success: false, error: res.error || 'Paketinformationen konnten nicht geladen werden.' };
+        }
+        const p = res.package;
+        const repoUrl = String(p.repositoryUrl || p.homepage || '').trim();
+        const ghMatch = repoUrl.match(/github\.com\/([^/]+\/[^/?#]+)/i);
+        if (ghMatch && !p.releaseNotes) {
+          const repo = ghMatch[1].replace(/\.git$/i, '');
+          const ghRes = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=8`, {
+            headers: { 'User-Agent': 'SoftwareKatalogApp' },
+          });
+          if (ghRes.ok) {
+            const releases = await ghRes.json();
+            const entries = (Array.isArray(releases) ? releases : [])
+              .filter((r) => !r.draft)
+              .map((r) => ({
+                version: extractVersion(r.tag_name || r.name || '') || r.tag_name || '',
+                title: r.name || r.tag_name || 'Release',
+                date: r.published_at ? r.published_at.slice(0, 10) : '',
+                body: (r.body || '').trim(),
+                url: r.html_url || '',
+                prerelease: Boolean(r.prerelease),
+              }));
+            payload = {
+              success: true,
+              source: `${prov.name || resolvedPm} / GitHub`,
+              entries,
+              externalUrl: `https://github.com/${repo}/releases`,
+            };
+          }
+        }
+        if (!payload.success) {
+          const entries =
+            p.releaseNotes || p.releaseNotesUrl
+              ? [
+                  {
+                    version: p.version || '',
+                    title: p.version ? `Version ${p.version}` : p.name || resolvedPkgId,
+                    date: p.releaseDate || '',
+                    body: p.releaseNotes || 'Kein direkter Text hinterlegt - nutze den externen Changelog-Link.',
+                    url: p.releaseNotesUrl || '',
+                    prerelease: false,
+                  },
+                ]
+              : [];
+          payload = {
+            success: true,
+            source: prov.name || resolvedPm,
+            entries,
+            externalUrl: p.releaseNotesUrl || p.repositoryUrl || p.homepage || '',
+          };
+        }
+      }
     }
 
     if (payload.success) {

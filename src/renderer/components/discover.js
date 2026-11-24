@@ -293,11 +293,12 @@ function renderResults() {
       const isInstalled = findMatchingInstalledPackage(pkg);
       const canDownloadToArchive =
         !isArchiveSource && !archiveMatch && getProviderCapability(providerId, 'supportsArchiveDownload');
+      const canLinkToArchive = !isArchiveSource && !archiveMatch && Boolean(pkg.packageId || pkg.id);
 
       const archiveActionHtml = archiveMatch
         ? `<button type="button" class="btn btn-ghost" data-discover-action="open-archive" data-archive-id="${escapeHTML(archiveMatch.id)}">📂 Im Archiv öffnen</button>`
-        : canDownloadToArchive
-          ? `<button type="button" class="btn btn-archive" data-discover-action="link-archive" data-result-idx="${idx}">🗄️ Ins Archiv laden</button>`
+        : canLinkToArchive
+          ? `<button type="button" class="btn btn-archive" data-discover-action="link-archive" data-result-idx="${idx}">${canDownloadToArchive ? '🗄️ Ins Archiv laden' : '📥 Ins Archiv aufnehmen'}</button>`
           : '';
 
       return `
@@ -470,28 +471,36 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
     }
 
     if (action === 'link-archive') {
-      onLinkToArchive?.({
-        packageManager: providerId,
-        packageId,
-        name: pkg.name || packageId,
-        version: pkg.version || '',
-        shortDescription: pkg.shortDescription || '',
-      });
+      const supportsSetupDl = getProviderCapability(providerId, 'supportsArchiveDownload');
+      onLinkToArchive?.(
+        {
+          id: `remote:${providerId}:${packageId}`,
+          packageManager: providerId,
+          packageId,
+          name: pkg.name || packageId,
+          version: pkg.version || '',
+          shortDescription: pkg.shortDescription || '',
+          homepage: pkg.homepage || '',
+        },
+        { downloadSetup: supportsSetupDl }
+      );
       return;
     }
 
     if (action === 'install') {
       const archiveMatch = findMatchingArchivePackage(pkg);
-      const canDownloadToArchive =
-        providerId !== 'archive' && !archiveMatch && getProviderCapability(providerId, 'supportsArchiveDownload');
+      const canLinkAfterInstall = providerId !== 'archive' && !archiveMatch && Boolean(packageId);
+      const supportsSetupDl = getProviderCapability(providerId, 'supportsArchiveDownload');
       const saveMode = state.settings.archiveSaveMode || 'ask';
 
       const linkPayload = {
+        id: `remote:${providerId}:${packageId}`,
         packageManager: providerId,
         packageId,
         name: pkg.name || packageId,
         version: pkg.version || '',
         shortDescription: pkg.shortDescription || '',
+        homepage: pkg.homepage || '',
       };
 
       btn.disabled = true;
@@ -513,16 +522,16 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
         showToast('Installation wurde abgebrochen.', { type: 'info' });
       } else if (res?.success) {
         await onReload?.({ rescanInstalled: true });
-        if (canDownloadToArchive && saveMode === 'auto-id') {
+        if (canLinkAfterInstall && saveMode === 'auto-id') {
           showToast(`${pkg.name || packageId} installiert - speichere automatisch im Archiv...`, { type: 'info' });
-          await onLinkToArchive?.(linkPayload, { mode: 'auto-id', downloadSetup: true });
-        } else if (canDownloadToArchive && saveMode === 'ask') {
+          await onLinkToArchive?.(linkPayload, { mode: 'auto-id', downloadSetup: supportsSetupDl });
+        } else if (canLinkAfterInstall && saveMode === 'ask') {
           showToast(`${pkg.name || packageId} erfolgreich installiert!`, {
             type: 'success',
             duration: 6000,
             action: {
               label: '📥 Ins Archiv',
-              onClick: () => onLinkToArchive?.(linkPayload, { mode: 'ask', downloadSetup: true }),
+              onClick: () => onLinkToArchive?.(linkPayload, { mode: 'ask', downloadSetup: supportsSetupDl }),
             },
           });
         } else {

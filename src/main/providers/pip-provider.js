@@ -8,11 +8,20 @@ import {
 } from '../../shared/python-parser.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli } from './cli-runner.js';
+import {
+  createConfigSourceManager,
+  getAdditionalCustomRegistryUrls,
+  getPrimaryCustomRegistryUrl,
+} from './config-sources-helper.js';
 import { createWingetBootstrapRunner } from './manager-bootstrap.js';
 import { searchPyPiPackages, showPyPiPackage } from './pypi-client.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const pipSourceManager = createConfigSourceManager({
+  providerId: 'pip',
+  defaultSource: { name: 'pypi', url: 'https://pypi.org/simple' },
+});
 
 function getPythonExtraPaths() {
   const candidates = [];
@@ -128,6 +137,7 @@ export const pipProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: false,
+    manageSources: true,
   },
 
   async checkAvailability({ signal = null } = {}) {
@@ -174,7 +184,12 @@ export const pipProvider = {
   }),
 
   async search(query, { limit = 25, signal = null } = {}) {
-    return searchPyPiPackages(query, { limit, signal, packageManager: 'pip' });
+    return searchPyPiPackages(query, {
+      limit,
+      signal,
+      packageManager: 'pip',
+      indexUrl: getPrimaryCustomRegistryUrl('pip'),
+    });
   },
 
   async listInstalled({ signal = null } = {}) {
@@ -193,7 +208,13 @@ export const pipProvider = {
   },
 
   async listUpgrades({ signal = null } = {}) {
-    const res = await runPip(['list', '--outdated', '--format=json'], { signal, timeoutMs: 90000 });
+    const primaryIndex = getPrimaryCustomRegistryUrl('pip');
+    const extraIndices = getAdditionalCustomRegistryUrls('pip');
+    const args = ['list', '--outdated', '--format=json'];
+    if (primaryIndex) args.push('--index-url', primaryIndex);
+    for (const extra of extraIndices) args.push('--extra-index-url', extra);
+
+    const res = await runPip(args, { signal, timeoutMs: 90000 });
     if (res.aborted) return { success: false, upgrades: [], canceled: true };
     if (res.notFound || (res.code !== 0 && !res.stdout)) {
       return {
@@ -208,7 +229,12 @@ export const pipProvider = {
   },
 
   async show(packageId, { forceRefresh = false, signal = null } = {}) {
-    return showPyPiPackage(packageId, { packageManager: 'pip', forceRefresh, signal });
+    return showPyPiPackage(packageId, {
+      packageManager: 'pip',
+      forceRefresh,
+      signal,
+      indexUrl: getPrimaryCustomRegistryUrl('pip'),
+    });
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {
@@ -223,7 +249,12 @@ export const pipProvider = {
     }
 
     const spec = cleanVer ? `${cleanId}==${cleanVer}` : cleanId;
-    const args = ['install', '--upgrade', spec];
+    const args = ['install', '--upgrade'];
+    const primaryIndex = getPrimaryCustomRegistryUrl('pip');
+    const extraIndices = getAdditionalCustomRegistryUrls('pip');
+    if (primaryIndex) args.push('--index-url', primaryIndex);
+    for (const extra of extraIndices) args.push('--extra-index-url', extra);
+    args.push(spec);
 
     let job = null;
     if (useJob) {
@@ -299,4 +330,6 @@ export const pipProvider = {
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
   },
+
+  ...pipSourceManager,
 };

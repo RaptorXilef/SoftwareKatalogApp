@@ -4,6 +4,13 @@ import { app } from 'electron';
 import { createProviderCache } from '../../shared/provider-cache.js';
 import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import {
+  isValidSourceName,
+  isValidSourceUrl,
+  isValidWingetSourceType,
+  PROVIDER_SOURCE_TEMPLATES,
+  parseWingetSourceListOutput,
+} from '../../shared/provider-sources-parser.js';
+import {
   mergeWingetExportWithList,
   mergeWingetShowResults,
   parseWingetExportJson,
@@ -13,7 +20,7 @@ import {
   parseWingetUpgradeOutput,
 } from '../../shared/winget-parser.js';
 import { createJob } from '../jobs.js';
-import { findBinaryPath, runCli } from './cli-runner.js';
+import { findBinaryPath, runCli, runElevatedPowerShell } from './cli-runner.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
@@ -29,8 +36,46 @@ export function getWingetCache() {
   return cacheInstance;
 }
 
+function escapeSingleQuotedPs(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
 function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return runCli('winget', args, { signal, timeoutMs, windowsHide: true });
+}
+
+async function runWingetWithUacFallback(args, { signal = null } = {}) {
+  const res = await runWinget(args, { signal, timeoutMs: 60000 });
+  if (signal?.aborted || res.aborted) {
+    return { success: false, canceled: true };
+  }
+  if (res.notFound) {
+    return { success: false, error: res.stderr || 'Winget ist auf diesem PC nicht verfuegbar.' };
+  }
+  if (res.code === 0) {
+    return { success: true };
+  }
+
+  const psArgs = args.map((arg) => `'${escapeSingleQuotedPs(arg)}'`).join(' ');
+  const uacRes = await runElevatedPowerShell(`& 'winget' ${psArgs}`, {
+    signal,
+    timeoutMs: 2 * 60 * 1000,
+  });
+  if (uacRes.canceled || uacRes.aborted) {
+    return { success: false, canceled: true };
+  }
+  if (uacRes.code === 0) {
+    return { success: true };
+  }
+  const errMsg = (
+    uacRes.error ||
+    uacRes.stderr ||
+    uacRes.stdout ||
+    res.stderr ||
+    res.stdout ||
+    `Winget-Fehlercode ${uacRes.code}`
+  ).trim();
+  return { success: false, error: errMsg };
 }
 
 async function fetchShowFresh(packageId, { preferGerman = true, signal = null } = {}) {
@@ -90,6 +135,7 @@ export const wingetProvider = {
     install: true,
     uninstall: true,
     supportsArchiveDownload: true,
+    manageSources: true,
   },
 
   async checkAvailability({ signal = null } = {}) {
@@ -367,5 +413,63 @@ export const wingetProvider = {
     const errMsg = (stderr || stdout || `Winget-Fehlercode ${code}`).trim();
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: code, error: errMsg };
+  },
+
+  async listSources({ signal = null } = {}) {
+    const res = await runWinget(['source', 'list'], { signal, timeoutMs: 30000 });
+    if (res.aborted) return { success: false, canceled: true, sources: [] };
+    if (res.notFound || (res.code !== 0 && !res.stdout)) {
+      return {
+        success: false,
+        sources: [],
+        templates: PROVIDER_SOURCE_TEMPLATES.winget,
+        requiresAdmin: true,
+        mode: 'cli',
+        error: res.error || res.stderr || 'Winget-Quellen konnten nicht abgerufen werden.',
+      };
+    }
+
+    const sources = parseWingetSourceListOutput(res.stdout).map((src) => ({
+      ...src,
+      builtIn: false,
+    }));
+    return {
+      success: true,
+      mode: 'cli',
+      requiresAdmin: true,
+      sources,
+      templates: PROVIDER_SOURCE_TEMPLATES.winget,
+      hint: 'Das Hinzufuegen oder Entfernen von Winget-Quellen erfordert unter Windows ggf. Administratorrechte (UAC).',
+    };
+  },
+
+  async addSource({ name = '', url = '', type = '' } = {}, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    const cleanUrl = String(url || '').trim();
+    const cleanType = String(type || '').trim();
+
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Quellenname (erlaubt: Buchstaben, Ziffern, . _ -).' };
+    }
+    if (!isValidSourceUrl(cleanUrl)) {
+      return { success: false, error: 'Bitte eine gueltige HTTP/HTTPS-URL angeben.' };
+    }
+    if (!isValidWingetSourceType(cleanType)) {
+      return { success: false, error: 'Ungueltiger Winget-Quelltyp.' };
+    }
+
+    const args = ['source', 'add', '--name', cleanName, '--arg', cleanUrl, '--accept-source-agreements'];
+    if (cleanType) {
+      args.push('--type', cleanType);
+    }
+    return runWingetWithUacFallback(args, { signal });
+  },
+
+  async removeSource(name, { signal = null } = {}) {
+    const cleanName = String(name || '').trim();
+    if (!isValidSourceName(cleanName)) {
+      return { success: false, error: 'Ungueltiger Quellenname.' };
+    }
+    return runWingetWithUacFallback(['source', 'remove', '--name', cleanName], { signal });
   },
 };

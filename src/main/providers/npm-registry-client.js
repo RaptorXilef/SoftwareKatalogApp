@@ -1,9 +1,15 @@
 import { isValidNpmPackageName, parseNpmSearchJson, parseNpmShowJson } from '../../shared/npm-parser.js';
+import { normalizeSourceUrl } from '../../shared/provider-sources-parser.js';
 import { compareVersions } from '../../shared/version.js';
 import { getWingetCache } from './winget-provider.js';
 
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
 const DEFAULT_FETCH_TIMEOUT_MS = 15000;
+
+function resolveRegistryBaseUrl(registryUrl) {
+  const clean = normalizeSourceUrl(registryUrl);
+  return clean || REGISTRY_BASE_URL;
+}
 
 /**
  * Lädt JSON mit AbortSignal-Unterstützung und festem Timeout.
@@ -43,16 +49,20 @@ export async function fetchRegistryJson(url, { signal = null, timeoutMs = DEFAUL
 /**
  * Durchsucht die npm-Registry (`/-/v1/search`).
  * @param {string} query
- * @param {{ limit?: number, signal?: AbortSignal | null, packageManager?: string }} [options]
+ * @param {{ limit?: number, signal?: AbortSignal | null, packageManager?: string, registryUrl?: string }} [options]
  */
-export async function searchNpmRegistry(query, { limit = 25, signal = null, packageManager = 'npm' } = {}) {
+export async function searchNpmRegistry(
+  query,
+  { limit = 25, signal = null, packageManager = 'npm', registryUrl = '' } = {}
+) {
   const cleanQuery = String(query || '').trim();
   if (cleanQuery.length < 2) {
     return { success: false, results: [], error: 'Bitte mindestens 2 Zeichen eingeben.' };
   }
 
+  const base = resolveRegistryBaseUrl(registryUrl);
   const size = Number.isFinite(limit) && limit > 0 ? Math.min(Math.max(Math.round(limit), 1), 50) : 25;
-  const url = `${REGISTRY_BASE_URL}/-/v1/search?text=${encodeURIComponent(cleanQuery)}&size=${size}`;
+  const url = `${base}/-/v1/search?text=${encodeURIComponent(cleanQuery)}&size=${size}`;
 
   const data = await fetchRegistryJson(url, { signal });
   const results = parseNpmSearchJson(data, limit, { packageManager });
@@ -64,19 +74,23 @@ export async function searchNpmRegistry(query, { limit = 25, signal = null, pack
 }
 
 /**
- * Ruft aktuelle Paketmetadaten direkt von `registry.npmjs.org` ab.
+ * Ruft aktuelle Paketmetadaten direkt von `registry.npmjs.org` (oder Custom-Registry) ab.
  * Für Scoped-Pakete (`@scope/pkg`) wird das volle Packument geladen, da `/latest` dort oft HTTP 405 liefert.
  * @param {string} packageId
- * @param {{ signal?: AbortSignal | null, packageManager?: string }} [options]
+ * @param {{ signal?: AbortSignal | null, packageManager?: string, registryUrl?: string }} [options]
  */
-export async function fetchNpmPackageLatest(packageId, { signal = null, packageManager = 'npm' } = {}) {
+export async function fetchNpmPackageLatest(
+  packageId,
+  { signal = null, packageManager = 'npm', registryUrl = '' } = {}
+) {
   const cleanId = String(packageId || '').trim();
   if (!isValidNpmPackageName(cleanId)) {
     throw new Error(`Ungültiger Paketname: "${cleanId}".`);
   }
 
+  const base = resolveRegistryBaseUrl(registryUrl);
   const encoded = encodeURIComponent(cleanId);
-  const url = cleanId.startsWith('@') ? `${REGISTRY_BASE_URL}/${encoded}` : `${REGISTRY_BASE_URL}/${encoded}/latest`;
+  const url = cleanId.startsWith('@') ? `${base}/${encoded}` : `${base}/${encoded}/latest`;
 
   const payload = await fetchRegistryJson(url, { signal });
   const parsed = parseNpmShowJson(payload, cleanId, { packageManager });
@@ -89,11 +103,11 @@ export async function fetchNpmPackageLatest(packageId, { signal = null, packageM
 /**
  * Liefert Paketdetails über den 7-Tage-Offline-Cache (`userData/provider-cache.json`).
  * @param {string} packageId
- * @param {{ packageManager?: string, forceRefresh?: boolean, signal?: AbortSignal | null }} [options]
+ * @param {{ packageManager?: string, forceRefresh?: boolean, signal?: AbortSignal | null, registryUrl?: string }} [options]
  */
 export async function showNpmRegistryPackage(
   packageId,
-  { packageManager = 'npm', forceRefresh = false, signal = null } = {}
+  { packageManager = 'npm', forceRefresh = false, signal = null, registryUrl = '' } = {}
 ) {
   const cleanId = String(packageId || '').trim();
   if (!cleanId) {
@@ -107,11 +121,15 @@ export async function showNpmRegistryPackage(
     };
   }
 
-  const cacheKey = `npm-registry:show:${cleanId.toLowerCase()}`;
+  const base = resolveRegistryBaseUrl(registryUrl);
+  const cacheKey =
+    base === REGISTRY_BASE_URL
+      ? `npm-registry:show:${cleanId.toLowerCase()}`
+      : `npm-registry:show:${base.toLowerCase()}:${cleanId.toLowerCase()}`;
   const cache = getWingetCache();
   const res = await cache.getOrFetch(
     cacheKey,
-    () => fetchNpmPackageLatest(cleanId, { signal, packageManager: 'npm' }),
+    () => fetchNpmPackageLatest(cleanId, { signal, packageManager: 'npm', registryUrl: base }),
     { forceRefresh }
   );
 
@@ -137,17 +155,18 @@ export async function showNpmRegistryPackage(
 }
 
 /**
- * Prüft installierte globale Pakete parallel (mit begrenzter Nebenläufigkeit) gegen `registry.npmjs.org`.
+ * Prüft installierte globale Pakete parallel (mit begrenzter Nebenläufigkeit) gegen die npm-Registry.
  * @param {Array<{ packageId?: string, id?: string, name?: string, version?: string }>} installedPackages
- * @param {{ packageManager?: string, signal?: AbortSignal | null, concurrency?: number }} [options]
+ * @param {{ packageManager?: string, signal?: AbortSignal | null, concurrency?: number, registryUrl?: string }} [options]
  */
 export async function checkNpmRegistryUpdates(
   installedPackages = [],
-  { packageManager = 'bun', signal = null, concurrency = 6 } = {}
+  { packageManager = 'bun', signal = null, concurrency = 6, registryUrl = '' } = {}
 ) {
   const list = Array.isArray(installedPackages) ? installedPackages.filter((p) => p?.packageId || p?.name) : [];
   if (list.length === 0) return [];
 
+  const base = resolveRegistryBaseUrl(registryUrl);
   const upgrades = [];
   const executing = new Set();
 
@@ -159,7 +178,7 @@ export async function checkNpmRegistryUpdates(
 
     const task = (async () => {
       try {
-        const latest = await fetchNpmPackageLatest(pkgId, { signal, packageManager });
+        const latest = await fetchNpmPackageLatest(pkgId, { signal, packageManager, registryUrl: base });
         if (!latest?.version) return;
         const isOutdated = installedVer ? compareVersions(latest.version, installedVer, 3) > 0 : false;
         if (isOutdated) {
