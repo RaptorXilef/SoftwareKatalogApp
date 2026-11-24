@@ -171,3 +171,210 @@ export function parseNvmListAvailableOutput(stdout, { query = '', limit = 30 } =
     source: 'nvm',
   }));
 }
+
+function getMajorVersion(version) {
+  const clean = normalizeNodeVersion(version);
+  if (!clean) return Number.NaN;
+  const first = clean.split('.')[0];
+  const parsed = Number.parseInt(first, 10);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+/**
+ * Parst die offizielle Node.js-Release-Liste (`https://nodejs.org/dist/index.json`)
+ * in einheitliche NVM-Release-Eintraege.
+ * @param {string | Array<Record<string, any>>} raw
+ * @param {{ limit?: number }} [options]
+ */
+export function parseNodeDistIndexJson(raw, { limit = 0 } = {}) {
+  let entries = [];
+  if (typeof raw === 'string') {
+    const cleaned = raw.replace(/^\uFEFF/, '').trim();
+    if (!cleaned) return [];
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) entries = parsed;
+    } catch {
+      return [];
+    }
+  } else if (Array.isArray(raw)) {
+    entries = raw;
+  }
+
+  if (entries.length === 0) return [];
+
+  const byVersion = new Map();
+  let highestNonLtsMajor = -1;
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const version = normalizeNodeVersion(entry.version);
+    if (!isValidNvmVersion(version) || !/^\d+\.\d+\.\d+$/.test(version)) continue;
+    if (byVersion.has(version)) continue;
+
+    const major = getMajorVersion(version);
+    if (!Number.isFinite(major)) continue;
+
+    const lts = entry.lts && typeof entry.lts === 'string' ? entry.lts.trim() : Boolean(entry.lts);
+    if (!lts && major > highestNonLtsMajor) {
+      highestNonLtsMajor = major;
+    }
+
+    byVersion.set(version, {
+      version,
+      major,
+      lts,
+      date: typeof entry.date === 'string' ? entry.date.trim() : '',
+    });
+  }
+
+  const maxResults = Number.isFinite(limit) && limit > 0 ? limit : Number.POSITIVE_INFINITY;
+  const list = [...byVersion.values()].map((item) => {
+    const channel = item.lts ? 'LTS' : item.major === highestNonLtsMajor ? 'Current' : 'Old Stable';
+    return {
+      packageManager: 'nvm',
+      packageId: item.version,
+      id: item.version,
+      name: channel === 'LTS' ? `Node.js v${item.version} (LTS)` : `Node.js v${item.version}`,
+      version: item.version,
+      major: item.major,
+      lts: item.lts,
+      channel,
+      date: item.date,
+      source: 'nvm',
+    };
+  });
+
+  list.sort((a, b) => compareVersions(b.version, a.version, 3));
+  return list.slice(0, maxResults);
+}
+
+/**
+ * Vergleicht ueber `nvm list` installierte Node.js-Versionen mit verfuegbaren Releases
+ * (primaer innerhalb derselben Major-Reihe, z. B. 26.12.1 -> 26.13.1, sowie optional neuester LTS/Current).
+ * @param {Array<Record<string, any>>} [installedPackages]
+ * @param {Array<Record<string, any>>} [availableVersions]
+ * @param {{ includeLatestLts?: boolean, includeLatestCurrent?: boolean }} [options]
+ */
+export function computeNvmUpgrades(
+  installedPackages = [],
+  availableVersions = [],
+  { includeLatestLts = true, includeLatestCurrent = false } = {}
+) {
+  if (!Array.isArray(installedPackages) || installedPackages.length === 0) return [];
+  if (!Array.isArray(availableVersions) || availableVersions.length === 0) return [];
+
+  const highestByMajor = new Map();
+  let latestLts = null;
+  let latestCurrent = null;
+  let overallHighest = null;
+
+  for (const raw of availableVersions) {
+    const rawVer = typeof raw === 'string' ? raw : raw?.version || raw?.packageId || raw?.id;
+    const version = normalizeNodeVersion(rawVer);
+    if (!isValidNvmVersion(version) || !/^\d+\.\d+\.\d+$/.test(version)) continue;
+
+    const major = Number.isFinite(Number(raw?.major)) ? Number(raw.major) : getMajorVersion(version);
+    if (!Number.isFinite(major)) continue;
+
+    const channel = typeof raw === 'object' && raw?.channel ? String(raw.channel).trim() : '';
+    const isLts = channel.toLowerCase() === 'lts' || Boolean(typeof raw === 'object' && raw?.lts);
+    const isCurrent = channel.toLowerCase() === 'current';
+    const entry = { version, major, channel: channel || (isLts ? 'LTS' : ''), isLts, isCurrent };
+
+    const prevMajor = highestByMajor.get(major);
+    if (!prevMajor || compareVersions(entry.version, prevMajor.version, 3) > 0) {
+      highestByMajor.set(major, entry);
+    }
+
+    if (isLts && (!latestLts || compareVersions(entry.version, latestLts.version, 3) > 0)) {
+      latestLts = entry;
+    }
+    if (isCurrent && (!latestCurrent || compareVersions(entry.version, latestCurrent.version, 3) > 0)) {
+      latestCurrent = entry;
+    }
+    if (!overallHighest || compareVersions(entry.version, overallHighest.version, 3) > 0) {
+      overallHighest = entry;
+    }
+  }
+
+  if (!latestCurrent) {
+    latestCurrent = overallHighest;
+  }
+
+  const normalizedInstalled = [];
+  const installedSet = new Set();
+  let highestInstalledMajor = -1;
+
+  for (const inst of installedPackages) {
+    const version = normalizeNodeVersion(inst?.version || inst?.packageId || inst?.id);
+    if (!isValidNvmVersion(version) || !/^\d+\.\d+\.\d+$/.test(version)) continue;
+    const major = getMajorVersion(version);
+    if (!Number.isFinite(major)) continue;
+
+    installedSet.add(version);
+    if (major > highestInstalledMajor) {
+      highestInstalledMajor = major;
+    }
+    normalizedInstalled.push({
+      version,
+      major,
+      name: String(inst?.name || `Node.js v${version}`).trim(),
+      isActive: Boolean(inst?.isActive),
+      arch: String(inst?.arch || '').trim(),
+    });
+  }
+
+  const upgrades = [];
+  const seenInstalled = new Set();
+
+  for (const inst of normalizedInstalled) {
+    if (seenInstalled.has(inst.version)) continue;
+    seenInstalled.add(inst.version);
+
+    let target = null;
+    const bestSameMajor = highestByMajor.get(inst.major);
+    if (
+      bestSameMajor &&
+      compareVersions(bestSameMajor.version, inst.version, 3) > 0 &&
+      !installedSet.has(bestSameMajor.version)
+    ) {
+      target = bestSameMajor;
+    } else if (inst.major === highestInstalledMajor) {
+      if (
+        includeLatestLts &&
+        latestLts &&
+        latestLts.major > highestInstalledMajor &&
+        compareVersions(latestLts.version, inst.version, 3) > 0 &&
+        !installedSet.has(latestLts.version)
+      ) {
+        target = latestLts;
+      } else if (
+        includeLatestCurrent &&
+        latestCurrent &&
+        latestCurrent.major > highestInstalledMajor &&
+        compareVersions(latestCurrent.version, inst.version, 3) > 0 &&
+        !installedSet.has(latestCurrent.version)
+      ) {
+        target = latestCurrent;
+      }
+    }
+
+    if (!target) continue;
+
+    upgrades.push({
+      packageManager: 'nvm',
+      packageId: inst.version,
+      id: inst.version,
+      name: inst.name || `Node.js v${inst.version}`,
+      installedVersion: inst.version,
+      availableVersion: target.version,
+      isActive: inst.isActive,
+      arch: inst.arch,
+      channel: target.channel || '',
+      source: 'nvm',
+    });
+  }
+
+  return upgrades;
+}

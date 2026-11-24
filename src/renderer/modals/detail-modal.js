@@ -1,3 +1,4 @@
+import { isIdLikeDisplayName } from '../../shared/installed-merger.js';
 import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
 import { formatMultiRootFileLabel } from '../../shared/multi-archive-logic.js';
 import { buildRemotePackageItem, canDownloadOnline, getProviderBadgeInfo } from '../../shared/unified-packages.js';
@@ -164,11 +165,12 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) 
     const nvmBtn = buildNvmUseButtonHtml(item, { large: true });
     if (nvmBtn) {
       buttons.push(nvmBtn);
-    } else if (canProviderInstall && st.hasWebUpdate) {
+    }
+    if (canProviderInstall && st.hasWebUpdate) {
       buttons.push(
         `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
       );
-    } else if (item.validInstallPath) {
+    } else if (!nvmBtn && item.validInstallPath) {
       buttons.push(
         '<button type="button" class="btn btn-lg btn-local" data-detail-action="launch-local">🚀 Programm starten</button>'
       );
@@ -922,6 +924,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
     if (res?.success && res.package) {
       loadedPkgProfile = res.package;
+      if (
+        res.package.name &&
+        isIdLikeDisplayName(item.name, effectivePkgId) &&
+        !isIdLikeDisplayName(res.package.name, effectivePkgId)
+      ) {
+        item.name = res.package.name;
+        const modalHeading = modal.querySelector('.detail-title-row h2');
+        if (modalHeading) modalHeading.textContent = res.package.name;
+        const gridTitle = document.querySelector(`#grid .card[data-id="${CSS.escape(item.id)}"] .card-title`);
+        if (gridTitle) gridTitle.textContent = res.package.name;
+      }
       const meta = renderPackageProfileBody(bodyEl, res.package, {
         fromCache: res.fromCache,
         isStale: res.isStale,
@@ -1203,6 +1216,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
     const res = await window.electronAPI.installPackage(effectivePm, effectivePkgId, {
       upgrade: item.isInstalled && st.hasWebUpdate,
+      targetVersion: item.isInstalled && st.hasWebUpdate ? st.webVersion || '' : '',
       silent: useSilent,
       itemName: item.name,
     });

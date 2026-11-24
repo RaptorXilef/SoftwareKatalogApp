@@ -1,3 +1,4 @@
+import { isIdLikeDisplayName } from './installed-merger.js';
 import { detectAdwareSignals, normalizeInstallMode, sanitizeSilentArgs } from './installer-logic.js';
 import { scoreCatalogItem } from './search.js';
 import { canDownloadOnline, getBaseName, getPackageStatus, isPackageVisible } from './unified-packages.js';
@@ -654,11 +655,17 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
     normalizedItem.source === 'archive' ? archiveVersion || webVersion || null : webVersion || archiveVersion || null;
 
   const defaultSelected = !archiveMissing && (status === 'missing' || status === 'outdated');
+  const resolvedDisplayName =
+    isIdLikeDisplayName(normalizedItem.name, normalizedItem.packageId) &&
+    matchedPackage?.name &&
+    !isIdLikeDisplayName(matchedPackage.name, normalizedItem.packageId)
+      ? matchedPackage.name
+      : normalizedItem.name || matchedPackage?.name || normalizedItem.packageId || normalizedItem.refId;
 
   return {
     ...normalizedItem,
     key,
-    name: normalizedItem.name || matchedPackage?.name || normalizedItem.packageId || normalizedItem.refId,
+    name: resolvedDisplayName,
     status,
     action,
     statusLabel,

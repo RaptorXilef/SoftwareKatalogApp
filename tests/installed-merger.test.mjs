@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mergeInstalledSoftware } from '../src/shared/installed-merger.js';
+import {
+  isCrypticStoreId,
+  matchAppxEntryForPackage,
+  mergeInstalledSoftware,
+  pickBestDisplayName,
+} from '../src/shared/installed-merger.js';
+import { buildUnifiedPackages, getPackageStatus } from '../src/shared/unified-packages.js';
 
 describe('mergeInstalledSoftware', () => {
   it('löst abgeschnittene Upgrade-IDs über winget export auf und verknüpft Registry + Archiv-Katalog', () => {
@@ -155,5 +161,91 @@ describe('mergeInstalledSoftware', () => {
     const audacity = merged.find((p) => p.packageId === 'Audacity.Audacity');
     assert.ok(audacity);
     assert.equal(audacity.displayIcon, 'C:\\Program Files\\Audacity\\audacity.exe,0');
+  });
+
+  it('loest kryptische MS-Store-IDs wie 9N9PHDT62W94 auf echte App-Namen auf und behaelt MS-Store-Updates', () => {
+    assert.equal(isCrypticStoreId('9N9PHDT62W94'), true);
+    assert.equal(isCrypticStoreId('HP Smart'), false);
+    assert.equal(
+      pickBestDisplayName({ candidates: ['9N9PHDT62W94', 'HP Smart'], packageId: '9N9PHDT62W94' }),
+      'HP Smart'
+    );
+
+    const appxEntries = [
+      {
+        name: 'AD2F1837.HPPrinterControl',
+        packageFamilyName: 'AD2F1837.HPPrinterControl_v10z8vjag6ke6',
+        displayName: 'HP Smart',
+        publisherDisplayName: 'HP Inc.',
+        version: '159.1.1160.0',
+        installLocation: 'C:\\Program Files\\WindowsApps\\AD2F1837.HPPrinterControl_159.1.1160.0_x64',
+      },
+    ];
+
+    const matchedAppx = matchAppxEntryForPackage(
+      { packageId: '9N9PHDT62W94', name: '9N9PHDT62W94', version: '159.1.1160.0' },
+      appxEntries
+    );
+    assert.equal(matchedAppx?.displayName, 'HP Smart');
+
+    const cachedMetadata = new Map([
+      ['msstore:9n9phdt62w94', { name: 'HP Smart', publisher: 'HP Inc.', homepage: 'https://www.hp.com' }],
+      ['chocolatey:git.install', { name: 'Git (Install)', publisher: 'Git Team' }],
+    ]);
+
+    const merged = mergeInstalledSoftware({
+      wingetExports: [
+        { packageManager: 'winget', packageId: '9N9PHDT62W94', version: '159.1.1160.0', source: 'msstore' },
+      ],
+      wingetUpgrades: [
+        {
+          packageManager: 'winget',
+          packageId: '9N9PHDT62W94',
+          name: 'HP Smart',
+          installedVersion: '159.1.1160.0',
+          availableVersion: '160.0.1200.0',
+          installedVersionIsLowerBound: true,
+          source: 'msstore',
+        },
+      ],
+      providerInstalled: [
+        {
+          packageManager: 'msstore',
+          packageId: '9N9PHDT62W94',
+          name: '9N9PHDT62W94',
+          version: 'Unbekannt',
+          source: 'msstore',
+        },
+        {
+          packageManager: 'chocolatey',
+          packageId: 'git.install',
+          name: 'git.install',
+          version: '2.47.1',
+          source: 'chocolatey',
+        },
+      ],
+      providerUpgrades: [],
+      appxEntries,
+      cachedMetadata,
+    });
+
+    const hpSmart = merged.find((p) => p.packageId === '9N9PHDT62W94');
+    assert.ok(hpSmart);
+    assert.equal(hpSmart.packageManager, 'msstore');
+    assert.equal(hpSmart.name, 'HP Smart');
+    assert.equal(hpSmart.installedVersion, '159.1.1160.0');
+    assert.equal(hpSmart.availableVersion, '160.0.1200.0');
+    assert.equal(hpSmart.hasUpdate, true);
+    assert.equal(hpSmart.installLocation, appxEntries[0].installLocation);
+
+    const chocoGit = merged.find((p) => p.id === 'chocolatey:git.install');
+    assert.ok(chocoGit);
+    assert.equal(chocoGit.name, 'Git (Install)');
+
+    const unified = buildUnifiedPackages({ catalogItems: [], installedApps: merged });
+    const hpUnified = unified.find((p) => p.packageId === '9N9PHDT62W94');
+    assert.ok(hpUnified);
+    assert.equal(getPackageStatus(hpUnified).hasWebUpdate, true);
+    assert.equal(getPackageStatus(hpUnified).status, 'webupdate');
   });
 });

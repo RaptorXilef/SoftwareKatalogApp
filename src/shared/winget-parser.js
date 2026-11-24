@@ -416,8 +416,112 @@ function parseUpgradeLineFallback(trimmed) {
   return { name, packageId, rawInstalledVersion, availableVersion, source };
 }
 
+function isTableHeaderRow(name, packageId) {
+  return (
+    /^name$/i.test(String(name || '').trim()) && /^(?:id|paket-id|package\s*id)$/i.test(String(packageId || '').trim())
+  );
+}
+
+function isListFooterLine(trimmed) {
+  return (
+    isUpgradeFooterLine(trimmed) ||
+    /^\d+\s+(?:Paket|package)/i.test(trimmed) ||
+    /^(?:Keine|No)\s+(?:installierten|installed)/i.test(trimmed)
+  );
+}
+
+function mapWingetListHeaderColumns(headerLine) {
+  const matches = [...String(headerLine || '').matchAll(/\S+/g)];
+  const offsets = matches.map((m) => m.index);
+  const colMap = {
+    name: 0,
+    id: 1,
+    version: 2,
+    available: -1,
+    source: -1,
+  };
+
+  for (let i = 0; i < matches.length; i++) {
+    const token = matches[i][0].toLowerCase();
+    if (token === 'name') colMap.name = i;
+    else if (token === 'id') colMap.id = i;
+    else if (token === 'version') colMap.version = i;
+    else if (token === 'verfügbar' || token === 'verfuegbar' || token === 'available') colMap.available = i;
+    else if (token === 'quelle' || token === 'source') colMap.source = i;
+  }
+
+  return { offsets, colMap };
+}
+
+function parseListLineFallback(trimmed, colMap, defaultSource) {
+  const cols = trimmed.split(/\s{2,}/);
+  if (cols.length >= 3) {
+    const name = (cols[colMap.name] || cols[0] || '').trim();
+    const packageId = (cols[colMap.id] || cols[1] || '').trim();
+    if (isValidPackageId(packageId)) {
+      const rawVersion = (cols[colMap.version] || cols[2] || '').trim();
+      let availableVersion = '';
+      let source = '';
+
+      if (colMap.available !== -1 && colMap.source !== -1) {
+        if (cols.length >= 5) {
+          availableVersion = (cols[colMap.available] || '').trim();
+          source = (cols[colMap.source] || '').trim();
+        } else if (cols.length === 4) {
+          const fourth = (cols[3] || '').trim();
+          if (/^(?:winget|msstore)$/i.test(fourth)) {
+            source = fourth;
+          } else {
+            availableVersion = fourth;
+          }
+        }
+      } else if (colMap.available !== -1) {
+        availableVersion = (cols[colMap.available] || '').trim();
+      } else if (colMap.source !== -1) {
+        source = (cols[colMap.source] || '').trim();
+      }
+
+      return { name, packageId, rawVersion, availableVersion, source: source || defaultSource };
+    }
+  }
+
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 3) return null;
+
+  let end = tokens.length;
+  let source = '';
+  const last = tokens[end - 1];
+  if (colMap.source !== -1 && /^(?:winget|msstore)$/i.test(last)) {
+    source = last;
+    end--;
+  }
+
+  if (end < 3) return null;
+  let availableVersion = '';
+  let rawVersion = tokens[--end];
+  if (end > 1 && (tokens[end - 1] === '<' || tokens[end - 1] === '>')) {
+    rawVersion = `${tokens[--end]} ${rawVersion}`;
+  } else if (
+    colMap.available !== -1 &&
+    end >= 3 &&
+    /^\d+(?:\.\d+)+/.test(rawVersion) &&
+    (/^[\d.<>-]+$/.test(tokens[end - 1]) || /^(?:unbekannt|unknown)$/i.test(tokens[end - 1]))
+  ) {
+    availableVersion = rawVersion;
+    rawVersion = tokens[--end];
+    if (end > 1 && (tokens[end - 1] === '<' || tokens[end - 1] === '>')) {
+      rawVersion = `${tokens[--end]} ${rawVersion}`;
+    }
+  }
+
+  if (end < 2) return null;
+  const packageId = tokens[--end];
+  const name = tokens.slice(0, end).join(' ');
+  return { name, packageId, rawVersion, availableVersion, source: source || defaultSource };
+}
+
 /**
- * Parst die Ausgabe von `winget upgrade` (inkl. abgeschnittener `…`-IDs und `< Version`-Angaben).
+ * Parst die Ausgabe von `winget upgrade` (inkl. abgeschnittener `...`-IDs, `< Version`-Angaben und Multi-Tabellen).
  * @param {string} stdout
  * @param {{ packageManager?: string, defaultSource?: string }} [options]
  */
@@ -426,14 +530,24 @@ export function parseWingetUpgradeOutput(stdout, { packageManager = 'winget', de
   const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
   if (sepIdx === -1) return [];
 
-  const headerLine = sepIdx > 0 ? lines[sepIdx - 1] : '';
-  const offsets = getColumnOffsets(headerLine);
+  let headerLine = sepIdx > 0 ? lines[sepIdx - 1] : '';
+  let offsets = getColumnOffsets(headerLine);
   const results = [];
 
   for (let i = sepIdx + 1; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed || isUpgradeFooterLine(trimmed)) continue;
+    if (!trimmed) continue;
+
+    if (/^-{5,}/.test(trimmed)) {
+      headerLine = i > 0 ? lines[i - 1] : '';
+      offsets = getColumnOffsets(headerLine);
+      continue;
+    }
+    if (i + 1 < lines.length && /^-{5,}/.test(lines[i + 1].trim())) {
+      continue;
+    }
+    if (isUpgradeFooterLine(trimmed)) continue;
 
     let name = '';
     let packageId = '';
@@ -467,9 +581,11 @@ export function parseWingetUpgradeOutput(stdout, { packageManager = 'winget', de
       }
     }
 
+    if (isTableHeaderRow(name, packageId)) continue;
     if (!isValidPackageId(packageId) || !availableVersion) continue;
 
     const idTruncated = packageId.endsWith('…') || packageId.endsWith('...');
+    const installedVersionIsLowerBound = /^\s*</.test(rawInstalledVersion);
 
     results.push({
       packageManager: packageManager || 'winget',
@@ -478,6 +594,7 @@ export function parseWingetUpgradeOutput(stdout, { packageManager = 'winget', de
       name: name.trim(),
       installedVersion: normalizeUpgradeVersion(rawInstalledVersion),
       rawInstalledVersion: rawInstalledVersion.trim(),
+      installedVersionIsLowerBound,
       availableVersion: availableVersion.trim(),
       source: source.trim() || defaultSource || 'winget',
       idTruncated,
@@ -485,6 +602,178 @@ export function parseWingetUpgradeOutput(stdout, { packageManager = 'winget', de
   }
 
   return results;
+}
+
+/**
+ * Parst die Tabellenausgabe von `winget list` (3, 4 oder 5 Spalten sowie Multi-Tabellen).
+ * @param {string} stdout
+ * @param {{ packageManager?: string, defaultSource?: string, requireDotInId?: boolean }} [options]
+ */
+export function parseWingetListOutput(
+  stdout,
+  { packageManager = 'winget', defaultSource = 'winget', requireDotInId = false } = {}
+) {
+  const lines = cleanCliLines(stdout).filter((l) => l.trim().length > 0);
+  const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
+  if (sepIdx === -1) return [];
+
+  let headerLine = sepIdx > 0 ? lines[sepIdx - 1] : '';
+  let { offsets, colMap } = mapWingetListHeaderColumns(headerLine);
+  const results = [];
+  const seenIds = new Set();
+
+  for (let i = sepIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (/^-{5,}/.test(trimmed)) {
+      headerLine = i > 0 ? lines[i - 1] : '';
+      ({ offsets, colMap } = mapWingetListHeaderColumns(headerLine));
+      continue;
+    }
+    if (i + 1 < lines.length && /^-{5,}/.test(lines[i + 1].trim())) {
+      continue;
+    }
+    if (isListFooterLine(trimmed)) continue;
+
+    let name = '';
+    let packageId = '';
+    let rawVersion = '';
+    let availableVersion = '';
+    let source = '';
+
+    if (offsets.length >= 3) {
+      const cells = sliceByOffsets(line, offsets);
+      name = cells[colMap.name] || '';
+      packageId = cells[colMap.id] || '';
+      rawVersion = cells[colMap.version] || '';
+      availableVersion = colMap.available !== -1 ? cells[colMap.available] || '' : '';
+      source = colMap.source !== -1 ? cells[colMap.source] || '' : '';
+    }
+
+    const offsetParsedLooksBroken =
+      !isValidPackageId(packageId) ||
+      !rawVersion ||
+      /\s/.test(normalizeUpgradeVersion(rawVersion)) ||
+      (availableVersion && /\s/.test(availableVersion));
+
+    if (offsetParsedLooksBroken) {
+      const fb = parseListLineFallback(trimmed, colMap, defaultSource);
+      if (fb) {
+        name = fb.name;
+        packageId = fb.packageId;
+        rawVersion = fb.rawVersion;
+        availableVersion = fb.availableVersion;
+        source = fb.source;
+      }
+    }
+
+    if (isTableHeaderRow(name, packageId)) continue;
+    if (!isValidPackageId(packageId)) continue;
+    if (requireDotInId && !packageId.includes('.')) continue;
+
+    const key = packageId.toLowerCase();
+    if (seenIds.has(key)) continue;
+    seenIds.add(key);
+
+    const idTruncated = packageId.endsWith('…') || packageId.endsWith('...');
+    const installedVersionIsLowerBound = /^\s*</.test(rawVersion);
+
+    results.push({
+      packageManager: packageManager || 'winget',
+      packageId,
+      id: packageId,
+      name: name.trim(),
+      version: normalizeUpgradeVersion(rawVersion),
+      rawVersion: rawVersion.trim(),
+      installedVersionIsLowerBound,
+      availableVersion: availableVersion.trim(),
+      source: source.trim() || defaultSource || 'winget',
+      idTruncated,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Ergaenzt `winget export`-Eintraege (volle IDs, ohne Name) mit lesbaren Namen und optionalen
+ * Update-Spalten aus `winget list` (inkl. Aufloesung abgeschnittener `...`-IDs).
+ * @param {Array<Record<string, any>>} [exportPackages]
+ * @param {Array<Record<string, any>>} [listPackages]
+ * @param {{ packageManager?: string, defaultSource?: string }} [options]
+ */
+export function mergeWingetExportWithList(
+  exportPackages = [],
+  listPackages = [],
+  { packageManager = 'winget', defaultSource = 'winget' } = {}
+) {
+  const listByExactId = new Map();
+  const truncatedList = [];
+
+  for (const item of listPackages || []) {
+    const pid = String(item?.packageId || item?.id || '').trim();
+    if (!pid) continue;
+    if (item.idTruncated || pid.endsWith('…') || pid.endsWith('...')) {
+      truncatedList.push(item);
+    } else {
+      listByExactId.set(pid.toLowerCase(), item);
+    }
+  }
+
+  const matchedListKeys = new Set();
+  const merged = [];
+
+  for (const exp of exportPackages || []) {
+    const pid = String(exp?.packageId || exp?.id || '').trim();
+    if (!pid) continue;
+    const key = pid.toLowerCase();
+
+    let match = listByExactId.get(key) || null;
+    if (match) {
+      matchedListKeys.add(key);
+    } else {
+      match =
+        truncatedList.find((t) => {
+          const prefix = String(t.packageId || '')
+            .replace(/(?:…|\.\.\.)$/, '')
+            .toLowerCase();
+          return prefix.length >= 4 && key.startsWith(prefix);
+        }) || null;
+    }
+
+    const version = String(exp?.version || '').trim() || String(match?.version || '').trim();
+    merged.push({
+      ...exp,
+      packageManager: exp?.packageManager || packageManager || 'winget',
+      packageId: pid,
+      id: pid,
+      name: String(match?.name || exp?.name || '').trim(),
+      version,
+      availableVersion: String(match?.availableVersion || exp?.availableVersion || '').trim(),
+      installedVersionIsLowerBound: Boolean(match?.installedVersionIsLowerBound || exp?.installedVersionIsLowerBound),
+      source: String(exp?.source || match?.source || defaultSource || 'winget').trim(),
+    });
+  }
+
+  const seenMerged = new Set(merged.map((m) => String(m.packageId || '').toLowerCase()));
+  for (const item of listPackages || []) {
+    const pid = String(item?.packageId || item?.id || '').trim();
+    if (!pid || item.idTruncated || pid.endsWith('…') || pid.endsWith('...')) continue;
+    const key = pid.toLowerCase();
+    if (matchedListKeys.has(key) || seenMerged.has(key)) continue;
+    seenMerged.add(key);
+    merged.push({
+      ...item,
+      packageManager: item?.packageManager || packageManager || 'winget',
+      packageId: pid,
+      id: pid,
+      source: String(item?.source || defaultSource || 'winget').trim(),
+    });
+  }
+
+  return merged;
 }
 
 /**

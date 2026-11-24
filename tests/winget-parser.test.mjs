@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { createProviderCache, DEFAULT_CACHE_TTL_MS } from '../src/shared/provider-cache.js';
 import {
   cleanCliLines,
+  mergeWingetExportWithList,
   mergeWingetShowResults,
   parseWingetExportJson,
+  parseWingetListOutput,
   parseWingetSearchOutput,
   parseWingetShowOutput,
   parseWingetUpgradeOutput,
@@ -247,8 +249,95 @@ describe('parseWingetUpgradeOutput', () => {
     assert.equal(upgrades[2].packageId, 'Piriform.Speccy');
     assert.equal(upgrades[2].installedVersion, '1.34.84');
     assert.equal(upgrades[2].rawInstalledVersion, '< 1.34.84');
+    assert.equal(upgrades[2].installedVersionIsLowerBound, true);
 
     assert.equal(upgrades[3].idTruncated, true);
+  });
+
+  it('parst mehrteilige winget upgrade Tabellen und ignoriert wiederholte Headerzeilen', () => {
+    const multiOut = [
+      'Name       Id            Version Verfügbar Quelle',
+      '-------------------------------------------------',
+      'HP Smart   9N9PHDT62W94  150.1.0 159.1.0   msstore',
+      '1 Aktualisierungen verfügbar.',
+      'Die folgenden Pakete erfordern explizites Targeting:',
+      'Name       Id            Version Verfügbar Quelle',
+      '-------------------------------------------------',
+      'WhatsApp   9NKSQGP7F2NH  < 2.24  2.25.1    msstore',
+    ].join('\n');
+
+    const upgrades = parseWingetUpgradeOutput(multiOut, { packageManager: 'msstore', defaultSource: 'msstore' });
+    assert.equal(upgrades.length, 2);
+    assert.equal(upgrades[0].packageId, '9N9PHDT62W94');
+    assert.equal(upgrades[0].name, 'HP Smart');
+    assert.equal(upgrades[1].packageId, '9NKSQGP7F2NH');
+    assert.equal(upgrades[1].installedVersionIsLowerBound, true);
+  });
+});
+
+describe('parseWingetListOutput & mergeWingetExportWithList', () => {
+  it('parst winget list (3, 4 und 5 Spalten inkl. MS-Store-IDs und Verfuegbar-Spalte)', () => {
+    const listOut = [
+      'Name                 ID           Version     Verfügbar   Quelle',
+      '-----------------------------------------------------------------',
+      'HP Smart             9N9PHDT62W94 Unbekannt   159.1.1160  msstore',
+      'Windows Terminal     9N0DX20HK701 < 1.21.0                msstore',
+      'Spotify              9NCBCSZSJRSB 1.2.50.335              msstore',
+    ].join('\n');
+
+    const parsed = parseWingetListOutput(listOut, {
+      packageManager: 'msstore',
+      defaultSource: 'msstore',
+      requireDotInId: false,
+    });
+    assert.equal(parsed.length, 3);
+    assert.equal(parsed[0].name, 'HP Smart');
+    assert.equal(parsed[0].packageId, '9N9PHDT62W94');
+    assert.equal(parsed[0].availableVersion, '159.1.1160');
+    assert.equal(parsed[1].name, 'Windows Terminal');
+    assert.equal(parsed[1].version, '1.21.0');
+    assert.equal(parsed[1].installedVersionIsLowerBound, true);
+    assert.equal(parsed[2].name, 'Spotify');
+    assert.equal(parsed[2].availableVersion, '');
+  });
+
+  it('fuehrt winget export und winget list (inkl. abgeschnittener ...-IDs) zusammen', () => {
+    const exported = [
+      { packageManager: 'winget', packageId: '7zip.7zip', version: '26.04', source: 'winget' },
+      {
+        packageManager: 'winget',
+        packageId: 'SatisfactoryModding.SatisfactoryModManager',
+        version: '3.1.0',
+        source: 'winget',
+      },
+    ];
+    const listed = [
+      {
+        packageManager: 'winget',
+        packageId: '7zip.7zip',
+        name: '7-Zip',
+        version: '26.04',
+        availableVersion: '',
+        source: 'winget',
+        idTruncated: false,
+      },
+      {
+        packageManager: 'winget',
+        packageId: 'SatisfactoryModding.SatisfactoryMo…',
+        name: 'Satisfactory Mod Manager',
+        version: '3.1.0',
+        availableVersion: '3.2.0',
+        source: 'winget',
+        idTruncated: true,
+      },
+    ];
+
+    const merged = mergeWingetExportWithList(exported, listed);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0].name, '7-Zip');
+    assert.equal(merged[1].packageId, 'SatisfactoryModding.SatisfactoryModManager');
+    assert.equal(merged[1].name, 'Satisfactory Mod Manager');
+    assert.equal(merged[1].availableVersion, '3.2.0');
   });
 });
 

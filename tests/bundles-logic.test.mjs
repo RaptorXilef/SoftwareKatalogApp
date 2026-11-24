@@ -225,6 +225,24 @@ describe('bundles-logic: PC-Status-Abgleich', () => {
     );
     assert.equal(missingWg.status, 'missing');
     assert.equal(missingWg.defaultSelected, true);
+
+    const resolvedCrypticName = evaluateBundleItemStatus(
+      { order: 7, source: 'msstore', packageId: '9N9PHDT62W94', name: '9N9PHDT62W94' },
+      [
+        ...packages,
+        {
+          id: 'msstore:9n9phdt62w94',
+          name: 'HP Smart',
+          origin: 'pc',
+          inArchive: false,
+          isInstalled: true,
+          installedVersion: '159.1.1160.0',
+          packageManager: 'msstore',
+          packageId: '9N9PHDT62W94',
+        },
+      ]
+    );
+    assert.equal(resolvedCrypticName.name, 'HP Smart');
   });
 
   it('erkennt fehlenden Archiv-Eintrag und setzt defaultSelected auf false', () => {

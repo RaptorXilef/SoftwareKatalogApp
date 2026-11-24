@@ -300,6 +300,7 @@ export function deriveGitHubAvatarUrl(rawUrl) {
  */
 export function extractCandidateHomepageUrls({
   homepage = '',
+  repositoryUrl = '',
   publisherUrl = '',
   webVersionUrl = '',
   links = [],
@@ -330,6 +331,7 @@ export function extractCandidateHomepageUrls({
     }
   }
 
+  pushUrl(repositoryUrl);
   pushUrl(webVersionUrl);
   pushUrl(publisherUrl);
 
@@ -420,4 +422,230 @@ export function parseFaviconLinksFromHtml(html, baseUrl) {
   }
 
   return result;
+}
+
+function decodeBasicXmlEntities(text) {
+  return String(text || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
+}
+
+function isResourcePlaceholder(value) {
+  const clean = String(value || '').trim();
+  return !clean || /^ms-resource:/i.test(clean);
+}
+
+function normalizeManifestRelPath(rawPath) {
+  return String(rawPath || '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+}
+
+function readXmlTagText(xml, tagName) {
+  const re = new RegExp(`<(?:[A-Za-z0-9_]+:)?${tagName}\\b[^>]*>([\\s\\S]*?)</(?:[A-Za-z0-9_]+:)?${tagName}>`, 'i');
+  const match = xml.match(re);
+  return match ? decodeBasicXmlEntities(match[1]) : '';
+}
+
+function readXmlAttribute(tagText, attrName) {
+  const re = new RegExp(`\\b${attrName}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i');
+  const match = tagText.match(re);
+  return match ? decodeBasicXmlEntities(match[1] ?? match[2] ?? '') : '';
+}
+
+/**
+ * Parst `AppxManifest.xml` einer MS-Store-/UWP-/AppX-App und extrahiert Anzeigename,
+ * Herausgeber sowie priorisierte relative Logo-Pfade (`Square150x150Logo`, `Square44x44Logo`, `Logo`).
+ * @param {string} xmlText
+ * @returns {{ displayName: string, publisherDisplayName: string, logoCandidates: string[] }}
+ */
+export function parseAppxManifestMetadata(xmlText) {
+  const xml = String(xmlText || '');
+  if (!xml.trim()) {
+    return { displayName: '', publisherDisplayName: '', logoCandidates: [] };
+  }
+
+  const propertiesMatch = xml.match(
+    /<(?:[A-Za-z0-9_]+:)?Properties\b[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_]+:)?Properties>/i
+  );
+  const propertiesXml = propertiesMatch ? propertiesMatch[1] : '';
+
+  const propDisplayName = propertiesXml ? readXmlTagText(propertiesXml, 'DisplayName') : '';
+  const propPublisher = propertiesXml ? readXmlTagText(propertiesXml, 'PublisherDisplayName') : '';
+  const propLogo = propertiesXml ? readXmlTagText(propertiesXml, 'Logo') : '';
+
+  const visualElementsMatches = [...xml.matchAll(/<(?:[A-Za-z0-9_]+:)?VisualElements\b[^>]*>/gi)];
+  const defaultTileMatches = [...xml.matchAll(/<(?:[A-Za-z0-9_]+:)?DefaultTile\b[^>]*>/gi)];
+
+  let veDisplayName = '';
+  const veSquare150 = [];
+  const veSquare44 = [];
+  const veLogos = [];
+  for (const m of visualElementsMatches) {
+    const tag = m[0];
+    const dn = readXmlAttribute(tag, 'DisplayName');
+    if (!veDisplayName && !isResourcePlaceholder(dn)) {
+      veDisplayName = dn;
+    }
+    const s150 = readXmlAttribute(tag, 'Square150x150Logo');
+    if (s150) veSquare150.push(s150);
+    const s44 = readXmlAttribute(tag, 'Square44x44Logo');
+    if (s44) veSquare44.push(s44);
+    const smallLogo = readXmlAttribute(tag, 'Square30x30Logo') || readXmlAttribute(tag, 'SmallLogo');
+    const logoAttr = readXmlAttribute(tag, 'Logo');
+    if (logoAttr) veLogos.push(logoAttr);
+    if (smallLogo) veLogos.push(smallLogo);
+  }
+
+  const tileLogos = [];
+  for (const m of defaultTileMatches) {
+    const tag = m[0];
+    const s71 = readXmlAttribute(tag, 'Square71x71Logo');
+    const s310 = readXmlAttribute(tag, 'Square310x310Logo');
+    if (s71) tileLogos.push(s71);
+    if (s310) tileLogos.push(s310);
+  }
+
+  const displayName = !isResourcePlaceholder(propDisplayName)
+    ? propDisplayName
+    : !isResourcePlaceholder(veDisplayName)
+      ? veDisplayName
+      : '';
+  const publisherDisplayName = !isResourcePlaceholder(propPublisher) ? propPublisher : '';
+
+  const rawCandidates = [...veSquare150, ...veSquare44, propLogo, ...veLogos, ...tileLogos];
+  const seen = new Set();
+  const logoCandidates = [];
+  for (const raw of rawCandidates) {
+    const norm = normalizeManifestRelPath(raw);
+    if (!norm) continue;
+    const key = norm.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      logoCandidates.push(norm);
+    }
+  }
+
+  return {
+    displayName,
+    publisherDisplayName,
+    logoCandidates,
+  };
+}
+
+function scoreAppxLogoVariant(relPath, { stemLower, isExact }) {
+  const lower = relPath.toLowerCase();
+  const baseName = getBaseName(lower);
+  const ext = getExtLower(lower);
+  if (!DIRECT_IMAGE_EXTS.has(ext)) return -9999;
+
+  let score = 0;
+
+  if (/(?:contrast-high|contrast-black|contrast-white)/i.test(lower)) {
+    score -= 100;
+  }
+  if (/(?:theme-light|altform-lightunplated)/i.test(lower)) {
+    score -= 15;
+  }
+  if (/(?:theme-dark|altform-unplated)/i.test(lower)) {
+    score += 15;
+  }
+
+  const targetMatch = baseName.match(/targetsize-(\d+)/i) || lower.match(/targetsize-(\d+)/i);
+  if (targetMatch) {
+    const px = Number.parseInt(targetMatch[1], 10);
+    if (px >= 64 && px <= 256) score += 70;
+    else if (px === 48) score += 45;
+    else if (px === 32) score += 20;
+    else if (px > 0) score += 5;
+  }
+
+  const scaleMatch = baseName.match(/scale-(\d+)/i) || lower.match(/scale-(\d+)/i);
+  if (scaleMatch) {
+    const scale = Number.parseInt(scaleMatch[1], 10);
+    if (scale === 200) score += 65;
+    else if (scale === 150) score += 50;
+    else if (scale === 400) score += 48;
+    else if (scale === 125) score += 38;
+    else if (scale === 100) score += 25;
+    else if (scale > 0) score += 20;
+  }
+
+  if (isExact) {
+    score += 30;
+  }
+
+  if (ext === '.svg') score += 12;
+  else if (ext === '.png') score += 10;
+  else if (ext === '.webp') score += 8;
+  else if (ext === '.ico') score += 5;
+
+  if (baseName.startsWith(`${stemLower}.`) || baseName.startsWith(`${stemLower}_`)) {
+    score += 2;
+  }
+
+  return score;
+}
+
+/**
+ * Waehlt aus vorhandenen AppX-Asset-Dateien die beste konkrete Datei fuer einen logischen
+ * Manifest-Logo-Pfad (z. B. `Assets/Square44x44Logo.png` -> `Assets/Square44x44Logo.scale-200.png`).
+ * @param {string} logicalRelPath
+ * @param {string[]} [availableFiles]
+ * @returns {string | null}
+ */
+export function selectBestAppxLogoFile(logicalRelPath, availableFiles = []) {
+  const normTarget = normalizeManifestRelPath(logicalRelPath);
+  if (!normTarget || !Array.isArray(availableFiles) || availableFiles.length === 0) return null;
+
+  const targetLower = normTarget.toLowerCase();
+  const lastSlash = targetLower.lastIndexOf('/');
+  const targetDir = lastSlash !== -1 ? targetLower.slice(0, lastSlash) : '';
+  const targetFile = lastSlash !== -1 ? targetLower.slice(lastSlash + 1) : targetLower;
+  const dotIdx = targetFile.lastIndexOf('.');
+  const stemLower = dotIdx > 0 ? targetFile.slice(0, dotIdx) : targetFile;
+  if (!stemLower) return null;
+
+  const scored = [];
+
+  for (const rawFile of availableFiles) {
+    const normFile = normalizeManifestRelPath(rawFile);
+    if (!normFile) continue;
+    const fileLower = normFile.toLowerCase();
+    const ext = getExtLower(fileLower);
+    if (!DIRECT_IMAGE_EXTS.has(ext)) continue;
+
+    const fileSlash = fileLower.lastIndexOf('/');
+    const fileDir = fileSlash !== -1 ? fileLower.slice(0, fileSlash) : '';
+    const fileBase = fileSlash !== -1 ? fileLower.slice(fileSlash + 1) : fileLower;
+
+    // Muss im selben Verzeichnis oder einem direkten Qualifier-Unterordner liegen
+    let inExpectedDir = fileDir === targetDir;
+    if (!inExpectedDir && targetDir && fileDir.startsWith(`${targetDir}/`)) {
+      const sub = fileDir.slice(targetDir.length + 1);
+      inExpectedDir = !sub.includes('/');
+    } else if (!inExpectedDir && !targetDir && fileDir && !fileDir.includes('/')) {
+      inExpectedDir = true;
+    }
+    if (!inExpectedDir) continue;
+
+    const isExact = fileLower === targetLower;
+    const fileDot = fileBase.lastIndexOf('.');
+    const fileStem = fileDot > 0 ? fileBase.slice(0, fileDot) : fileBase;
+    const isVariant = fileStem === stemLower || fileStem.startsWith(`${stemLower}.`);
+    if (!isExact && !isVariant) continue;
+
+    const score = scoreAppxLogoVariant(normFile, { stemLower, isExact });
+    scored.push({ original: String(rawFile), score, isExact });
+  }
+
+  if (scored.length === 0) return null;
+  scored.sort((a, b) => b.score - a.score || Number(b.isExact) - Number(a.isExact));
+  return scored[0].original;
 }

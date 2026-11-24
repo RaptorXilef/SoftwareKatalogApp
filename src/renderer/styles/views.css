@@ -225,12 +225,30 @@
 }
 
 .bundle-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11.5px;
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg) 70%, var(--surface));
   border: 1px solid var(--border);
   color: var(--text);
+}
+
+.bundle-item-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.bundle-item-icon-fallback {
+  display: none;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .bundle-preview-more {

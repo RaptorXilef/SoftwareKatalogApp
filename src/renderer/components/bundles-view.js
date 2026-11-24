@@ -1,7 +1,8 @@
 import { evaluateBundleStatus } from '../../shared/bundles-logic.js';
 import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { getUsableProviders, state } from '../state.js';
-import { escapeHTML } from '../utils/sanitize.js';
+import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
+import { queueItemsForIconResolution } from './cards.js';
 
 let viewHandlers = {};
 
@@ -62,15 +63,33 @@ function renderBundleCardHtml(bundle) {
 
   const previewItems = items.slice(0, 5);
   const remainingCount = Math.max(0, items.length - previewItems.length);
+  const previewIconItems = [];
   const previewHtml = previewItems
     .map((entry) => {
       const icon = entry.status === 'up-to-date' ? '✅' : entry.status === 'outdated' ? '⬆️' : '⬇️';
       const shield = entry.adwareProtected ? ' 🛡️' : '';
-      return `<span class="bundle-preview-chip" title="${escapeHTML(entry.statusLabel)}">#${entry.order} ${icon} ${escapeHTML(entry.name)}${shield}</span>`;
+      const iconTarget = entry.matchedPackage || {
+        id: entry.key,
+        name: entry.name,
+        packageManager: entry.source === 'archive' ? '' : entry.source,
+        packageId: entry.packageId || '',
+      };
+      previewIconItems.push(iconTarget);
+      const iconPath =
+        iconTarget.icon ||
+        state.pcIconCache.get(iconTarget.id) ||
+        (iconTarget.pcApp?.id ? state.pcIconCache.get(iconTarget.pcApp.id) : null) ||
+        null;
+      const itemIconHtml = iconPath
+        ? `<img class="bundle-item-icon" src="${escapeHTML(toMediaUrl(iconPath))}" loading="lazy" decoding="async" alt="">`
+        : `<span class="bundle-item-icon-fallback" data-icon-item-id="${escapeHTML(iconTarget.id)}"></span>`;
+      return `<span class="bundle-preview-chip" title="${escapeHTML(entry.statusLabel)}">${itemIconHtml}#${entry.order} ${icon} ${escapeHTML(entry.name)}${shield}</span>`;
     })
     .join('');
 
-  return `
+  return {
+    previewIconItems,
+    html: `
     <article class="bundle-card" data-bundle-id="${escapeHTML(bundle.id)}">
       <div class="bundle-card-head">
         <div class="bundle-card-title-row">
@@ -121,7 +140,8 @@ function renderBundleCardHtml(bundle) {
         <button type="button" class="btn btn-danger" data-bundle-action="delete" data-bundle-id="${escapeHTML(bundle.id)}">🗑️ Löschen</button>
       </div>
     </article>
-  `;
+  `,
+  };
 }
 
 function getBundleProviderFilterOptions() {
@@ -191,6 +211,9 @@ export function renderBundlesView() {
     ? `<div class="discover-notice">⚠️ Die Bündel-Funktion im Hauptprozess ist noch nicht aktiv (alte Electron-Instanz läuft noch). Bitte beende alle laufenden Electron-Fenster und starte <code>npm run dev</code> bzw. die App einmal neu.</div>`
     : '';
 
+  const renderedCards = filtered.map(renderBundleCardHtml);
+  const bundleIconCandidates = renderedCards.flatMap((c) => c.previewIconItems);
+
   container.innerHTML = `
     <div class="bundles-header">
       <div class="bundles-header-main">
@@ -221,9 +244,13 @@ export function renderBundlesView() {
     ${
       filtered.length === 0
         ? renderEmptyBundlesHtml(Boolean(q || activeFilter !== 'all'))
-        : `<div class="bundles-grid">${filtered.map(renderBundleCardHtml).join('')}</div>`
+        : `<div class="bundles-grid">${renderedCards.map((c) => c.html).join('')}</div>`
     }
   `;
+
+  if (bundleIconCandidates.length > 0) {
+    queueItemsForIconResolution(bundleIconCandidates, { prioritize: true });
+  }
 
   const searchInput = container.querySelector('#bundleSearchInput');
   const clearBtn = container.querySelector('#clearBundleSearchBtn');

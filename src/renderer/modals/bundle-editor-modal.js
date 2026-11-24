@@ -462,7 +462,7 @@ export function renderBundleEditorModal({
             <span class="bundle-item-order">#${idx + 1}</span>
             <div class="bundle-item-main">
               <div class="bundle-item-title">
-                <strong>${escapeHTML(item.name)}</strong>
+                <strong>${escapeHTML(evalInfo.name || item.name)}</strong>
                 <span class="provider-badge ${escapeHTML(itemBadge?.badgeClass || '')}">${escapeHTML(itemBadge?.label || getProviderLabel(item.source))}</span>
                 ${modeHintHtml}
               </div>

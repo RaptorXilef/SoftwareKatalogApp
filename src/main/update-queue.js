@@ -139,6 +139,7 @@ async function executeQueueItem(entry, { signal, onProgress }) {
       typeof provider.upgrade === 'function'
         ? await provider.upgrade(entry.packageId, {
             silent: useSilent,
+            targetVersion: entry.toVersion || '',
             itemName: entry.name,
             signal,
             useJob: false,
@@ -146,6 +147,7 @@ async function executeQueueItem(entry, { signal, onProgress }) {
         : await provider.install(entry.packageId, {
             upgrade: true,
             silent: useSilent,
+            targetVersion: entry.toVersion || '',
             itemName: entry.name,
             signal,
             useJob: false,

@@ -4,8 +4,10 @@ import { app } from 'electron';
 import { createProviderCache } from '../../shared/provider-cache.js';
 import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import {
+  mergeWingetExportWithList,
   mergeWingetShowResults,
   parseWingetExportJson,
+  parseWingetListOutput,
   parseWingetSearchOutput,
   parseWingetShowOutput,
   parseWingetUpgradeOutput,
@@ -150,18 +152,46 @@ export const wingetProvider = {
     );
 
     try {
-      const { code, stderr } = await runWinget(
-        ['export', '-o', tempFile, '--include-versions', '--accept-source-agreements'],
-        { signal, timeoutMs: 60000 }
-      );
+      const [exportRes, listRes] = await Promise.all([
+        runWinget(['export', '-o', tempFile, '--include-versions', '--accept-source-agreements'], {
+          signal,
+          timeoutMs: 60000,
+        }),
+        runWinget(['list', '--source', 'winget', '--accept-source-agreements'], {
+          signal,
+          timeoutMs: 60000,
+        }),
+      ]);
 
-      if (signal?.aborted) return { success: false, packages: [], canceled: true };
+      if (signal?.aborted || exportRes.aborted || listRes.aborted) {
+        return { success: false, packages: [], canceled: true };
+      }
+
+      const listed = listRes.stdout
+        ? parseWingetListOutput(listRes.stdout, {
+            packageManager: 'winget',
+            defaultSource: 'winget',
+            requireDotInId: false,
+          })
+        : [];
+
       if (!fs.existsSync(tempFile)) {
-        return { success: false, packages: [], error: stderr || `winget export fehlgeschlagen (Code ${code}).` };
+        if (listed.length > 0) {
+          return { success: true, packages: listed };
+        }
+        return {
+          success: false,
+          packages: [],
+          error: exportRes.stderr || listRes.stderr || `winget export fehlgeschlagen (Code ${exportRes.code}).`,
+        };
       }
 
       const raw = await fs.promises.readFile(tempFile, 'utf-8');
-      const packages = parseWingetExportJson(raw);
+      const exported = parseWingetExportJson(raw);
+      const packages = mergeWingetExportWithList(exported, listed, {
+        packageManager: 'winget',
+        defaultSource: 'winget',
+      });
       return { success: true, packages };
     } catch (e) {
       return { success: false, packages: [], error: e.message };

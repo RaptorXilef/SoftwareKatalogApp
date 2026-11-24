@@ -4,6 +4,7 @@ import { app } from 'electron';
 import {
   mergeWingetShowResults,
   parseWingetExportJson,
+  parseWingetListOutput,
   parseWingetSearchOutput,
   parseWingetShowOutput,
   parseWingetUpgradeOutput,
@@ -131,6 +132,24 @@ export const msstoreProvider = {
   },
 
   async listInstalled({ signal = null } = {}) {
+    const listRes = await runWingetMsStore(['list', '--source', 'msstore', '--accept-source-agreements'], {
+      signal,
+      timeoutMs: 60000,
+    });
+
+    if (signal?.aborted || listRes.aborted) return { success: false, packages: [], canceled: true };
+
+    if (listRes.stdout) {
+      const listed = parseWingetListOutput(listRes.stdout, {
+        packageManager: 'msstore',
+        defaultSource: 'msstore',
+        requireDotInId: false,
+      });
+      if (listed.length > 0) {
+        return { success: true, packages: listed };
+      }
+    }
+
     const tempFile = path.join(
       app.getPath('temp'),
       `sk_msstore_export_${Date.now()}_${Math.random().toString(36).slice(2)}.json`
@@ -144,7 +163,14 @@ export const msstoreProvider = {
 
       if (signal?.aborted) return { success: false, packages: [], canceled: true };
       if (!fs.existsSync(tempFile)) {
-        return { success: false, packages: [], error: stderr || `winget export fehlgeschlagen (Code ${code}).` };
+        if (listRes.code === 0) {
+          return { success: true, packages: [] };
+        }
+        return {
+          success: false,
+          packages: [],
+          error: listRes.stderr || stderr || `winget list/export fehlgeschlagen (Code ${code}).`,
+        };
       }
 
       const raw = await fs.promises.readFile(tempFile, 'utf-8');

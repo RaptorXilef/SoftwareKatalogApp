@@ -1,7 +1,9 @@
 import path from 'node:path';
 import {
+  computeNvmUpgrades,
   isValidNvmVersion,
   normalizeNodeVersion,
+  parseNodeDistIndexJson,
   parseNvmListAvailableOutput,
   parseNvmListOutput,
 } from '../../shared/nvm-parser.js';
@@ -11,6 +13,56 @@ import { createCliAvailabilityChecker, createWingetBootstrapRunner } from './man
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000;
+const NODE_DIST_INDEX_URL = 'https://nodejs.org/dist/index.json';
+const NODE_DIST_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let nodeDistCache = {
+  fetchedAt: 0,
+  entries: [],
+};
+
+async function fetchNodeDistIndex({ signal = null, timeoutMs = 12000 } = {}) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
+  const now = Date.now();
+  if (nodeDistCache.entries.length > 0 && now - nodeDistCache.fetchedAt < NODE_DIST_CACHE_TTL_MS) {
+    return nodeDistCache.entries;
+  }
+
+  const controller = new AbortController();
+  const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const onExternalAbort = () => controller.abort();
+  if (signal) {
+    signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    const res = await fetch(NODE_DIST_INDEX_URL, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'SoftwareKatalogApp',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Node.js Release-Index HTTP-Fehler ${res.status}`);
+    }
+    const json = await res.json();
+    const parsed = parseNodeDistIndexJson(json);
+    if (parsed.length > 0) {
+      nodeDistCache = {
+        fetchedAt: Date.now(),
+        entries: parsed,
+      };
+    }
+    return parsed;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
+  }
+}
 
 function getNvmExtraPaths() {
   return [
@@ -132,7 +184,7 @@ export const nvmProvider = {
   capabilities: {
     search: true,
     listInstalled: true,
-    listUpgrades: false,
+    listUpgrades: true,
     show: true,
     install: true,
     uninstall: true,
@@ -198,6 +250,78 @@ export const nvmProvider = {
     return { success: true, packages };
   },
 
+  async listUpgrades({ signal = null, includeLatestLts = true, includeLatestCurrent = false } = {}) {
+    const installed = await this.listInstalled({ signal });
+    if (installed.canceled) return { success: false, upgrades: [], canceled: true };
+    if (!installed.success) return { success: false, upgrades: [], error: installed.error };
+    if (!installed.packages || installed.packages.length === 0) {
+      return { success: true, upgrades: [] };
+    }
+
+    const installedMajors = new Set(
+      installed.packages
+        .map((pkg) => Number.parseInt(String(pkg.version || '').split('.')[0], 10))
+        .filter(Number.isFinite)
+    );
+
+    let cliAvailable = [];
+    let cliError = null;
+    try {
+      const availRes = await runNvm(['list', 'available'], { signal, timeoutMs: 25000 });
+      if (availRes.aborted || signal?.aborted) {
+        return { success: false, upgrades: [], canceled: true };
+      }
+      if (availRes.code === 0 && availRes.stdout) {
+        cliAvailable = parseNvmListAvailableOutput(availRes.stdout, { limit: 0 });
+      } else {
+        cliError = availRes.error || availRes.stderr || null;
+      }
+    } catch (err) {
+      cliError = err?.message || null;
+    }
+
+    const cliMajors = new Set(
+      cliAvailable
+        .map((entry) => Number.parseInt(String(entry.version || '').split('.')[0], 10))
+        .filter(Number.isFinite)
+    );
+    const missingAnyInstalledMajor = [...installedMajors].some((major) => !cliMajors.has(major));
+
+    let distEntries = [];
+    if (cliAvailable.length === 0 || missingAnyInstalledMajor) {
+      try {
+        distEntries = await fetchNodeDistIndex({ signal, timeoutMs: 12000 });
+      } catch (err) {
+        if (signal?.aborted || err?.name === 'AbortError') {
+          return { success: false, upgrades: [], canceled: true };
+        }
+        if (cliAvailable.length === 0) {
+          return {
+            success: false,
+            upgrades: [],
+            error: err?.message || cliError || 'Verfuegbare Node.js-Versionen konnten nicht abgerufen werden.',
+          };
+        }
+      }
+    }
+
+    const mergedByVersion = new Map();
+    for (const entry of cliAvailable) {
+      mergedByVersion.set(entry.version, entry);
+    }
+    for (const entry of distEntries) {
+      if (!mergedByVersion.has(entry.version)) {
+        mergedByVersion.set(entry.version, entry);
+      }
+    }
+
+    const upgrades = computeNvmUpgrades(installed.packages, [...mergedByVersion.values()], {
+      includeLatestLts,
+      includeLatestCurrent,
+    });
+    return { success: true, upgrades };
+  },
+
   async show(packageId, { signal = null } = {}) {
     const cleanVer = normalizeNodeVersion(packageId);
     if (!isValidNvmVersion(cleanVer)) {
@@ -259,8 +383,12 @@ export const nvmProvider = {
     };
   },
 
-  async install(packageId, { itemName = '', signal = null, useJob = true } = {}) {
-    const cleanVer = normalizeNodeVersion(packageId);
+  async install(
+    packageId,
+    { upgrade = false, targetVersion = '', version = '', itemName = '', signal = null, useJob = true } = {}
+  ) {
+    const requestedRaw = upgrade ? targetVersion || version || packageId : version || packageId;
+    const cleanVer = normalizeNodeVersion(requestedRaw) || normalizeNodeVersion(packageId);
     if (!isValidNvmVersion(cleanVer, { allowAliases: true })) {
       return { success: false, error: 'Ungültige Node.js-Version für NVM angegeben.' };
     }
@@ -268,13 +396,16 @@ export const nvmProvider = {
     let job = null;
     if (useJob) {
       job = createJob({
-        type: 'nvm-install',
-        title: `NVM-Installation: ${itemName || `Node.js v${cleanVer}`}`,
+        type: upgrade ? 'nvm-upgrade' : 'nvm-install',
+        title: `NVM-${upgrade ? 'Update' : 'Installation'}: ${itemName || `Node.js v${cleanVer}`}`,
         dedupeKey: `nvm-install:${cleanVer.toLowerCase()}`,
         cancelable: true,
       });
       if (!job) return { success: false, alreadyRunning: true, error: 'NVM-Installation läuft bereits.' };
-      job.update(null, `Installiere Node.js ${cleanVer} via NVM...`);
+      job.update(
+        null,
+        upgrade ? `Installiere Node.js v${cleanVer} (Update) via NVM...` : `Installiere Node.js ${cleanVer} via NVM...`
+      );
     }
 
     const activeSignal = job ? job.signal : signal;
@@ -297,6 +428,10 @@ export const nvmProvider = {
     const errMsg = (res.stderr || res.stdout || res.error || `NVM-Fehlercode ${res.code}`).trim();
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: res.code, error: errMsg };
+  },
+
+  async upgrade(packageId, opts = {}) {
+    return this.install(packageId, { ...opts, upgrade: true });
   },
 
   async uninstall(packageId, { itemName = '', signal = null, useJob = true } = {}) {

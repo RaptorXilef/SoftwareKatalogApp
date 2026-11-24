@@ -28,8 +28,21 @@ const STATUS_META = {
 };
 
 const iconQueue = [];
+const queuedIconIds = new Set();
 let activeIconJobs = 0;
 const MAX_ICON_JOBS = 4;
+
+function createCardIconImg(iconPath, cls = 'card-icon') {
+  const img = document.createElement('img');
+  img.className = cls;
+  img.src = toMediaUrl(iconPath);
+  if (cls === 'card-icon') {
+    img.loading = 'lazy';
+    img.decoding = 'async';
+  }
+  img.alt = '';
+  return img;
+}
 
 function updateCardIconInDom(itemId, iconPath) {
   const grid = document.getElementById('grid');
@@ -38,24 +51,30 @@ function updateCardIconInDom(itemId, iconPath) {
       if (!(card instanceof HTMLElement) || card.dataset.id !== itemId) continue;
       const fallback = card.querySelector('.card-icon-fallback');
       if (!fallback) continue;
-      const img = document.createElement('img');
-      img.className = 'card-icon';
-      img.src = toMediaUrl(iconPath);
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      img.alt = '';
-      fallback.replaceWith(img);
+      fallback.replaceWith(createCardIconImg(iconPath, 'card-icon'));
+    }
+  }
+
+  const bundlesView = document.getElementById('bundlesView');
+  if (bundlesView) {
+    for (const slot of bundlesView.querySelectorAll('[data-icon-item-id]')) {
+      if (!(slot instanceof HTMLElement) || slot.dataset.iconItemId !== itemId) continue;
+      slot.replaceWith(createCardIconImg(iconPath, 'bundle-item-icon'));
     }
   }
 
   if (state.currentModalId === itemId) {
     const detailFallback = document.querySelector('#modalContent .detail-icon-fallback');
     if (detailFallback) {
-      const img = document.createElement('img');
-      img.className = 'detail-icon';
-      img.src = toMediaUrl(iconPath);
-      img.alt = '';
-      detailFallback.replaceWith(img);
+      detailFallback.replaceWith(createCardIconImg(iconPath, 'detail-icon'));
+    }
+  }
+
+  const modalEl = document.getElementById('modalContent');
+  if (modalEl) {
+    for (const slot of modalEl.querySelectorAll('[data-icon-item-id]')) {
+      if (!(slot instanceof HTMLElement) || slot.dataset.iconItemId !== itemId) continue;
+      slot.replaceWith(createCardIconImg(iconPath, 'bundle-item-icon'));
     }
   }
 }
@@ -77,6 +96,9 @@ function hasAnyIconSourceCandidate(item) {
       item.uninstallString ||
       item.packageId ||
       item.wingetId ||
+      item.appxPackageFamilyName ||
+      item.homepage ||
+      item.packageManager ||
       item.webVersionUrl ||
       item.links?.length ||
       item.isInstalled
@@ -86,7 +108,9 @@ function hasAnyIconSourceCandidate(item) {
 function pumpIconQueue() {
   while (activeIconJobs < MAX_ICON_JOBS && iconQueue.length > 0) {
     const item = iconQueue.shift();
-    if (!item || state.pcIconCache.has(item.id) || item.icon) continue;
+    if (!item) continue;
+    queuedIconIds.delete(item.id);
+    if (state.pcIconCache.has(item.id) || item.icon) continue;
     activeIconJobs++;
     window.electronAPI
       .extractCachedAppIcon({
@@ -98,6 +122,8 @@ function pumpIconQueue() {
         uninstallString: item.uninstallString || '',
         packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
         packageId: item.packageId || item.wingetId || '',
+        appxPackageFamilyName: item.appxPackageFamilyName || '',
+        homepage: item.homepage || '',
         webVersionUrl: item.webVersionUrl || '',
         links: Array.isArray(item.links) ? item.links : [],
       })
@@ -121,14 +147,47 @@ function pumpIconQueue() {
   }
 }
 
-function queuePcIconExtraction(entries) {
-  for (const { item } of entries) {
-    if (item.icon || state.pcIconTried.has(item.id)) continue;
+/**
+ * Reiht sichtbare Pakete/Karten fuer die gedrosselte Hintergrund-Icon-Aufloesung ein
+ * und aktualisiert vorhandene Karten sofort live im DOM.
+ * @param {Array<Record<string, any>>} items
+ * @param {{ prioritize?: boolean }} [options]
+ */
+export function queueItemsForIconResolution(items, { prioritize = true } = {}) {
+  const toPrepend = [];
+  for (const item of items || []) {
+    if (!item?.id) continue;
+    const cachedPath =
+      item.icon ||
+      state.pcIconCache.get(item.id) ||
+      (item.pcApp?.id ? state.pcIconCache.get(item.pcApp.id) : null) ||
+      null;
+    if (cachedPath) {
+      item.icon = cachedPath;
+      updateCardIconInDom(item.id, cachedPath);
+      continue;
+    }
+    if (state.pcIconTried.has(item.id) || queuedIconIds.has(item.id)) continue;
     if (!hasAnyIconSourceCandidate(item)) continue;
     state.pcIconTried.add(item.id);
-    iconQueue.push(item);
+    queuedIconIds.add(item.id);
+    if (prioritize) {
+      toPrepend.push(item);
+    } else {
+      iconQueue.push(item);
+    }
+  }
+  if (toPrepend.length > 0) {
+    iconQueue.unshift(...toPrepend);
   }
   pumpIconQueue();
+}
+
+function queuePcIconExtraction(entries) {
+  queueItemsForIconResolution(
+    (entries || []).map((e) => e.item),
+    { prioritize: true }
+  );
 }
 
 function isProviderItemVisible(item) {

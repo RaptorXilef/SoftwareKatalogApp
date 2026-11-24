@@ -285,6 +285,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
           typeof provider.upgrade === 'function'
             ? await provider.upgrade(task.packageId, {
                 silent: false,
+                targetVersion: task.toVersion || '',
                 itemName: task.name,
                 signal: job.signal,
                 useJob: false,
@@ -292,6 +293,7 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
             : await provider.install(task.packageId, {
                 upgrade: true,
                 silent: false,
+                targetVersion: task.toVersion || '',
                 itemName: task.name,
                 signal: job.signal,
                 useJob: false,

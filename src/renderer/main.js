@@ -436,6 +436,10 @@ document.addEventListener(
       target.replaceWith(fallback);
       return;
     }
+    if (target.classList.contains('bundle-item-icon')) {
+      target.remove();
+      return;
+    }
     if (target.classList.contains('detail-icon')) {
       const id = state.currentModalId || '';
       const isPcOnly = PC_ONLY_ID_RE.test(id);

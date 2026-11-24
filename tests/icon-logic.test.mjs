@@ -6,10 +6,12 @@ import {
   extractCandidateHomepageUrls,
   isGenericIconSource,
   isIgnoredExecutableName,
+  parseAppxManifestMetadata,
   parseDisplayIcon,
   parseFaviconLinksFromHtml,
   resolvePackageIcon,
   scoreExecutableCandidate,
+  selectBestAppxLogoFile,
 } from '../src/shared/icon-logic.js';
 
 describe('icon-logic: parseDisplayIcon & Pfadbereinigung', () => {
@@ -197,5 +199,76 @@ describe('icon-logic: Icon-Priorität & Online-Favicon-Fallback', () => {
     assert.equal(icons[0], 'https://example.org/apple-touch-icon.png');
     assert.equal(icons[1], 'https://example.org/assets/logo.png');
     assert.equal(icons[2], 'https://example.org/favicon.ico');
+  });
+});
+
+describe('icon-logic: AppX-Manifest-Logo-Parsing & Scale-Auswahl', () => {
+  it('parst AppxManifest.xml mit DisplayName, PublisherDisplayName und priorisierten Logo-Pfaden', () => {
+    const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
+      <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+               xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+        <Properties>
+          <DisplayName>HP Smart</DisplayName>
+          <PublisherDisplayName>HP Inc.</PublisherDisplayName>
+          <Logo>Assets\\StoreLogo.png</Logo>
+        </Properties>
+        <Applications>
+          <Application Id="App">
+            <uap:VisualElements
+              DisplayName="ms-resource:AppDisplayName"
+              Square150x150Logo="Assets\\MedTile.png"
+              Square44x44Logo="Assets\\AppList.png" />
+          </Application>
+        </Applications>
+      </Package>`;
+
+    const meta = parseAppxManifestMetadata(manifestXml);
+    assert.equal(meta.displayName, 'HP Smart');
+    assert.equal(meta.publisherDisplayName, 'HP Inc.');
+    assert.deepEqual(meta.logoCandidates, ['Assets/MedTile.png', 'Assets/AppList.png', 'Assets/StoreLogo.png']);
+
+    const resourceOnlyXml = `<?xml version="1.0" encoding="utf-8"?>
+      <Package>
+        <Properties>
+          <DisplayName>ms-resource:PkgDisplayName</DisplayName>
+          <Logo>Assets\\Logo.png</Logo>
+        </Properties>
+        <Applications>
+          <Application Id="App">
+            <uap:VisualElements DisplayName="WhatsApp Desktop" Square44x44Logo="Assets\\Square44x44Logo.png" />
+          </Application>
+        </Applications>
+      </Package>`;
+
+    const resourceMeta = parseAppxManifestMetadata(resourceOnlyXml);
+    assert.equal(resourceMeta.displayName, 'WhatsApp Desktop');
+    assert.deepEqual(resourceMeta.logoCandidates, ['Assets/Square44x44Logo.png', 'Assets/Logo.png']);
+  });
+
+  it('bevorzugt scale-200 / targetsize-48_altform-unplated und meidet high-contrast Logos', () => {
+    const files = [
+      'Assets/Square44x44Logo.scale-100.png',
+      'Assets/Square44x44Logo.scale-200.png',
+      'Assets/Square44x44Logo.contrast-white_scale-200.png',
+      'Assets/Square44x44Logo.targetsize-16.png',
+      'Assets/Square44x44Logo.targetsize-48_altform-unplated.png',
+    ];
+    assert.equal(selectBestAppxLogoFile('Assets/Square44x44Logo.png', files), 'Assets/Square44x44Logo.scale-200.png');
+
+    const targetFiles = [
+      'Assets/AppList.targetsize-24.png',
+      'Assets/AppList.targetsize-48_altform-unplated.png',
+      'Assets/AppList.targetsize-48_contrast-black.png',
+    ];
+    assert.equal(
+      selectBestAppxLogoFile('Assets/AppList.png', targetFiles),
+      'Assets/AppList.targetsize-48_altform-unplated.png'
+    );
+
+    const subQualifierFiles = ['Assets/scale-100/MedTile.png', 'Assets/scale-200/MedTile.png'];
+    assert.equal(selectBestAppxLogoFile('Assets/MedTile.png', subQualifierFiles), 'Assets/scale-200/MedTile.png');
+
+    assert.equal(selectBestAppxLogoFile('Assets/Logo.png', ['Assets/Logo.png']), 'Assets/Logo.png');
+    assert.equal(selectBestAppxLogoFile('Assets/Missing.png', ['Assets/Other.png']), null);
   });
 });

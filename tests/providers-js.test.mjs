@@ -70,9 +70,14 @@ const {
   mergeBunGlobalPackages,
   parsePnpmListJson,
 } = await import('../src/shared/npm-parser.js');
-const { isValidNvmVersion, normalizeNodeVersion, parseNvmListAvailableOutput, parseNvmListOutput } = await import(
-  '../src/shared/nvm-parser.js'
-);
+const {
+  computeNvmUpgrades,
+  isValidNvmVersion,
+  normalizeNodeVersion,
+  parseNodeDistIndexJson,
+  parseNvmListAvailableOutput,
+  parseNvmListOutput,
+} = await import('../src/shared/nvm-parser.js');
 const {
   isValidComposerPackageName,
   parseComposerOutdatedJson,
@@ -326,6 +331,58 @@ describe('nvm-parser', () => {
     assert.equal(v20Only.length, 1);
     assert.equal(v20Only[0].packageId, '20.18.1');
   });
+
+  it('parst nodejs.org dist/index.json und erkennt NVM-Upgrades je Major-Reihe (z. B. 26.12.1 -> 26.13.1) sowie optional LTS/Current', () => {
+    const distJson = JSON.stringify([
+      { version: 'v27.1.0', lts: false, date: '2026-11-20' },
+      { version: 'v26.13.1', lts: 'Zeta', date: '2026-11-18' },
+      { version: 'v26.12.1', lts: 'Zeta', date: '2026-10-01' },
+      { version: 'v22.14.0', lts: 'Jod', date: '2026-09-10' },
+      { version: 'v22.11.0', lts: 'Jod', date: '2025-10-29' },
+      { version: 'v20.19.0', lts: 'Iron', date: '2026-08-01' },
+      { version: 'v18.20.8', lts: 'Hydrogen', date: '2025-04-01' },
+    ]);
+
+    const distEntries = parseNodeDistIndexJson(distJson);
+    assert.equal(distEntries.length, 7);
+    assert.equal(distEntries[0].version, '27.1.0');
+    assert.equal(distEntries[0].channel, 'Current');
+    assert.equal(distEntries[1].version, '26.13.1');
+    assert.equal(distEntries[1].channel, 'LTS');
+
+    // Fall 1: 26.12.1 -> 26.13.1 und 20.18.1 -> 20.19.0 (22.14.0 bereits installiert -> kein Update fuer 22.11.0 auf 22.14.0)
+    const installed = [
+      { packageId: '26.12.1', name: 'Node.js v26.12.1', version: '26.12.1', isActive: true, arch: '64-bit' },
+      { packageId: '22.14.0', name: 'Node.js v22.14.0', version: '22.14.0', isActive: false, arch: '64-bit' },
+      { packageId: '20.18.1', name: 'Node.js v20.18.1', version: '20.18.1', isActive: false, arch: '64-bit' },
+    ];
+    const upgrades = computeNvmUpgrades(installed, distEntries);
+    assert.equal(upgrades.length, 2);
+    assert.equal(upgrades[0].packageId, '26.12.1');
+    assert.equal(upgrades[0].installedVersion, '26.12.1');
+    assert.equal(upgrades[0].availableVersion, '26.13.1');
+    assert.equal(upgrades[0].isActive, true);
+    assert.equal(upgrades[1].packageId, '20.18.1');
+    assert.equal(upgrades[1].availableVersion, '20.19.0');
+
+    // Fall 2: Bereits neuestes 18.x installiert -> optionales LTS-Upgrade auf 26.13.1, kein Fehlalarm wenn 26.13.1 schon drauf ist
+    const ltsFallback = computeNvmUpgrades([{ version: '18.20.8' }], distEntries, { includeLatestLts: true });
+    assert.equal(ltsFallback.length, 1);
+    assert.equal(ltsFallback[0].availableVersion, '26.13.1');
+
+    const alreadyHasLatestLts = computeNvmUpgrades([{ version: '18.20.8' }, { version: '26.13.1' }], distEntries, {
+      includeLatestLts: true,
+    });
+    assert.equal(alreadyHasLatestLts.length, 0);
+
+    // Fall 3: includeLatestCurrent schlaegt 27.1.0 vor, wenn 26.13.1 bereits aktuell ist
+    const currentOpt = computeNvmUpgrades([{ version: '26.13.1' }], distEntries, {
+      includeLatestLts: true,
+      includeLatestCurrent: true,
+    });
+    assert.equal(currentOpt.length, 1);
+    assert.equal(currentOpt[0].availableVersion, '27.1.0');
+  });
 });
 
 describe('composer-parser', () => {
@@ -429,7 +486,7 @@ describe('registry defaults & cross-provider integration for JS/Runtime/PHP', ()
 
     const nvm = getProvider('nvm');
     assert.equal(nvm.category, 'runtime');
-    assert.equal(nvm.capabilities.listUpgrades, false);
+    assert.equal(nvm.capabilities.listUpgrades, true);
     assert.equal(typeof nvm.useVersion, 'function');
 
     const composer = getProvider('composer');

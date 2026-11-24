@@ -1,4 +1,5 @@
 import { resolvePackageIcon } from './icon-logic.js';
+import { isIdLikeDisplayName } from './installed-merger.js';
 import { compareVersions, extractVersion } from './version.js';
 
 const GENERIC_DIRS = new Set([
@@ -325,8 +326,14 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       origin,
     });
 
+    const preferredArchiveName =
+      isIdLikeDisplayName(item.name, packageId) && matchedPc?.name && !isIdLikeDisplayName(matchedPc.name, packageId)
+        ? matchedPc.name
+        : item.name;
+
     unified.push({
       ...item,
+      name: preferredArchiveName,
       origin,
       inArchive: true,
       archiveItemId: item.id,
@@ -335,6 +342,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       iconSource: resolvedIcon.source,
       isInstalled,
       installedVersion,
+      installedVersionIsLowerBound: Boolean(matchedPc?.installedVersionIsLowerBound),
       webVersion,
       packageManager,
       packageId,
@@ -342,7 +350,9 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       providerName: getProviderBadgeInfo(packageManager)?.label || '',
       bucket: matchedPc?.bucket || item.bucket || '',
       isActive: Boolean(matchedPc?.isActive),
-      publisher: matchedPc?.publisher || '',
+      publisher: matchedPc?.publisher || item.publisher || '',
+      homepage: matchedPc?.homepage || item.homepage || '',
+      appxPackageFamilyName: matchedPc?.appxPackageFamilyName || '',
       pcApp: matchedPc || null,
       canUninstall: Boolean(matchedPc?.canUninstall),
       uninstallString: matchedPc?.uninstallString || '',
@@ -383,6 +393,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       archiveIcon: null,
       isInstalled: true,
       installedVersion,
+      installedVersionIsLowerBound: Boolean(pcApp.installedVersionIsLowerBound),
       webVersion,
       packageManager: pkgManager,
       packageId: pkgId,
@@ -390,6 +401,8 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       providerName: getProviderBadgeInfo(pkgManager)?.label || '',
       bucket: pcApp.bucket || '',
       isActive: Boolean(pcApp.isActive),
+      homepage: pcApp.homepage || '',
+      appxPackageFamilyName: pcApp.appxPackageFamilyName || '',
       webSourceType: pkgManager === 'winget' ? 'winget' : 'none',
       tags: pcApp.publisher ? [pcApp.publisher] : [],
       mainCategory: '',
@@ -550,10 +563,13 @@ export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
       item.isInstalled && webVersion && localVersion && compareVersions(webVersion, localVersion, depth) > 0
     );
   } else if (item.origin === 'pc') {
+    const hasKnownUpgradeFlag = Boolean(item.hasWingetUpgrade || item.hasProviderUpgrade);
+    const localIsUnknown = !localVersion || /^(?:unknown|unbekannt|-)$/i.test(String(localVersion).trim());
     hasWebUpdate = Boolean(
       webVersion &&
         ((localVersion && compareVersions(webVersion, localVersion, depth) > 0) ||
-          ((item.hasWingetUpgrade || item.hasProviderUpgrade) && webVersion !== localVersion))
+          (hasKnownUpgradeFlag &&
+            (webVersion !== localVersion || Boolean(item.installedVersionIsLowerBound) || localIsUnknown)))
     );
   } else {
     hasWebUpdate = Boolean(webVersion && (!archiveVersion || compareVersions(webVersion, archiveVersion, depth) > 0));

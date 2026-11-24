@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { app, shell } from 'electron';
 import {
@@ -10,11 +11,19 @@ import {
   extractCandidateHomepageUrls,
   isGenericIconSource,
   isIgnoredExecutableName,
+  parseAppxManifestMetadata,
   parseDisplayIcon,
   parseFaviconLinksFromHtml,
   scoreExecutableCandidate,
+  selectBestAppxLogoFile,
 } from '../shared/icon-logic.js';
-import { mergeInstalledSoftware } from '../shared/installed-merger.js';
+import {
+  isCrypticStoreId,
+  isUnknownVersionString,
+  matchAppxEntryForPackage,
+  mergeInstalledSoftware,
+  pickBestDisplayName,
+} from '../shared/installed-merger.js';
 import {
   normalizeInstallMode,
   resolveInstallExecutionPlan,
@@ -876,12 +885,127 @@ function syncArchiveInstalledVersions(programs) {
   }
 }
 
+function buildShowCacheKey(packageManager, packageId) {
+  const cleanPm = String(packageManager || 'winget')
+    .trim()
+    .toLowerCase();
+  const cleanPidLower = String(packageId || '')
+    .trim()
+    .toLowerCase();
+  if (!cleanPidLower) return '';
+  if (['npm', 'bun', 'pnpm'].includes(cleanPm)) {
+    return `npm-registry:show:${cleanPidLower}`;
+  }
+  if (['pip', 'uv'].includes(cleanPm)) {
+    return `pypi:show:${normalizePythonPackageName(cleanPidLower)}`;
+  }
+  if (['pwsh7', 'pwsh5'].includes(cleanPm)) {
+    return `psgallery:show:${cleanPidLower}`;
+  }
+  if (cleanPm === 'vcpkg') {
+    return `vcpkg:show:${cleanPidLower.split(':')[0]}`;
+  }
+  return `${cleanPm}:show:${cleanPidLower}`;
+}
+
+let appxInventoryCache = null;
+let appxInventoryPromise = null;
+
 /**
- * Kombiniert `winget export`, `winget upgrade` und Windows-Registry-Uninstall-Daten
- * zu einer vollständigen Liste aller auf diesem PC installierten Programme.
+ * Liest installierte AppX-/MS-Store-Apps inkl. StartApps-Anzeigenamen und `AppxManifest.xml`-Metadaten.
+ * @param {AbortSignal | null} [signal]
+ */
+export async function getInstalledAppxInventory(signal = null) {
+  if (appxInventoryCache) return appxInventoryCache;
+  if (appxInventoryPromise) return appxInventoryPromise;
+
+  appxInventoryPromise = (async () => {
+    const psScript = `
+      [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+      $ErrorActionPreference = 'SilentlyContinue'
+      $startMap = @{}
+      foreach ($sa in (Get-StartApps)) {
+        if ($sa.AppID -and $sa.Name) {
+          $fam = ($sa.AppID -split '!')[0]
+          if ($fam -and -not $startMap.ContainsKey($fam)) {
+            $startMap[$fam] = [string]$sa.Name
+          }
+        }
+      }
+      $items = Get-AppxPackage | Where-Object { -not $_.IsFramework -and -not $_.IsResourcePackage -and $_.InstallLocation } | ForEach-Object {
+        $fam = [string]$_.PackageFamilyName
+        [PSCustomObject]@{
+          name = [string]$_.Name
+          packageFamilyName = $fam
+          version = [string]$_.Version
+          installLocation = [string]$_.InstallLocation
+          startAppName = if ($fam -and $startMap.ContainsKey($fam)) { [string]$startMap[$fam] } else { '' }
+        }
+      }
+      ConvertTo-Json -InputObject @($items) -Depth 2 -Compress
+    `;
+
+    try {
+      const { code, stdout } = await runPowerShell(psScript, { signal, asTempFile: true });
+      if (signal?.aborted || code === -1 || !stdout) return [];
+
+      const parsed = JSON.parse(stdout);
+      const rawList = Array.isArray(parsed) ? parsed : [parsed];
+      const inventory = [];
+
+      for (const raw of rawList) {
+        if (!raw || typeof raw !== 'object') continue;
+        const installLocation = String(raw.installLocation || '').trim();
+        const pkgName = String(raw.name || '').trim();
+        if (!installLocation && !pkgName) continue;
+
+        let manifestMeta = { displayName: '', publisherDisplayName: '', logoCandidates: [] };
+        if (installLocation) {
+          const manifestPath = path.join(installLocation, 'AppxManifest.xml');
+          try {
+            if (fs.existsSync(manifestPath)) {
+              const xml = await fs.promises.readFile(manifestPath, 'utf-8');
+              manifestMeta = parseAppxManifestMetadata(xml);
+            }
+          } catch {
+            // Zugriff auf geschuetzten WindowsApps-Unterordner ignorieren
+          }
+        }
+
+        const startAppName = String(raw.startAppName || '').trim();
+        const cleanedPkgName = pkgName.includes('.') ? pkgName.slice(pkgName.indexOf('.') + 1) : pkgName;
+        const displayName = startAppName || manifestMeta.displayName || cleanedPkgName || pkgName;
+
+        inventory.push({
+          name: pkgName,
+          packageFamilyName: String(raw.packageFamilyName || '').trim(),
+          displayName,
+          publisherDisplayName: manifestMeta.publisherDisplayName,
+          version: String(raw.version || '').trim(),
+          installLocation,
+          logoCandidates: manifestMeta.logoCandidates,
+        });
+      }
+
+      appxInventoryCache = inventory;
+      return inventory;
+    } catch {
+      return [];
+    } finally {
+      appxInventoryPromise = null;
+    }
+  })();
+
+  return appxInventoryPromise;
+}
+
+/**
+ * Kombiniert `winget export`, `winget upgrade`, Provider-Daten, Registry und AppX-Inventar
+ * zu einer vollstaendigen Liste aller auf diesem PC installierten Programme.
  */
 export async function scanInstalledSoftware({ includeSystemComponents = false, silent = false } = {}) {
   startMenuShortcutsCache = null;
+  appxInventoryCache = null;
   failedIconKeys.clear();
   let job = null;
   if (!silent) {
@@ -909,32 +1033,39 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
     const emptyInstalled = Promise.resolve({ success: false, packages: [] });
     const emptyUpgrades = Promise.resolve({ success: false, upgrades: [] });
 
-    const [registryEntries, exportRes, upgradeRes, msstoreInstalledRes, msstoreUpgradeRes, extraProviderResults] =
-      await Promise.all([
-        readRegistryUninstallEntries(signal),
-        wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
-        wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
-        !wingetEnabled && msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
-        msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
-        Promise.all(
-          extraProviders.map(async (provider) => {
-            const [installedSettled, upgradesSettled] = await Promise.allSettled([
-              provider.capabilities?.listInstalled && typeof provider.listInstalled === 'function'
-                ? provider.listInstalled({ signal })
-                : emptyInstalled,
-              provider.capabilities?.listUpgrades && typeof provider.listUpgrades === 'function'
-                ? provider.listUpgrades({ signal })
-                : emptyUpgrades,
-            ]);
-            return {
-              installed:
-                installedSettled.status === 'fulfilled' ? installedSettled.value : { success: false, packages: [] },
-              upgrades:
-                upgradesSettled.status === 'fulfilled' ? upgradesSettled.value : { success: false, upgrades: [] },
-            };
-          })
-        ),
-      ]);
+    const [
+      registryEntries,
+      appxEntries,
+      exportRes,
+      upgradeRes,
+      msstoreInstalledRes,
+      msstoreUpgradeRes,
+      extraProviderResults,
+    ] = await Promise.all([
+      readRegistryUninstallEntries(signal),
+      msstoreEnabled || wingetEnabled ? getInstalledAppxInventory(signal) : Promise.resolve([]),
+      wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
+      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
+      msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
+      msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
+      Promise.all(
+        extraProviders.map(async (provider) => {
+          const [installedSettled, upgradesSettled] = await Promise.allSettled([
+            provider.capabilities?.listInstalled && typeof provider.listInstalled === 'function'
+              ? provider.listInstalled({ signal })
+              : emptyInstalled,
+            provider.capabilities?.listUpgrades && typeof provider.listUpgrades === 'function'
+              ? provider.listUpgrades({ signal })
+              : emptyUpgrades,
+          ]);
+          return {
+            installed:
+              installedSettled.status === 'fulfilled' ? installedSettled.value : { success: false, packages: [] },
+            upgrades: upgradesSettled.status === 'fulfilled' ? upgradesSettled.value : { success: false, upgrades: [] },
+          };
+        })
+      ),
+    ]);
 
     if (signal?.aborted) {
       return { success: false, canceled: true };
@@ -953,9 +1084,30 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
             .map((pkg) => ({ ...pkg, packageManager: 'msstore', source: 'msstore' }))
         : [];
 
-    const providerInstalled = [
-      ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : msstoreFromWingetExport),
-    ];
+    const msstoreById = new Map();
+    for (const pkg of [
+      ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : []),
+      ...msstoreFromWingetExport,
+    ]) {
+      const pid = String(pkg?.packageId || pkg?.id || '').trim();
+      if (!pid) continue;
+      const key = pid.toLowerCase();
+      const prev = msstoreById.get(key);
+      if (!prev) {
+        msstoreById.set(key, pkg);
+      } else {
+        msstoreById.set(key, {
+          ...prev,
+          ...pkg,
+          name: pickBestDisplayName({ candidates: [prev.name, pkg.name], packageId: pid, packageManager: 'msstore' }),
+          version: !isUnknownVersionString(prev.version) ? prev.version : pkg.version || prev.version || '',
+          availableVersion: prev.availableVersion || pkg.availableVersion || '',
+          installedVersionIsLowerBound: Boolean(prev.installedVersionIsLowerBound || pkg.installedVersionIsLowerBound),
+        });
+      }
+    }
+
+    const providerInstalled = [...msstoreById.values()];
     const providerUpgrades = [...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : [])];
 
     for (const extra of extraProviderResults) {
@@ -967,16 +1119,87 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
       }
     }
 
+    const cache = getWingetCache();
+    const cachedMetadata = new Map();
+    const collectCachedMeta = (pm, pid) => {
+      const cleanPm = String(pm || '')
+        .trim()
+        .toLowerCase();
+      const cleanPid = String(pid || '').trim();
+      if (!cleanPm || !cleanPid) return;
+      const mapKey = `${cleanPm}:${cleanPid.toLowerCase()}`;
+      if (cachedMetadata.has(mapKey)) return;
+      const cacheKey = buildShowCacheKey(cleanPm, cleanPid);
+      if (!cacheKey) return;
+      const cached = cache.get(cacheKey)?.data;
+      if (cached) cachedMetadata.set(mapKey, cached);
+    };
+
+    for (const pkg of wingetExports) collectCachedMeta('winget', pkg.packageId);
+    for (const up of wingetUpgrades) collectCachedMeta('winget', up.packageId);
+    for (const pkg of providerInstalled) collectCachedMeta(pkg.packageManager, pkg.packageId || pkg.id);
+    for (const up of providerUpgrades) collectCachedMeta(up.packageManager, up.packageId || up.id);
+
     const programs = mergeInstalledSoftware({
       wingetExports,
       wingetUpgrades,
       providerInstalled,
       providerUpgrades,
       registryEntries,
+      appxEntries,
+      cachedMetadata,
       catalogItems,
       includeSystemComponents,
       msiEnabled,
     });
+
+    // Fuer MS-Store-Apps, die noch keinen lesbaren Namen haben, optional `msstore.show()` (max. 12, Parallelitaet 3)
+    if (msstoreProv && typeof msstoreProv.show === 'function' && !signal?.aborted) {
+      const unresolvedMsStore = programs
+        .filter((p) => p.packageManager === 'msstore' && isCrypticStoreId(p.name) && p.packageId)
+        .slice(0, 12);
+
+      if (unresolvedMsStore.length > 0) {
+        const executing = new Set();
+        for (const prog of unresolvedMsStore) {
+          if (signal?.aborted) break;
+          const task = (async () => {
+            try {
+              const showRes = await msstoreProv.show(prog.packageId, { signal });
+              const data = showRes?.success ? showRes.package : null;
+              if (!data) return;
+              if (data.name && !isCrypticStoreId(data.name)) {
+                prog.name = data.name;
+              }
+              if (!prog.publisher && (data.publisher || data.author)) {
+                prog.publisher = data.publisher || data.author;
+              }
+              if (!prog.homepage && (data.homepage || data.publisherUrl)) {
+                prog.homepage = data.homepage || data.publisherUrl;
+              }
+              if (!prog.installLocation && appxEntries.length > 0) {
+                const matchedAppx = matchAppxEntryForPackage(prog, appxEntries);
+                if (matchedAppx) {
+                  prog.installLocation = matchedAppx.installLocation || prog.installLocation;
+                  prog.appxPackageFamilyName = matchedAppx.packageFamilyName || prog.appxPackageFamilyName;
+                  if (isUnknownVersionString(prog.installedVersion) && matchedAppx.version) {
+                    prog.installedVersion = matchedAppx.version;
+                  }
+                }
+              }
+            } catch {
+              // Einzelne show()-Fehler blockieren keinen PC-Scan
+            }
+          })();
+          executing.add(task);
+          task.finally(() => executing.delete(task));
+          if (executing.size >= 3) {
+            await Promise.race(executing);
+          }
+        }
+        await Promise.all(executing);
+      }
+    }
 
     syncArchiveInstalledVersions(programs);
 
@@ -1467,11 +1690,107 @@ async function fetchOnlineFaviconToCache({ appKey, homepageUrls, cacheDir }) {
   return null;
 }
 
+function createConcurrencyLimiter(maxConcurrent) {
+  let active = 0;
+  const waiting = [];
+  return async (fn) => {
+    if (active >= maxConcurrent) {
+      await new Promise((resolve) => waiting.push(resolve));
+    }
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      const next = waiting.shift();
+      if (next) next();
+    }
+  };
+}
+
+const runBgCliShowLimited = createConcurrencyLimiter(2);
+const runBgHttpShowLimited = createConcurrencyLimiter(4);
+const HTTP_SHOW_PROVIDERS = new Set(['npm', 'bun', 'pnpm', 'pip', 'uv', 'cargo', 'composer', 'dotnet', 'nvm']);
+
+async function collectRelImageFilesInDir(rootDir, subRelDir, maxDepth = 1) {
+  const results = [];
+  const startDir = subRelDir ? path.join(rootDir, subRelDir) : rootDir;
+  if (!fs.existsSync(startDir)) return results;
+
+  const walk = async (dir, relPrefix, depth) => {
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relPath = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) {
+          await walk(fullPath, relPath, depth + 1);
+        }
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (CACHE_IMAGE_EXTS.includes(ext)) {
+          results.push(relPath);
+        }
+      }
+    }
+  };
+
+  await walk(startDir, subRelDir ? subRelDir.replace(/\\/g, '/') : '', 0);
+  return results;
+}
+
+async function findAppxLogoInInstallLocation(installLocation, cachedLogoCandidates = null) {
+  if (!installLocation || !fs.existsSync(installLocation)) return null;
+
+  let candidates = Array.isArray(cachedLogoCandidates) ? cachedLogoCandidates : [];
+  if (candidates.length === 0) {
+    const manifestPath = path.join(installLocation, 'AppxManifest.xml');
+    try {
+      if (fs.existsSync(manifestPath)) {
+        const xml = await fs.promises.readFile(manifestPath, 'utf-8');
+        candidates = parseAppxManifestMetadata(xml).logoCandidates;
+      }
+    } catch {
+      return null;
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  const dirFilesCache = new Map();
+  for (const logicalRel of candidates) {
+    const normRel = String(logicalRel || '').replace(/\\/g, '/');
+    const slashIdx = normRel.lastIndexOf('/');
+    const subDir = slashIdx !== -1 ? normRel.slice(0, slashIdx) : '';
+    const cacheKey = subDir.toLowerCase();
+
+    if (!dirFilesCache.has(cacheKey)) {
+      dirFilesCache.set(cacheKey, await collectRelImageFilesInDir(installLocation, subDir, 1));
+    }
+
+    const available = dirFilesCache.get(cacheKey) || [];
+    const bestRel = selectBestAppxLogoFile(normRel, available);
+    if (bestRel) {
+      const absPath = path.join(installLocation, bestRel);
+      if (fs.existsSync(absPath)) {
+        return absPath;
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Extrahiert ein Programm-Icon on-demand über mehrstufige Fallback-Kette in `userData/icon-cache/`:
  * 1. Registry DisplayIcon (inkl. .ico/.png/.svg & .exe/.dll mit Index)
- * 2. Installationsordner & Startmenü-.lnk-Ziele
- * 3. Optionaler Online-Favicon-/GitHub-Avatar-Fallback über bekannte Homepage-URLs
+ * 1.5. AppX-/MS-Store-Manifest-Logos (`AppxManifest.xml` inkl. `.scale-200.png` / `.targetsize-48`)
+ * 2. Installationsordner (inkl. Scoop-Apps) & Startmenü-.lnk-Ziele
+ * 3. Optionaler Online-Favicon-/GitHub-Avatar-Fallback über bekannte oder per `show()` geladene Homepage-URLs
  */
 export async function extractCachedAppIcon({
   id,
@@ -1482,6 +1801,7 @@ export async function extractCachedAppIcon({
   uninstallString = '',
   packageManager = '',
   packageId = '',
+  appxPackageFamilyName = '',
   homepage = '',
   webVersionUrl = '',
   links = [],
@@ -1490,7 +1810,7 @@ export async function extractCachedAppIcon({
   if (!id) return { success: false, error: 'Keine Programm-ID für Icon-Cache angegeben.' };
 
   const appKey = String(id).trim();
-  const failFingerprint = `${appKey}|${displayIcon}|${installLocation}|${executablePath}|${packageId}|${homepage}`;
+  const failFingerprint = `${appKey}|${displayIcon}|${installLocation}|${executablePath}|${packageId}|${appxPackageFamilyName}|${homepage}`;
   if (failedIconKeys.has(failFingerprint)) {
     return { success: false, error: 'Icon für diesen Eintrag in dieser Sitzung nicht gefunden.' };
   }
@@ -1511,6 +1831,44 @@ export async function extractCachedAppIcon({
       if (stage1?.success) return stage1;
     }
 
+    // Stufe 1.5: AppX-/MS-Store-Logo aus `AppxManifest.xml` extrahieren
+    const cleanPm = String(packageManager || '')
+      .trim()
+      .toLowerCase();
+    const looksLikeAppx =
+      cleanPm === 'msstore' || Boolean(appxPackageFamilyName) || /\\windowsapps\\/i.test(String(installLocation || ''));
+    if (looksLikeAppx) {
+      let appxLoc = normalizeDirPath(installLocation);
+      let logoCandidates = [];
+      if (!appxLoc || !fs.existsSync(appxLoc)) {
+        const inventory = await getInstalledAppxInventory();
+        const matched = matchAppxEntryForPackage(
+          {
+            packageId,
+            name,
+            appxPackageFamilyName,
+          },
+          inventory
+        );
+        if (matched?.installLocation) {
+          appxLoc = matched.installLocation;
+          logoCandidates = matched.logoCandidates || [];
+        }
+      }
+      if (appxLoc && fs.existsSync(appxLoc)) {
+        const logoPath = await findAppxLogoInInstallLocation(appxLoc, logoCandidates);
+        if (logoPath) {
+          const stageAppx = await extractFileIconToCache({
+            appKey,
+            sourceType: 'appx-logo',
+            sourcePath: logoPath,
+            cacheDir,
+          });
+          if (stageAppx?.success) return stageAppx;
+        }
+      }
+    }
+
     // Stufe 2a: Expliziter Executable-Pfad (z. B. validInstallPath / autoPaths)
     if (executablePath) {
       const parsedExe = parseDisplayIcon(executablePath, process.env);
@@ -1526,7 +1884,7 @@ export async function extractCachedAppIcon({
       }
     }
 
-    // Stufe 2b: InstallLocation & UninstallString-Verzeichnis nach Haupt-.exe / .ico durchsuchen
+    // Stufe 2b: InstallLocation, UninstallString & Scoop-App-Ordner nach Haupt-.exe / .ico durchsuchen
     const candidateDirs = [];
     const seenDirs = new Set();
     const pushDir = (d) => {
@@ -1541,6 +1899,15 @@ export async function extractCachedAppIcon({
     const uninstallExe = extractExeFromCommandString(uninstallString);
     if (uninstallExe && !isGenericIconSource(uninstallExe)) {
       pushDir(path.dirname(uninstallExe));
+    }
+    if (cleanPm === 'scoop' && packageId) {
+      const scoopAppName = String(packageId).split('/').pop();
+      if (scoopAppName) {
+        if (process.env.SCOOP) {
+          pushDir(path.join(process.env.SCOOP, 'apps', scoopAppName, 'current'));
+        }
+        pushDir(path.join(os.homedir(), 'scoop', 'apps', scoopAppName, 'current'));
+      }
     }
 
     for (const dir of candidateDirs) {
@@ -1573,30 +1940,47 @@ export async function extractCachedAppIcon({
       if (stage2c?.success) return stage2c;
     }
 
-    // Stufe 3: Optionaler Online-Favicon-Fallback (aus Provider-Cache oder hinterlegten URLs)
+    // Stufe 3: Optionaler Online-Favicon-Fallback (aus Provider-Cache, show() oder hinterlegten URLs)
     if (allowOnlineFallback) {
+      const effectivePm = cleanPm || (packageId ? 'winget' : '');
       let cachedPkg = null;
-      if (packageId) {
-        const cleanPm = String(packageManager || 'winget')
-          .trim()
-          .toLowerCase();
-        const cleanPidLower = String(packageId).trim().toLowerCase();
-        const cacheKey = ['npm', 'bun', 'pnpm'].includes(cleanPm)
-          ? `npm-registry:show:${cleanPidLower}`
-          : ['pip', 'uv'].includes(cleanPm)
-            ? `pypi:show:${normalizePythonPackageName(cleanPidLower)}`
-            : ['pwsh7', 'pwsh5'].includes(cleanPm)
-              ? `psgallery:show:${cleanPidLower}`
-              : `${cleanPm}:show:${cleanPidLower}`;
-        cachedPkg = getWingetCache().get(cacheKey)?.data || null;
+      if (packageId && effectivePm) {
+        const cacheKey = buildShowCacheKey(effectivePm, packageId);
+        if (cacheKey) {
+          cachedPkg = getWingetCache().get(cacheKey)?.data || null;
+        }
       }
 
-      const homepageUrls = extractCandidateHomepageUrls({
-        homepage: homepage || cachedPkg?.homepage || '',
+      let homepageUrls = extractCandidateHomepageUrls({
+        homepage: homepage || cachedPkg?.homepage || (effectivePm === 'nvm' ? 'https://nodejs.org/' : ''),
+        repositoryUrl: cachedPkg?.repositoryUrl || '',
         publisherUrl: cachedPkg?.publisherUrl || '',
         webVersionUrl,
         links,
       });
+
+      if (!cachedPkg && homepageUrls.length === 0 && packageId && effectivePm) {
+        initDefaultProviders();
+        const provider = getProvider(effectivePm);
+        if (provider?.capabilities?.show && typeof provider.show === 'function') {
+          const runLimited = HTTP_SHOW_PROVIDERS.has(effectivePm) ? runBgHttpShowLimited : runBgCliShowLimited;
+          try {
+            const showRes = await runLimited(() => provider.show(packageId));
+            if (showRes?.success && showRes.package) {
+              cachedPkg = showRes.package;
+              homepageUrls = extractCandidateHomepageUrls({
+                homepage: homepage || cachedPkg.homepage || '',
+                repositoryUrl: cachedPkg.repositoryUrl || '',
+                publisherUrl: cachedPkg.publisherUrl || '',
+                webVersionUrl,
+                links,
+              });
+            }
+          } catch {
+            // Ignorieren, Platzhalter bleibt bestehen
+          }
+        }
+      }
 
       const stage3 = await fetchOnlineFaviconToCache({
         appKey,
