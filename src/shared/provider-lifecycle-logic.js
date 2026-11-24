@@ -98,19 +98,30 @@ export function normalizeProviderVersion(rawVersion) {
   return withoutPrefix || null;
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
  * Gruppiert registrierte Provider in die UI-Kategorien ("System", "Sprachen & Entwickler", "Archiv").
  * @param {Array<Record<string, any>>} providers
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {Array<{ id: string, label: string, providers: Array<Record<string, any>> }>}
  */
-export function groupProvidersByUiCategory(providers) {
+export function groupProvidersByUiCategory(providers, { t = undefined } = {}) {
   const list = Array.isArray(providers) ? providers : [];
   return PROVIDER_UI_GROUPS.map((group) => {
     const allowedCats = new Set(group.categories);
     const items = list.filter((provider) => allowedCats.has(normalizeProviderCategory(provider?.category)));
     return {
       id: group.id,
-      label: group.label,
+      label: tr(t, `providers.groups.${group.id}`, {}, group.label),
       providers: items,
     };
   }).filter((group) => group.providers.length > 0);
@@ -120,14 +131,15 @@ export function groupProvidersByUiCategory(providers) {
  * Erzeugt den Live-Status-Badge für einen Paketmanager im Einstellungs-Modal.
  * @param {Record<string, any>} provider
  * @param {{ available?: boolean, version?: string | null, binaryPath?: string | null, error?: string | null } | null} [availability]
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {{ kind: 'checking' | 'installed' | 'missing' | 'system', text: string, title: string }}
  */
-export function formatProviderStatusBadge(provider, availability = null) {
+export function formatProviderStatusBadge(provider, availability = null, { t = undefined } = {}) {
   if (!availability) {
     return {
       kind: 'checking',
-      text: '⏳ Prüfe...',
-      title: 'Verfügbarkeit wird geprüft...',
+      text: `⏳ ${tr(t, 'providers.status.checking', {}, 'Prüfe...')}`,
+      title: tr(t, 'providers.status.checkingTitle', {}, 'Verfügbarkeit wird geprüft...'),
     };
   }
 
@@ -135,23 +147,28 @@ export function formatProviderStatusBadge(provider, availability = null) {
   if (availability.available && provider?.isSystemComponent) {
     return {
       kind: 'system',
-      text: version ? `🔒 Systemkomponente v${version}` : '🔒 Systemkomponente',
-      title: availability.binaryPath || 'Integrierte Windows-Systemkomponente',
+      text: version
+        ? `🔒 ${tr(t, 'providers.status.systemVersion', { version }, `Systemkomponente v${version}`)}`
+        : `🔒 ${tr(t, 'providers.status.system', {}, 'Systemkomponente')}`,
+      title:
+        availability.binaryPath || tr(t, 'providers.status.systemTitle', {}, 'Integrierte Windows-Systemkomponente'),
     };
   }
 
   if (availability.available) {
     return {
       kind: 'installed',
-      text: version ? `🟢 Installiert v${version}` : '🟢 Installiert',
-      title: availability.binaryPath || 'Installiert und einsatzbereit',
+      text: version
+        ? `🟢 ${tr(t, 'providers.status.installedVersion', { version }, `Installiert v${version}`)}`
+        : `🟢 ${tr(t, 'providers.status.installed', {}, 'Installiert')}`,
+      title: availability.binaryPath || tr(t, 'providers.status.installedTitle', {}, 'Installiert und einsatzbereit'),
     };
   }
 
   return {
     kind: 'missing',
-    text: '⚪ Nicht installiert',
-    title: availability.error || 'Auf diesem PC nicht installiert',
+    text: `⚪ ${tr(t, 'providers.status.missing', {}, 'Nicht installiert')}`,
+    title: availability.error || tr(t, 'providers.status.missingTitle', {}, 'Auf diesem PC nicht installiert'),
   };
 }
 

@@ -3,12 +3,120 @@ import {
   getAvailableLocales,
   getConfiguredLanguage,
   getI18nLocale,
+  hasI18nKey,
   onI18nChange,
   setI18nState,
   t,
 } from '../../shared/i18n.js';
+import { getProviderBadgeInfo, PROVIDER_DISPLAY_META } from '../../shared/unified-packages.js';
 
 export { getAvailableLocales, getConfiguredLanguage, getI18nLocale, onI18nChange, t };
+
+/**
+ * Returns the localized display name for a provider ID or provider object.
+ * @param {string | { id?: string, name?: string } | null | undefined} providerOrId
+ * @param {Array<Record<string, any>>} [providersList]
+ * @returns {string}
+ */
+export function getLocalizedProviderName(providerOrId, providersList = []) {
+  const id =
+    typeof providerOrId === 'string'
+      ? providerOrId.trim().toLowerCase()
+      : String(providerOrId?.id || '')
+          .trim()
+          .toLowerCase();
+  if (id === 'archive') {
+    return t('providers.names.archive');
+  }
+  if (providerOrId && typeof providerOrId === 'object' && providerOrId.name) {
+    return String(providerOrId.name);
+  }
+  const found = Array.isArray(providersList)
+    ? providersList.find((p) => String(p?.id || '').toLowerCase() === id)
+    : null;
+  if (found?.name) return String(found.name);
+  return PROVIDER_DISPLAY_META[id]?.label || id;
+}
+
+/**
+ * Returns provider badge info with localized Archive label.
+ * @param {unknown} providerId
+ * @param {Array<Record<string, any>>} [providersList]
+ * @returns {{ id: string, label: string, badgeClass: string } | null}
+ */
+export function getLocalizedProviderBadge(providerId, providersList = []) {
+  const info = getProviderBadgeInfo(providerId, providersList);
+  if (!info) return null;
+  if (info.id === 'archive') {
+    return { ...info, label: t('providers.names.archive') };
+  }
+  return info;
+}
+
+/**
+ * Returns the localized provider description if available.
+ * @param {Record<string, any> | null | undefined} provider
+ * @returns {string}
+ */
+export function getLocalizedProviderDescription(provider) {
+  const id = String(provider?.id || '')
+    .trim()
+    .toLowerCase();
+  const key = id ? `providers.descriptions.${id}` : '';
+  if (key && hasI18nKey(key)) {
+    return t(key);
+  }
+  return String(provider?.description || '');
+}
+
+/**
+ * Returns the localized provider uninstall warning if available.
+ * @param {Record<string, any> | null | undefined} provider
+ * @returns {string}
+ */
+export function getLocalizedProviderUninstallWarning(provider) {
+  if (!provider?.uninstallWarning) return '';
+  const id = String(provider?.id || '')
+    .trim()
+    .toLowerCase();
+  const key = id ? `providers.uninstallWarnings.${id}` : '';
+  if (key && hasI18nKey(key)) {
+    return t(key);
+  }
+  return String(provider.uninstallWarning || '');
+}
+
+/**
+ * Returns the localized description for a provider source quick template.
+ * @param {string} providerId
+ * @param {{ name?: string, url?: string, description?: string } | null | undefined} template
+ * @returns {string}
+ */
+export function getLocalizedSourceTemplateDescription(providerId, template) {
+  const cleanPm = String(providerId || '')
+    .trim()
+    .toLowerCase();
+  const cleanName = String(template?.name || '').trim();
+  const key = cleanPm && cleanName ? `providerSources.templates.${cleanPm}.${cleanName}` : '';
+  if (key && hasI18nKey(key)) {
+    return t(key);
+  }
+  return String(template?.description || template?.url || cleanName || '');
+}
+
+/**
+ * Maps a policy evaluation result to a localized error message.
+ * @param {{ reason?: string, error?: string } | null | undefined} policyEval
+ * @param {string} [fallbackKey]
+ * @returns {string}
+ */
+export function getLocalizedPolicyError(policyEval, fallbackKey = 'policy.blockedDefault') {
+  const reason = policyEval?.reason;
+  if (reason === 'not-in-whitelist') return t('policy.errorNotInWhitelist');
+  if (reason === 'in-blacklist') return t('policy.errorInBlacklist');
+  if (reason === 'adware-silent-conflict') return t('policy.errorAdwareConflict');
+  return String(policyEval?.error || t(fallbackKey));
+}
 
 /**
  * Applies translations to all `[data-i18n*]` elements under `root` and updates `<html lang>` / `<title>`.

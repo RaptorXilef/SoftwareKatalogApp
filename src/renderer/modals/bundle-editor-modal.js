@@ -10,9 +10,9 @@ import {
   sortBundleItems,
 } from '../../shared/bundles-logic.js';
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { showToast } from '../components/toast.js';
 import { isProviderUsable, state } from '../state.js';
+import { getI18nLocale, getLocalizedProviderBadge, getLocalizedProviderName, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -74,10 +74,16 @@ export function renderBundleEditorModal({
     getBundleEditorArchiveCandidates(state.catalog, {
       query: '',
       visibleHiddenCats: state.settings.visibleHiddenCats || [],
+      locale: getI18nLocale() || 'en',
     }).length;
 
   const getKnownCountForProvider = (providerId) =>
-    getKnownProviderPackages(state.packages, { providerId, query: '' }).length;
+    getKnownProviderPackages(state.packages, {
+      providerId,
+      query: '',
+      t,
+      locale: getI18nLocale() || 'en',
+    }).length;
 
   const clearPendingDebounce = () => {
     if (searchDebounceTimer) {
@@ -100,18 +106,15 @@ export function renderBundleEditorModal({
     return activeRemoteProviders.some((p) => p.id === activeSource) ? [activeSource] : [];
   };
 
-  const getProviderLabel = (providerId) => {
-    if (providerId === 'archive') return 'Archiv';
-    const found = activeRemoteProviders.find((p) => p.id === providerId);
-    return found?.name || (providerId === 'winget' ? 'Winget' : providerId);
-  };
+  const getProviderLabel = (providerId) => getLocalizedProviderName(providerId, activeRemoteProviders);
 
   const buildCombinedSearchView = () => {
     const q = searchQuery.trim();
     const visibleHiddenCats = state.settings.visibleHiddenCats || [];
+    const locale = getI18nLocale() || 'en';
     const archiveResults =
       activeSource === 'archive' || activeSource === 'all'
-        ? getBundleEditorArchiveCandidates(state.catalog, { query: q, visibleHiddenCats })
+        ? getBundleEditorArchiveCandidates(state.catalog, { query: q, visibleHiddenCats, locale })
         : [];
 
     const remoteIds = getTargetRemoteProviderIds();
@@ -120,7 +123,7 @@ export function renderBundleEditorModal({
 
     for (const providerId of remoteIds) {
       const providerName = getProviderLabel(providerId);
-      const known = getKnownProviderPackages(state.packages, { providerId, query: q });
+      const known = getKnownProviderPackages(state.packages, { providerId, query: q, t, locale });
       const hasFreshRemote = hasSearchedRemote && lastSearchedQuery === q && q.length >= 2;
       const remoteList = hasFreshRemote ? remoteResultsByProvider.get(providerId) || [] : [];
       const merged = mergeProviderEditorResults({
@@ -160,14 +163,23 @@ export function renderBundleEditorModal({
     // Kompakte Status-Leiste für die gewählte Quelle
     const statusSegments = [];
     if (activeSource === 'archive' || activeSource === 'all') {
-      statusSegments.push(`🗄️ Archiv: ${archiveResults.length} Programme`);
+      statusSegments.push(`🗄️ ${t('bundleEditor.statusArchiveCount', { count: archiveResults.length })}`);
     }
     for (const meta of remoteMeta) {
       if (meta.hasFreshRemote) {
-        statusSegments.push(`⚡ ${meta.providerName}: ${meta.remoteCount} Suchtreffer (${meta.knownCount} bekannt)`);
+        statusSegments.push(
+          `⚡ ${t('bundleEditor.statusRemoteFresh', {
+            name: meta.providerName,
+            remoteCount: meta.remoteCount,
+            knownCount: meta.knownCount,
+          })}`
+        );
       } else {
         statusSegments.push(
-          `⚡ ${meta.providerName}: ${meta.knownCount} bekannte/installierte Pakete · Suchbegriff eingeben für Online-Suche`
+          `⚡ ${t('bundleEditor.statusRemoteIdle', {
+            name: meta.providerName,
+            knownCount: meta.knownCount,
+          })}`
         );
       }
     }
@@ -183,7 +195,7 @@ export function renderBundleEditorModal({
       } else if (meta.hasFreshRemote && !isSearchingRemote && meta.remoteCount === 0) {
         const emptyMsg = meta.hint
           ? `${meta.providerName}: ${meta.hint}`
-          : `${meta.providerName} hat für "${q}" keine Pakete gefunden.`;
+          : t('bundleEditor.remoteEmptyDefault', { name: meta.providerName, query: q });
         parts.push(`<div class="bundle-search-notice">ℹ️ ${escapeHTML(emptyMsg)}</div>`);
       }
     }
@@ -191,20 +203,20 @@ export function renderBundleEditorModal({
     if (isSearchingRemote) {
       const names = remoteMeta.map((m) => m.providerName).join(', ') || 'Winget';
       parts.push(
-        `<div class="bundle-search-empty">⏳ Durchsuche ${escapeHTML(names)} nach "${escapeHTML(q)}"...</div>`
+        `<div class="bundle-search-empty">⏳ ${escapeHTML(t('bundleEditor.searchingRemote', { names, query: q }))}</div>`
       );
     }
 
     if (combined.length === 0 && !isSearchingRemote) {
-      let emptyText = 'Keine passenden Programme gefunden.';
+      let emptyText = t('bundleEditor.emptyNoMatches');
       if (activeSource === 'archive') {
-        emptyText = q ? `Keine Archiv-Programme für "${q}" gefunden.` : 'Keine Programme im Archiv vorhanden.';
+        emptyText = q ? t('bundleEditor.emptyArchiveQuery', { query: q }) : t('bundleEditor.emptyArchiveAll');
       } else if (!q) {
-        emptyText = 'Noch keine bekannten Pakete vorhanden. Tippe mindestens 2 Zeichen für die Online-Suche.';
+        emptyText = t('bundleEditor.emptyRemoteIdle');
       } else if (q.length < 2) {
-        emptyText = 'Bitte mindestens 2 Zeichen für die Online-Suche eingeben.';
+        emptyText = t('bundleEditor.emptyRemoteShort');
       } else {
-        emptyText = `Keine Treffer für "${q}" gefunden.`;
+        emptyText = t('bundleEditor.emptyRemoteQuery', { query: q });
       }
       parts.push(`<div class="bundle-search-empty">${escapeHTML(emptyText)}</div>`);
       return parts.join('');
@@ -216,7 +228,7 @@ export function renderBundleEditorModal({
           const key = getBundleItemKey(entry.editorItem);
           const alreadyAdded = existingKeys.has(key);
           const isArchive = entry.providerId === 'archive';
-          const badgeInfo = getProviderBadgeInfo(entry.providerId, state.providers);
+          const badgeInfo = getLocalizedProviderBadge(entry.providerId, state.providers);
           const providerLabel = badgeInfo?.label || getProviderLabel(entry.providerId);
           return `
             <div class="bundle-search-row">
@@ -224,7 +236,7 @@ export function renderBundleEditorModal({
                 <div class="bundle-search-row-title">
                   <strong>${escapeHTML(entry.name)}</strong>
                   <span class="provider-badge ${escapeHTML(badgeInfo?.badgeClass || (isArchive ? 'is-archive' : ''))}">${escapeHTML(providerLabel)}</span>
-                  ${entry.isInstalled ? '<span class="card-chip">💻 Installiert</span>' : ''}
+                  ${entry.isInstalled ? `<span class="card-chip">💻 ${escapeHTML(t('bundleEditor.badgeInstalled'))}</span>` : ''}
                   ${entry.version ? `<span class="card-chip">v${escapeHTML(entry.version)}</span>` : ''}
                 </div>
                 <div class="bundle-search-row-meta">
@@ -240,7 +252,7 @@ export function renderBundleEditorModal({
                 data-editor-add-source="${escapeHTML(entry.providerId)}"
                 ${alreadyAdded ? 'disabled' : ''}
               >
-                ${alreadyAdded ? '✓ Enthalten' : '➕ Hinzufügen'}
+                ${alreadyAdded ? `✓ ${escapeHTML(t('bundleEditor.btnAdded'))}` : `➕ ${escapeHTML(t('bundleEditor.btnAdd'))}`}
               </button>
             </div>
           `;
@@ -274,7 +286,7 @@ export function renderBundleEditorModal({
       clearRemoteSearchState();
       isSearchingRemote = false;
       if (explicit) {
-        showToast('Bitte mindestens 2 Zeichen für die Paketmanager-Suche eingeben.', { type: 'info' });
+        showToast(t('bundleEditor.minCharsToast'), { type: 'info' });
       }
       updateSearchResultsDom();
       return;
@@ -339,7 +351,7 @@ export function renderBundleEditorModal({
       lastSearchedQuery = q;
       remoteResultsByProvider.clear();
       for (const providerId of targetIds) {
-        remoteErrorsByProvider.set(providerId, err?.message || 'Suchfehler');
+        remoteErrorsByProvider.set(providerId, err?.message || t('bundleEditor.searchErrorDefault'));
       }
       updateSearchResultsDom();
     }
@@ -349,7 +361,7 @@ export function renderBundleEditorModal({
     const key = getBundleItemKey(newItem);
     if (!key) return;
     if (getExistingKeysSet().has(key)) {
-      showToast(`"${newItem.name}" ist bereits im Bündel enthalten.`, { type: 'info' });
+      showToast(t('bundleEditor.alreadyInBundleToast', { name: newItem.name }), { type: 'info' });
       return;
     }
     draftItems = sortBundleItems([
@@ -376,17 +388,17 @@ export function renderBundleEditorModal({
     };
 
     const countParts = [...sourceCounts.entries()].map(([src, cnt]) => {
-      const label = getProviderBadgeInfo(src, state.providers)?.label || getProviderLabel(src);
+      const label = getLocalizedProviderBadge(src, state.providers)?.label || getProviderLabel(src);
       return `${cnt} ${label}`;
     });
     if (stats.excludedCount > 0) {
-      countParts.push(`${stats.excludedCount} ohne Quelle ausgelassen`);
+      countParts.push(t('bundleEditor.snapshotExcludedCount', { count: stats.excludedCount }));
     }
 
     const filterBtnsHtml = [...sourceCounts.keys()]
       .map((src) => {
-        const label = getProviderBadgeInfo(src, state.providers)?.label || getProviderLabel(src);
-        return `<button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-provider" data-snap-provider="${escapeHTML(src)}">Nur ${escapeHTML(label)}</button>`;
+        const label = getLocalizedProviderBadge(src, state.providers)?.label || getProviderLabel(src);
+        return `<button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-provider" data-snap-provider="${escapeHTML(src)}">${escapeHTML(t('bundleEditor.snapshotFilterOnly', { label }))}</button>`;
       })
       .join('');
 
@@ -395,17 +407,17 @@ export function renderBundleEditorModal({
     return `
       <div class="bundle-snapshot-banner">
         <div class="bundle-snapshot-info">
-          <strong>📸 1-Klick-Snapshot dieses PCs</strong>
+          <strong>📸 ${escapeHTML(t('bundleEditor.snapshotBannerTitle'))}</strong>
           <p class="muted">
-            ${stats.includedCount} übernehmbare Programme erkannt (${escapeHTML(countParts.join(' · '))}). Hake ab, was ins Bündel soll.
+            ${escapeHTML(t('bundleEditor.snapshotBannerDesc', { count: stats.includedCount, summary: countParts.join(' · ') }))}
           </p>
         </div>
         <div class="bundle-snapshot-controls">
-          <input type="text" id="bundleSnapshotFilter" value="${escapeHTML(snapshotFilterText)}" placeholder="Snapshot-Liste filtern...">
-          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-all">Alle (${draftItems.length})</button>
-          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-none">Keine</button>
+          <input type="text" id="bundleSnapshotFilter" value="${escapeHTML(snapshotFilterText)}" placeholder="${escapeHTML(t('bundleEditor.snapshotFilterPlaceholder'))}">
+          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-all">${escapeHTML(t('bundleEditor.snapshotAllBtn', { count: draftItems.length }))}</button>
+          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-none">${escapeHTML(t('bundleEditor.snapshotNoneBtn'))}</button>
           ${filterBtnsHtml}
-          <span class="bundle-snapshot-counter"><strong>${checkedCount}</strong> von ${draftItems.length} gewählt</span>
+          <span class="bundle-snapshot-counter">${escapeHTML(t('bundleEditor.snapshotCounter', { checked: checkedCount, total: draftItems.length }))}</span>
         </div>
       </div>
     `;
@@ -424,13 +436,13 @@ export function renderBundleEditorModal({
     if (draftItems.length === 0) {
       return `
         <div class="bundle-items-empty">
-          Noch keine Programme im Bündel. Füge oben Programme über die Archiv- &amp; Winget-Suche hinzu.
+          ${escapeHTML(t('bundleEditor.itemsEmpty'))}
         </div>
       `;
     }
 
     if (visibleItems.length === 0) {
-      return '<div class="bundle-items-empty">Keine Programme im Snapshot entsprechen dem Filter.</div>';
+      return `<div class="bundle-items-empty">${escapeHTML(t('bundleEditor.snapshotFilterEmpty'))}</div>`;
     }
 
     return visibleItems
@@ -438,27 +450,26 @@ export function renderBundleEditorModal({
         const key = getBundleItemKey(item);
         const evalInfo = evaluateBundleItemStatus(item, state.packages, {
           versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+          t,
         });
         const isChecked = !isSnapshotMode || snapshotCheckedKeys.has(key);
-        const itemBadge = getProviderBadgeInfo(item.source, state.providers);
+        const itemBadge = getLocalizedProviderBadge(item.source, state.providers);
 
         let modeHintHtml = '';
         if (evalInfo.adwareProtected) {
-          modeHintHtml =
-            '<span class="card-chip chip-install-protected" title="Adware-Schutz aktiv - wird immer interaktiv am Ende ausgeführt">🛡️ Adware-Schutz</span>';
+          modeHintHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(t('bundleEditor.chipAdwareTitle'))}">🛡️ ${escapeHTML(t('bundleEditor.chipAdwareLabel'))}</span>`;
         } else if (evalInfo.canRunArchiveSilent) {
-          modeHintHtml =
-            '<span class="card-chip chip-install-silent" title="Stille Archiv-Installation konfiguriert">⚡ Silent</span>';
+          modeHintHtml = `<span class="card-chip chip-install-silent" title="${escapeHTML(t('bundleEditor.chipSilentTitle'))}">⚡ ${escapeHTML(t('bundleEditor.chipSilentLabel'))}</span>`;
         }
 
         return `
           <div class="bundle-item-row ${isChecked ? '' : 'is-unchecked'}" draggable="true" data-item-index="${idx}">
             ${
               isSnapshotMode
-                ? `<label class="bundle-item-snap-check" title="Ins Bündel übernehmen"><input type="checkbox" data-snap-check-key="${escapeHTML(key)}" ${isChecked ? 'checked' : ''}></label>`
+                ? `<label class="bundle-item-snap-check" title="${escapeHTML(t('bundleEditor.snapshotCheckboxTitle'))}"><input type="checkbox" data-snap-check-key="${escapeHTML(key)}" ${isChecked ? 'checked' : ''}></label>`
                 : ''
             }
-            <span class="bundle-drag-handle" title="Per Drag & Drop oder Pfeiltasten sortieren">⠿</span>
+            <span class="bundle-drag-handle" title="${escapeHTML(t('bundleEditor.dragHandleTitle'))}">⠿</span>
             <span class="bundle-item-order">#${idx + 1}</span>
             <div class="bundle-item-main">
               <div class="bundle-item-title">
@@ -468,17 +479,17 @@ export function renderBundleEditorModal({
               </div>
               <div class="bundle-item-meta">
                 <code>${escapeHTML(item.packageId || item.refId)}</code>
-                ${evalInfo.archiveMissing ? '<span class="bundle-warn-inline">⚠️ Nicht im lokalen Archiv gefunden</span>' : ''}
+                ${evalInfo.archiveMissing ? `<span class="bundle-warn-inline">⚠️ ${escapeHTML(t('bundleEditor.archiveMissingWarn'))}</span>` : ''}
               </div>
             </div>
-            <label class="bundle-optional-toggle" title="Als optional markieren">
+            <label class="bundle-optional-toggle" title="${escapeHTML(t('bundleEditor.markOptionalTitle'))}">
               <input type="checkbox" data-optional-index="${idx}" ${item.optional ? 'checked' : ''}>
-              <span>Optional</span>
+              <span>${escapeHTML(t('common.optional'))}</span>
             </label>
             <div class="bundle-item-order-btns">
-              <button type="button" class="btn btn-ghost btn-xs" data-move-index="${idx}" data-move-dir="up" title="Nach oben (früher installieren)" ${idx === 0 ? 'disabled' : ''}>↑</button>
-              <button type="button" class="btn btn-ghost btn-xs" data-move-index="${idx}" data-move-dir="down" title="Nach unten (später installieren)" ${idx === draftItems.length - 1 ? 'disabled' : ''}>↓</button>
-              <button type="button" class="btn btn-danger btn-xs" data-remove-index="${idx}" title="Aus Bündel entfernen">✕</button>
+              <button type="button" class="btn btn-ghost btn-xs" data-move-index="${idx}" data-move-dir="up" title="${escapeHTML(t('bundleEditor.moveUpTitle'))}" ${idx === 0 ? 'disabled' : ''}>↑</button>
+              <button type="button" class="btn btn-ghost btn-xs" data-move-index="${idx}" data-move-dir="down" title="${escapeHTML(t('bundleEditor.moveDownTitle'))}" ${idx === draftItems.length - 1 ? 'disabled' : ''}>↓</button>
+              <button type="button" class="btn btn-danger btn-xs" data-remove-index="${idx}" title="${escapeHTML(t('bundleEditor.removeItemTitle'))}">✕</button>
             </div>
           </div>
         `;
@@ -492,36 +503,36 @@ export function renderBundleEditorModal({
       const archiveTotal = getVisibleArchiveCount();
       tabs.push(`<button type="button" class="source-chip ${activeSource === 'archive' ? 'active' : ''}" data-search-source="archive">
         <span>🗄️</span>
-        <span>Archiv (${archiveTotal})</span>
+        <span>${escapeHTML(t('bundleEditor.sourceArchiveCount', { count: archiveTotal }))}</span>
       </button>`);
     }
     for (const provider of activeRemoteProviders) {
       const knownCount = getKnownCountForProvider(provider.id);
       tabs.push(`<button type="button" class="source-chip ${activeSource === provider.id ? 'active' : ''}" data-search-source="${escapeHTML(provider.id)}">
         <span>⚡</span>
-        <span>${escapeHTML(provider.name)} (${knownCount})</span>
+        <span>${escapeHTML(getLocalizedProviderName(provider))} (${knownCount})</span>
       </button>`);
     }
     if ((isArchiveUsable ? 1 : 0) + activeRemoteProviders.length > 1) {
       tabs.push(`<button type="button" class="source-chip ${activeSource === 'all' ? 'active' : ''}" data-search-source="all">
         <span>🔎</span>
-        <span>Alle Quellen</span>
+        <span>${escapeHTML(t('bundleEditor.sourceAll'))}</span>
       </button>`);
     }
     if (tabs.length === 0) {
-      return '<span class="muted">Keine aktiven &amp; installierten Paketquellen verfügbar.</span>';
+      return `<span class="muted">${escapeHTML(t('bundleEditor.noUsableSources'))}</span>`;
     }
     return tabs.join('');
   };
 
   const getSearchPlaceholder = () => {
     if (activeSource === 'archive') {
-      return 'Archiv-Programme filtern (Name, Kategorie, Winget-ID)...';
+      return t('bundleEditor.placeholderArchive');
     }
     if (activeSource === 'all') {
-      return 'Archiv filtern & Online-Suche in Paketmanagern starten (z. B. vlc, 7zip)...';
+      return t('bundleEditor.placeholderAll');
     }
-    return `In ${getProviderLabel(activeSource)} suchen (z. B. vlc, firefox, VideoLAN.VLC)...`;
+    return t('bundleEditor.placeholderProvider', { name: getProviderLabel(activeSource) });
   };
 
   const render = () => {
@@ -535,10 +546,10 @@ export function renderBundleEditorModal({
       activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement ? activeEl.selectionEnd : null;
 
     const modalTitle = isSnapshotMode
-      ? '📸 Bündel aus diesem PC erstellen'
+      ? `📸 ${t('bundleEditor.titleSnapshot')}`
       : isEditMode
-        ? `✏️ Bündel bearbeiten: ${draftName || 'Bündel'}`
-        : '➕ Neues Bündel erstellen';
+        ? `✏️ ${t('bundleEditor.titleEdit', { name: draftName || t('bundleEditor.bundleDefaultName') })}`
+        : `➕ ${t('bundleEditor.titleNew')}`;
 
     const saveCount = isSnapshotMode
       ? draftItems.filter((it) => snapshotCheckedKeys.has(getBundleItemKey(it))).length
@@ -548,9 +559,9 @@ export function renderBundleEditorModal({
       <div class="modal-header">
         <div>
           <h2>${escapeHTML(modalTitle)}</h2>
-          <span class="muted">Reihenfolge anpassen (z. B. Runtimes nach oben) · Gespeichert in <code>data/bundles.json</code></span>
+          <span class="muted">${escapeHTML(t('bundleEditor.headerSubtitle'))}</span>
         </div>
-        <button type="button" class="icon-btn" data-editor-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <button type="button" class="icon-btn" data-editor-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
 
       <div class="modal-body bundle-editor-body">
@@ -558,11 +569,11 @@ export function renderBundleEditorModal({
 
         <div class="bundle-meta-grid">
           <label class="form-field">
-            <span>Bündel-Name</span>
-            <input type="text" id="bundleNameInput" value="${escapeHTML(draftName)}" placeholder="z. B. Basis-Setup neuer PC">
+            <span>${escapeHTML(t('bundleEditor.fieldName'))}</span>
+            <input type="text" id="bundleNameInput" value="${escapeHTML(draftName)}" placeholder="${escapeHTML(t('bundleEditor.fieldNamePlaceholder'))}">
           </label>
           <div class="form-field">
-            <span>Icon</span>
+            <span>${escapeHTML(t('bundleEditor.fieldIcon'))}</span>
             <div class="bundle-icon-row">
               <input type="text" id="bundleIconInput" class="bundle-icon-input" value="${escapeHTML(draftIcon)}" maxlength="8">
               <div class="bundle-icon-presets">
@@ -576,20 +587,20 @@ export function renderBundleEditorModal({
         </div>
 
         <label class="form-field">
-          <span>Beschreibung (optional)</span>
-          <textarea id="bundleDescInput" rows="2" placeholder="Wofür ist dieses Bündel gedacht?">${escapeHTML(draftDesc)}</textarea>
+          <span>${escapeHTML(t('bundleEditor.fieldDescription'))}</span>
+          <textarea id="bundleDescInput" rows="2" placeholder="${escapeHTML(t('bundleEditor.fieldDescriptionPlaceholder'))}">${escapeHTML(draftDesc)}</textarea>
         </label>
 
         <div class="bundle-search-section">
           <div class="bundle-section-head">
-            <strong>➕ Programme hinzufügen</strong>
+            <strong>➕ ${escapeHTML(t('bundleEditor.addProgramsTitle'))}</strong>
             <div class="bundle-source-toggles">
               ${renderSourceTabsHtml()}
             </div>
           </div>
           <div class="bundle-search-bar">
             <input type="text" id="bundleAddSearchInput" value="${escapeHTML(searchQuery)}" placeholder="${escapeHTML(getSearchPlaceholder())}">
-            <button type="button" class="btn btn-primary" data-editor-action="search-packages">🔎 Suchen</button>
+            <button type="button" class="btn btn-primary" data-editor-action="search-packages">🔎 ${escapeHTML(t('common.search'))}</button>
           </div>
           <div class="bundle-search-results" id="bundleSearchResults">
             ${renderSearchResultsHtml()}
@@ -598,8 +609,8 @@ export function renderBundleEditorModal({
 
         <div class="bundle-items-section">
           <div class="bundle-section-head">
-            <strong>📋 Reihenfolge &amp; enthaltene Programme (${draftItems.length})</strong>
-            <span class="muted">Per ↑/↓ oder Drag &amp; Drop sortieren · Stille Pakete laufen bei Installation zuerst</span>
+            <strong>📋 ${escapeHTML(t('bundleEditor.itemsSectionTitle', { count: draftItems.length }))}</strong>
+            <span class="muted">${escapeHTML(t('bundleEditor.itemsSectionHint'))}</span>
           </div>
           <div class="bundle-items-list" id="bundleItemsList">
             ${renderItemsListHtml()}
@@ -608,11 +619,11 @@ export function renderBundleEditorModal({
       </div>
 
       <div class="modal-footer">
-        <span class="muted">${saveCount} Paket(e) werden im Bündel gespeichert</span>
+        <span class="muted">${escapeHTML(t('bundleEditor.footerSummary', { count: saveCount }))}</span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-editor-action="cancel" ${isSaving ? 'disabled' : ''}>Abbrechen</button>
+          <button type="button" class="btn btn-ghost" data-editor-action="cancel" ${isSaving ? 'disabled' : ''}>${escapeHTML(t('common.cancel'))}</button>
           <button type="button" class="btn btn-primary" data-editor-action="save" ${isSaving ? 'disabled' : ''}>
-            ${isSaving ? '⏳ Speichere...' : '💾 Bündel speichern'}
+            ${isSaving ? `⏳ ${escapeHTML(t('common.saving'))}` : `💾 ${escapeHTML(t('bundleEditor.saveBtn'))}`}
           </button>
         </div>
       </div>
@@ -852,7 +863,7 @@ export function renderBundleEditorModal({
     if (action === 'save') {
       const finalName = draftName.trim();
       if (!finalName) {
-        showToast('Bitte einen Bündel-Namen eingeben.', { type: 'warn' });
+        showToast(t('bundleEditor.missingNameToast'), { type: 'warn' });
         const nameEl = modal.querySelector('#bundleNameInput');
         if (nameEl instanceof HTMLElement) nameEl.focus();
         return;
@@ -863,7 +874,7 @@ export function renderBundleEditorModal({
         : draftItems;
 
       if (finalItems.length === 0) {
-        showToast('Bitte mindestens ein Programm im Bündel auswählen.', { type: 'warn' });
+        showToast(t('bundleEditor.missingItemsToast'), { type: 'warn' });
         return;
       }
 
@@ -885,10 +896,10 @@ export function renderBundleEditorModal({
       if (res?.success) {
         await triggerCatalogReload();
         closeModal();
-        showToast(`Bündel "${res.bundle?.name || finalName}" gespeichert.`, { type: 'success' });
+        showToast(t('bundleEditor.savedToast', { name: res.bundle?.name || finalName }), { type: 'success' });
         onSaved?.(res.bundle);
       } else {
-        showToast(res?.error || 'Bündel konnte nicht gespeichert werden.', { type: 'error', duration: 6000 });
+        showToast(res?.error || t('bundleEditor.saveErrorToast'), { type: 'error', duration: 6000 });
         render();
       }
     }

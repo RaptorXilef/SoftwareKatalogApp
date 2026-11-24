@@ -141,16 +141,36 @@ function toSearchableStrings(buffer) {
   };
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
  * Erkennt den Installer-Typ anhand Dateiendung und PE-Strings/Metadaten-Markern ohne Ausführung.
+ * @param {string} [fileName]
+ * @param {unknown} [buffer]
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  */
-export function detectInstallerFromBuffer(fileName = '', buffer = null) {
+export function detectInstallerFromBuffer(fileName = '', buffer = null, { t = undefined } = {}) {
   const lowerName = String(fileName || '')
     .trim()
     .toLowerCase();
 
+  const localizePreset = (preset, matchedSignature) => ({
+    ...preset,
+    label: preset.type === 'unknown' ? tr(t, 'installer.types.unknown.label', {}, preset.label) : preset.label,
+    hint: tr(t, `installer.types.${preset.type}.hint`, {}, preset.hint),
+    matchedSignature,
+  });
+
   if (lowerName.endsWith('.msi')) {
-    return { ...INSTALLER_TYPE_PRESETS.msi, matchedSignature: 'extension:.msi' };
+    return localizePreset(INSTALLER_TYPE_PRESETS.msi, 'extension:.msi');
   }
 
   const searchable = toSearchableStrings(buffer);
@@ -159,19 +179,27 @@ export function detectInstallerFromBuffer(fileName = '', buffer = null) {
       for (const marker of sig.markers) {
         const needle = marker.toLowerCase();
         if (searchable.rawLower.includes(needle) || searchable.collapsedLower.includes(needle)) {
-          return { ...INSTALLER_TYPE_PRESETS[sig.type], matchedSignature: marker };
+          return localizePreset(INSTALLER_TYPE_PRESETS[sig.type], marker);
         }
       }
     }
   }
 
-  return { ...INSTALLER_TYPE_PRESETS.unknown, matchedSignature: null };
+  return localizePreset(INSTALLER_TYPE_PRESETS.unknown, null);
 }
 
 /**
  * Prüft Name, Dateiname, Paket-ID, Herausgeber und optional PE-Strings auf bekannte Adware-Wrapper.
+ * @param {{ name?: string, fileName?: string, packageId?: string, publisher?: string, buffer?: unknown, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  */
-export function detectAdwareSignals({ name = '', fileName = '', packageId = '', publisher = '', buffer = null } = {}) {
+export function detectAdwareSignals({
+  name = '',
+  fileName = '',
+  packageId = '',
+  publisher = '',
+  buffer = null,
+  t = undefined,
+} = {}) {
   const combinedText = [name, fileName, packageId, publisher].filter(Boolean).join(' ');
 
   if (combinedText) {
@@ -180,7 +208,12 @@ export function detectAdwareSignals({ name = '', fileName = '', packageId = '', 
         return {
           flagged: true,
           matchedLabel: entry.label,
-          reason: `Bekannter Adware-/Bundle-Kandidat erkannt (${entry.label}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)", damit Zusatzangebote im Setup sicher abgewählt werden können.`,
+          reason: tr(
+            t,
+            'installer.adwareTextReason',
+            { label: entry.label },
+            `Bekannter Adware-/Bundle-Kandidat erkannt (${entry.label}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)", damit Zusatzangebote im Setup sicher abgewählt werden können.`
+          ),
           recommendedMode: 'interactive-required',
         };
       }
@@ -195,7 +228,12 @@ export function detectAdwareSignals({ name = '', fileName = '', packageId = '', 
         return {
           flagged: true,
           matchedLabel: marker,
-          reason: `Verdächtiger Adware-Wrapper-Marker in Setup-Datei erkannt (${marker}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)".`,
+          reason: tr(
+            t,
+            'installer.adwarePeReason',
+            { marker },
+            `Verdächtiger Adware-Wrapper-Marker in Setup-Datei erkannt (${marker}). Empfohlen wird "Immer Interaktiv (Adware-Schutz)".`
+          ),
           recommendedMode: 'interactive-required',
         };
       }
@@ -214,15 +252,23 @@ export const DETAIL_SILENT_LOCK_TOOLTIP = '🛡️ Gesperrt wegen Adware-/Klick-
 
 /**
  * Bestimmt die Vorauswahl und Sperre für den Silent-/Interaktiv-Schalter im Detail-Modal.
+ * @param {unknown} installMode
+ * @param {unknown} [requestedMode]
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  */
-export function resolveDetailInstallMode(installMode, requestedMode = null) {
+export function resolveDetailInstallMode(installMode, requestedMode = null, { t = undefined } = {}) {
   const mode = normalizeInstallMode(installMode);
   if (mode === 'interactive-required') {
     return {
       selected: 'interactive',
       silent: false,
       silentLocked: true,
-      lockTooltip: DETAIL_SILENT_LOCK_TOOLTIP,
+      lockTooltip: `🛡️ ${tr(
+        t,
+        'installer.detailSilentLockTooltip',
+        {},
+        'Gesperrt wegen Adware-/Klick-Schutz (in Bearbeiten änderbar)'
+      )}`,
     };
   }
 
@@ -317,22 +363,34 @@ export function resolveInstallExecutionPlan({
 
 /**
  * Liefert ein UI-Badge für Detail-Modal und Massen-Updates, falls Silent oder Adware-Schutz konfiguriert ist.
+ * @param {Record<string, any> | null | undefined} item
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  */
-export function getInstallModeBadge(item) {
+export function getInstallModeBadge(item, { t = undefined } = {}) {
   if (!item) return null;
   if (item.installMode === 'interactive-required') {
     return {
       type: 'protected',
-      label: '🛡️ Interaktiv-Schutz',
-      title: 'Immer interaktiv (Adware-Schutz) - Silent-Parameter werden immer ignoriert',
+      label: `🛡️ ${tr(t, 'cards.chipInstallProtected', {}, 'Interaktiv-Schutz')}`,
+      title: tr(
+        t,
+        'cards.chipInstallProtectedTitle',
+        {},
+        'Immer interaktiv (Adware-Schutz) - Silent-Parameter werden immer ignoriert'
+      ),
     };
   }
   const cleanArgs = sanitizeSilentArgs(item.silentArgs);
   if (item.installMode === 'silent' && cleanArgs) {
     return {
       type: 'silent',
-      label: '⚡ Silent',
-      title: `Stille Installation konfiguriert: ${cleanArgs}`,
+      label: `⚡ ${tr(t, 'cards.chipInstallSilent', {}, 'Silent')}`,
+      title: tr(
+        t,
+        'cards.chipInstallSilentTitle',
+        { args: cleanArgs },
+        `Stille Installation konfiguriert: ${cleanArgs}`
+      ),
     };
   }
   return null;

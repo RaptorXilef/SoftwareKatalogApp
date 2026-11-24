@@ -54,10 +54,23 @@ import {
   state,
   toggleFavorite,
 } from './state.js';
-import { initRendererI18n, t } from './utils/i18n.js';
+import { applyTranslationsToDom, getI18nLocale, initRendererI18n, onI18nChange, t } from './utils/i18n.js';
 import { escapeHTML } from './utils/sanitize.js';
 
+function renderHeaderUpdateNotice() {
+  const notice = document.getElementById('headerUpdateNotice');
+  if (!notice) return;
+  if (!state.availableAppUpdateVersion) {
+    notice.innerHTML = '';
+    return;
+  }
+  notice.innerHTML = `<button type="button" class="update-pill" id="btnHeaderAppUpdate">🎁 ${escapeHTML(t('app.updatePill', { version: state.availableAppUpdateVersion }))}</button>`;
+  document.getElementById('btnHeaderAppUpdate')?.addEventListener('click', () => openSettingsModal('updates'));
+}
+
 function handleLanguageChanged() {
+  applyTranslationsToDom(document);
+  renderHeaderUpdateNotice();
   renderAuthHeaderControls();
   renderAdminSessionButton();
   renderTagChips();
@@ -160,11 +173,8 @@ async function checkAppUpdateInBackground() {
 
   const res = await window.electronAPI.checkAppUpdate();
   if (res && !res.error && res.updateAvailable) {
-    const notice = document.getElementById('headerUpdateNotice');
-    if (notice) {
-      notice.innerHTML = `<button type="button" class="update-pill" id="btnHeaderAppUpdate">🎁 ${escapeHTML(t('app.updatePill', { version: res.latestVersion }))}</button>`;
-      document.getElementById('btnHeaderAppUpdate')?.addEventListener('click', () => openSettingsModal('updates'));
-    }
+    state.availableAppUpdateVersion = res.latestVersion;
+    renderHeaderUpdateNotice();
   }
 }
 
@@ -772,9 +782,8 @@ function setupScanProgressBanner() {
 }
 
 async function bootstrap() {
-  await initRendererI18n({
-    onLanguageUpdated: () => handleLanguageChanged(),
-  });
+  await initRendererI18n();
+  onI18nChange(() => handleLanguageChanged());
   initLightbox();
   initModals({ onReload: reloadUI });
   setupGridEvents();
@@ -830,7 +839,10 @@ async function bootstrap() {
         showToast(t('toasts.bundleSnapshotScanning'), { type: 'info' });
         await runInstalledScan({ silent: false });
       }
-      const snapshot = buildBundleDraftFromInstalled(state.packages);
+      const snapshot = buildBundleDraftFromInstalled(state.packages, {
+        t,
+        locale: getI18nLocale() || 'en',
+      });
       if (snapshot.includedCount === 0) {
         showToast(t('toasts.bundleSnapshotEmpty'), { type: 'warn' });
         return;

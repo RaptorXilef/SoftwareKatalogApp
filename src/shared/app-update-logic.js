@@ -319,30 +319,47 @@ export function selectReleaseAsset(assets, { installKind = 'portable-dir', arch 
   };
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
  * Formatiert Installationsmodus und Architektur fuer die Anzeige in den Einstellungen.
  * @param {string} [installKind]
  * @param {string} [arch]
- * @param {{ isPackaged?: boolean, isAllUsersInstall?: boolean }} [options]
+ * @param {{ isPackaged?: boolean, isAllUsersInstall?: boolean, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {{ label: string, detail: string, shortBadge: string, installKind: InstallKind, arch: NormalizedArch }}
  */
 export function formatInstallModeInfo(
   installKind = 'portable-dir',
   arch = 'x64',
-  { isPackaged = true, isAllUsersInstall = false } = {}
+  { isPackaged = true, isAllUsersInstall = false, t = undefined } = {}
 ) {
   const normalizedKind =
     installKind === 'installed' || installKind === 'portable-exe' || installKind === 'portable-dir'
       ? installKind
       : 'portable-dir';
   const normalizedArch = normalizeArch(arch);
-  const bitLabel = normalizedArch === 'ia32' ? '32-Bit' : normalizedArch === 'arm64' ? 'ARM64' : '64-Bit';
+  const bitLabel =
+    normalizedArch === 'ia32'
+      ? tr(t, 'appUpdate.mode.arch32', {}, '32-Bit')
+      : normalizedArch === 'arm64'
+        ? 'ARM64'
+        : tr(t, 'appUpdate.mode.arch64', {}, '64-Bit');
 
   if (normalizedKind === 'installed') {
     return {
-      label: `Installiert (${bitLabel})`,
-      detail: isAllUsersInstall ? 'Systemweite Installation (Alle Benutzer)' : 'Benutzer-Installation',
-      shortBadge: `Installiert - ${bitLabel}`,
+      label: tr(t, 'appUpdate.mode.installedLabel', { arch: bitLabel }, `Installiert (${bitLabel})`),
+      detail: isAllUsersInstall
+        ? tr(t, 'appUpdate.mode.installedAllUsersDetail', {}, 'Systemweite Installation (Alle Benutzer)')
+        : tr(t, 'appUpdate.mode.installedUserDetail', {}, 'Benutzer-Installation'),
+      shortBadge: tr(t, 'appUpdate.mode.installedShort', { arch: bitLabel }, `Installiert - ${bitLabel}`),
       installKind: normalizedKind,
       arch: normalizedArch,
     };
@@ -350,18 +367,22 @@ export function formatInstallModeInfo(
 
   if (normalizedKind === 'portable-exe') {
     return {
-      label: `Portabel (${bitLabel})`,
-      detail: 'Portable Einzel-EXE',
-      shortBadge: `Portabel - ${bitLabel}`,
+      label: tr(t, 'appUpdate.mode.portableExeLabel', { arch: bitLabel }, `Portabel (${bitLabel})`),
+      detail: tr(t, 'appUpdate.mode.portableExeDetail', {}, 'Portable Einzel-EXE'),
+      shortBadge: tr(t, 'appUpdate.mode.portableExeShort', { arch: bitLabel }, `Portabel - ${bitLabel}`),
       installKind: normalizedKind,
       arch: normalizedArch,
     };
   }
 
   return {
-    label: `Portabel (Ordner, ${bitLabel})`,
-    detail: isPackaged ? 'Entpacktes ZIP-Archiv' : 'Entwicklungsmodus',
-    shortBadge: isPackaged ? `Portabel (ZIP) - ${bitLabel}` : `Entwicklung - ${bitLabel}`,
+    label: tr(t, 'appUpdate.mode.portableDirLabel', { arch: bitLabel }, `Portabel (Ordner, ${bitLabel})`),
+    detail: isPackaged
+      ? tr(t, 'appUpdate.mode.portableDirPackagedDetail', {}, 'Entpacktes ZIP-Archiv')
+      : tr(t, 'appUpdate.mode.portableDirDevDetail', {}, 'Entwicklungsmodus'),
+    shortBadge: isPackaged
+      ? tr(t, 'appUpdate.mode.portableDirPackagedShort', { arch: bitLabel }, `Portabel (ZIP) - ${bitLabel}`)
+      : tr(t, 'appUpdate.mode.portableDirDevShort', { arch: bitLabel }, `Entwicklung - ${bitLabel}`),
     installKind: normalizedKind,
     arch: normalizedArch,
   };

@@ -1,5 +1,6 @@
 import { renderAuthHeaderControls } from '../components/toolbar.js';
 import { applyAuthStatus, refreshAuthStatus, state } from '../state.js';
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 /**
@@ -23,32 +24,32 @@ export function openLoginModal({ reason = '' } = {}) {
 
   dialog.innerHTML = `
     <div class="modal-header">
-      <h2>🔒 Admin-Anmeldung</h2>
-      <button type="button" class="icon-btn" data-login-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+      <h2>🔒 ${escapeHTML(t('login.title'))}</h2>
+      <button type="button" class="icon-btn" data-login-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
     </div>
 
     <form id="authLoginForm" class="modal-body login-modal-body" autocomplete="off">
-      ${reason ? `<p class="panel-hint">${escapeHTML(reason)}</p>` : '<p class="panel-hint">Dieser Bereich ist durch ein Administrator-Konto geschützt. Bitte melde dich an.</p>'}
+      ${reason ? `<p class="panel-hint">${escapeHTML(reason)}</p>` : `<p class="panel-hint">${escapeHTML(t('login.defaultHint'))}</p>`}
       ${integrityWarningHtml}
 
       <label class="form-field">
-        <span>Benutzername</span>
-        <input type="text" id="authLoginUsername" value="${escapeHTML(defaultUsername)}" placeholder="Admin-Benutzername" required autocomplete="username">
+        <span>${escapeHTML(t('login.usernameLabel'))}</span>
+        <input type="text" id="authLoginUsername" value="${escapeHTML(defaultUsername)}" placeholder="${escapeHTML(t('login.usernamePlaceholder'))}" required autocomplete="username">
       </label>
 
       <label class="form-field">
-        <span>Passwort</span>
+        <span>${escapeHTML(t('login.passwordLabel'))}</span>
         <div class="login-password-row">
-          <input type="password" id="authLoginPassword" placeholder="Passwort eingeben" required autocomplete="current-password">
-          <button type="button" class="btn btn-ghost btn-xs" id="btnToggleLoginPw" data-login-action="toggle-pw" title="Passwort anzeigen/verbergen">👁️</button>
+          <input type="password" id="authLoginPassword" placeholder="${escapeHTML(t('login.passwordPlaceholder'))}" required autocomplete="current-password">
+          <button type="button" class="btn btn-ghost btn-xs" id="btnToggleLoginPw" data-login-action="toggle-pw" title="${escapeHTML(t('login.togglePasswordTitle'))}">👁️</button>
         </div>
       </label>
 
       <div id="authLoginError" class="login-error-box" role="alert" hidden></div>
 
       <div class="login-actions-row">
-        <button type="button" class="btn btn-ghost" data-login-action="cancel">Abbrechen</button>
-        <button type="submit" class="btn btn-primary" id="btnAuthLoginSubmit">🔓 Anmelden</button>
+        <button type="button" class="btn btn-ghost" data-login-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+        <button type="submit" class="btn btn-primary" id="btnAuthLoginSubmit">🔓 ${escapeHTML(t('login.submitBtn'))}</button>
       </div>
     </form>
   `;
@@ -124,7 +125,7 @@ export function openLoginModal({ reason = '' } = {}) {
 
         if (!username || !password) {
           if (errorBox instanceof HTMLElement) {
-            errorBox.textContent = 'Bitte Benutzername und Passwort eingeben.';
+            errorBox.textContent = t('login.missingCredentials');
             errorBox.hidden = false;
           }
           return;
@@ -133,7 +134,7 @@ export function openLoginModal({ reason = '' } = {}) {
         busy = true;
         if (submitBtn instanceof HTMLButtonElement) {
           submitBtn.disabled = true;
-          submitBtn.textContent = '⏳ Prüfe...';
+          submitBtn.textContent = `⏳ ${t('login.submittingBtn')}`;
         }
         if (errorBox instanceof HTMLElement) {
           errorBox.hidden = true;
@@ -153,7 +154,7 @@ export function openLoginModal({ reason = '' } = {}) {
           }
 
           if (errorBox instanceof HTMLElement) {
-            errorBox.textContent = res?.error || 'Anmeldung fehlgeschlagen.';
+            errorBox.textContent = res?.error || t('login.failed');
             errorBox.hidden = false;
           }
           if (passInput instanceof HTMLInputElement) {
@@ -162,14 +163,14 @@ export function openLoginModal({ reason = '' } = {}) {
           }
         } catch (err) {
           if (errorBox instanceof HTMLElement) {
-            errorBox.textContent = err?.message || 'Verbindungsfehler bei der Anmeldung.';
+            errorBox.textContent = err?.message || t('login.connectionError');
             errorBox.hidden = false;
           }
         } finally {
           busy = false;
           if (!settled && submitBtn instanceof HTMLButtonElement) {
             submitBtn.disabled = false;
-            submitBtn.textContent = '🔓 Anmelden';
+            submitBtn.textContent = `🔓 ${t('login.submitBtn')}`;
           }
         }
       };

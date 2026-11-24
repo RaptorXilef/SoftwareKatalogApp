@@ -7,6 +7,7 @@ import {
   getPackageStatus,
   normalizeDefaultSortModes,
 } from '../shared/unified-packages.js';
+import { t } from './utils/i18n.js';
 
 export { getBaseName };
 
@@ -55,6 +56,7 @@ export const state = {
   currentModalKind: null,
   isEditModalOpen: false,
   hasCheckedAppUpdate: false,
+  availableAppUpdateVersion: null,
   selectedUpdateIds: new Set(),
   isBatchActionRunning: false,
   isBundleInstallRunning: false,
@@ -155,7 +157,7 @@ export function getAccessPolicy() {
  * @param {'update' | 'install' | 'view'} [action]
  */
 export function evaluateItemPolicy(item, action = 'view') {
-  return evaluatePackagePolicy(item, action, getAccessPolicy(), isAdminAuthenticated());
+  return evaluatePackagePolicy(item, action, getAccessPolicy(), isAdminAuthenticated(), { t });
 }
 
 export function isItemVisibleForTab(item, tab = state.activeTab) {

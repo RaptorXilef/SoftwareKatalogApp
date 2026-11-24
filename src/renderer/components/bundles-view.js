@@ -1,6 +1,6 @@
 import { evaluateBundleStatus } from '../../shared/bundles-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { getUsableProviders, getVisibleBundleItems, getVisibleBundles, state } from '../state.js';
+import { getLocalizedProviderBadge, t } from '../utils/i18n.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { queueItemsForIconResolution } from './cards.js';
 
@@ -10,10 +10,10 @@ function renderEmptyBundlesHtml(hasSearch) {
   if (hasSearch) {
     return `
       <div class="bundles-empty">
-        <h3>Keine passenden Bündel gefunden</h3>
-        <p class="muted">Passe den Suchbegriff an oder setze die Suche zurück.</p>
+        <h3>${escapeHTML(t('bundles.emptySearchTitle'))}</h3>
+        <p class="muted">${escapeHTML(t('bundles.emptySearchDesc'))}</p>
         <div class="bundles-empty-actions">
-          <button type="button" class="btn btn-ghost" data-bundle-action="clear-search">Suche zurücksetzen</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="clear-search">${escapeHTML(t('bundles.resetSearch'))}</button>
         </div>
       </div>
     `;
@@ -22,16 +22,12 @@ function renderEmptyBundlesHtml(hasSearch) {
   return `
     <div class="bundles-empty">
       <div class="bundles-empty-icon">📦</div>
-      <h3>Noch keine Paketbündel vorhanden</h3>
-      <p class="muted">
-        Stelle kuratierte Programmpakete für neue PCs zusammen oder erstelle mit einem Klick
-        einen Snapshot aller aktuell auf diesem PC installierten Programme.
-        Alle Bündel liegen zentral in <code>data/bundles.json</code> im Archiv.
-      </p>
+      <h3>${escapeHTML(t('bundles.emptyTitle'))}</h3>
+      <p class="muted">${escapeHTML(t('bundles.emptyDesc'))}</p>
       <div class="bundles-empty-actions">
-        <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
-        <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
-        <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Bündel importieren</button>
+        <button type="button" class="btn btn-primary" data-bundle-action="new">➕ ${escapeHTML(t('bundles.newBundle'))}</button>
+        <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 ${escapeHTML(t('bundles.snapshotFromPc'))}</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 ${escapeHTML(t('bundles.importBundle'))}</button>
       </div>
     </div>
   `;
@@ -46,6 +42,7 @@ function renderBundleCardHtml(bundle) {
   const evaluation = evaluateBundleStatus(visibleBundle, {
     packages: state.packages,
     versionCompareDepth: depth,
+    t,
   });
   const { items, summary } = evaluation;
 
@@ -54,10 +51,10 @@ function renderBundleCardHtml(bundle) {
     const src = String(it.source || 'archive').toLowerCase();
     sourceCountsMap.set(src, (sourceCountsMap.get(src) || 0) + 1);
   }
-  const sourceSummaryParts = [`${summary.total} Paket(e)`];
+  const sourceSummaryParts = [t('bundles.packageCount', { count: summary.total })];
   const countBadgesHtml = [...sourceCountsMap.entries()]
     .map(([src, cnt]) => {
-      const badge = getProviderBadgeInfo(src, state.providers);
+      const badge = getLocalizedProviderBadge(src, state.providers);
       const label = badge?.label || src;
       return `<span class="provider-badge ${escapeHTML(badge?.badgeClass || '')}">${escapeHTML(label)}: ${cnt}</span>`;
     })
@@ -103,7 +100,7 @@ function renderBundleCardHtml(bundle) {
             <span class="bundle-card-counts">${sourceSummaryParts.join('')} ${countBadgesHtml}</span>
           </div>
         </div>
-        <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="Bündel als JSON exportieren">📤 Exportieren</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="${escapeHTML(t('bundles.exportTitle'))}">📤 ${escapeHTML(t('common.export'))}</button>
       </div>
 
       ${bundle.description ? `<p class="bundle-card-desc">${escapeHTML(bundle.description)}</p>` : ''}
@@ -117,16 +114,16 @@ function renderBundleCardHtml(bundle) {
           <div class="bundle-progress-fill" style="width: ${pct}%"></div>
         </div>
         <div class="bundle-status-pills">
-          ${summary.upToDateCount > 0 ? `<span class="bundle-pill is-ok">✅ ${summary.upToDateCount} aktuell</span>` : ''}
-          ${summary.outdatedCount > 0 ? `<span class="bundle-pill is-outdated">⬆️ ${summary.outdatedCount} veraltet</span>` : ''}
-          ${summary.missingCount > 0 ? `<span class="bundle-pill is-missing">⬇️ ${summary.missingCount} fehlt</span>` : ''}
-          ${summary.adwareProtectedCount > 0 ? `<span class="bundle-pill is-protected">🛡️ ${summary.adwareProtectedCount} Interaktiv-Schutz</span>` : ''}
+          ${summary.upToDateCount > 0 ? `<span class="bundle-pill is-ok">✅ ${escapeHTML(t('bundles.pillUpToDate', { count: summary.upToDateCount }))}</span>` : ''}
+          ${summary.outdatedCount > 0 ? `<span class="bundle-pill is-outdated">⬆️ ${escapeHTML(t('bundles.pillOutdated', { count: summary.outdatedCount }))}</span>` : ''}
+          ${summary.missingCount > 0 ? `<span class="bundle-pill is-missing">⬇️ ${escapeHTML(t('bundles.pillMissing', { count: summary.missingCount }))}</span>` : ''}
+          ${summary.adwareProtectedCount > 0 ? `<span class="bundle-pill is-protected">🛡️ ${escapeHTML(t('bundles.pillProtected', { count: summary.adwareProtectedCount }))}</span>` : ''}
         </div>
       </div>
 
       <div class="bundle-preview-list">
         ${previewHtml}
-        ${remainingCount > 0 ? `<span class="bundle-preview-more">+${remainingCount} weitere</span>` : ''}
+        ${remainingCount > 0 ? `<span class="bundle-preview-more">${escapeHTML(t('bundles.moreItems', { count: remainingCount }))}</span>` : ''}
       </div>
 
       <div class="bundle-card-actions">
@@ -137,11 +134,11 @@ function renderBundleCardHtml(bundle) {
           data-bundle-id="${escapeHTML(bundle.id)}"
           ${summary.total === 0 || state.isBundleInstallRunning ? 'disabled' : ''}
         >
-          🚀 Bündel installieren / abgleichen
+          🚀 ${escapeHTML(t('bundles.runBundle'))}
         </button>
-        <button type="button" class="btn btn-ghost" data-bundle-action="edit" data-bundle-id="${escapeHTML(bundle.id)}">✏️ Bearbeiten</button>
-        <button type="button" class="btn btn-ghost" data-bundle-action="duplicate" data-bundle-id="${escapeHTML(bundle.id)}">📋 Duplizieren</button>
-        <button type="button" class="btn btn-danger" data-bundle-action="delete" data-bundle-id="${escapeHTML(bundle.id)}">🗑️ Löschen</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="edit" data-bundle-id="${escapeHTML(bundle.id)}">✏️ ${escapeHTML(t('common.edit'))}</button>
+        <button type="button" class="btn btn-ghost" data-bundle-action="duplicate" data-bundle-id="${escapeHTML(bundle.id)}">📋 ${escapeHTML(t('bundles.duplicate'))}</button>
+        <button type="button" class="btn btn-danger" data-bundle-action="delete" data-bundle-id="${escapeHTML(bundle.id)}">🗑️ ${escapeHTML(t('common.delete'))}</button>
       </div>
     </article>
   `,
@@ -150,8 +147,8 @@ function renderBundleCardHtml(bundle) {
 
 function getBundleProviderFilterOptions() {
   const options = [
-    { id: 'all', label: 'Alle' },
-    { id: 'archive', label: 'Archiv' },
+    { id: 'all', label: t('common.all') },
+    { id: 'archive', label: t('providers.names.archive') },
   ];
   const seen = new Set(['all', 'archive']);
 
@@ -168,7 +165,7 @@ function getBundleProviderFilterOptions() {
         .toLowerCase();
       if (!src || seen.has(src)) continue;
       seen.add(src);
-      const badge = getProviderBadgeInfo(src, state.providers);
+      const badge = getLocalizedProviderBadge(src, state.providers);
       options.push({ id: src, label: badge?.label || src });
     }
   }
@@ -214,7 +211,7 @@ export function renderBundlesView() {
   const selEnd = activeEl instanceof HTMLInputElement ? activeEl.selectionEnd : null;
 
   const ipcNoticeHtml = state.bundlesIpcUnavailable
-    ? `<div class="discover-notice">⚠️ Die Bündel-Funktion im Hauptprozess ist noch nicht aktiv (alte Electron-Instanz läuft noch). Bitte beende alle laufenden Electron-Fenster und starte <code>npm run dev</code> bzw. die App einmal neu.</div>`
+    ? `<div class="discover-notice">⚠️ ${escapeHTML(t('bundles.ipcUnavailableNotice'))}</div>`
     : '';
 
   const renderedCards = filtered.map(renderBundleCardHtml);
@@ -224,23 +221,23 @@ export function renderBundlesView() {
     <div class="bundles-header">
       <div class="bundles-header-main">
         <div>
-          <h2>📦 Paketbündel</h2>
-          <p class="muted">Zentral im Archiv gespeichert (<code>data/bundles.json</code>) - auf allen PCs direkt abgleichbar</p>
+          <h2>📦 ${escapeHTML(t('bundles.headerTitle'))}</h2>
+          <p class="muted">${escapeHTML(t('bundles.headerSubtitle'))}</p>
         </div>
         <div class="bundles-header-actions">
-          <button type="button" class="btn btn-primary" data-bundle-action="new">➕ Neues Bündel</button>
-          <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 Aus diesem PC erstellen</button>
-          <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 Bündel importieren</button>
-          <button type="button" class="btn btn-ghost" data-bundle-action="export-all" ${state.bundles.length === 0 ? 'disabled' : ''}>📤 Alle Bündel exportieren</button>
+          <button type="button" class="btn btn-primary" data-bundle-action="new">➕ ${escapeHTML(t('bundles.newBundle'))}</button>
+          <button type="button" class="btn btn-local" data-bundle-action="snapshot">📸 ${escapeHTML(t('bundles.snapshotFromPc'))}</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="import">📥 ${escapeHTML(t('bundles.importBundle'))}</button>
+          <button type="button" class="btn btn-ghost" data-bundle-action="export-all" ${state.bundles.length === 0 ? 'disabled' : ''}>📤 ${escapeHTML(t('bundles.exportAllBundles'))}</button>
         </div>
       </div>
 
       <div class="bundles-search-row">
         <div class="bundles-search-box">
-          <input type="text" id="bundleSearchInput" value="${escapeHTML(state.bundleSearchQuery)}" placeholder="Bündel oder enthaltene Programme suchen (Strg+F)..." autocomplete="off">
-          <button type="button" id="clearBundleSearchBtn" class="clear-btn" title="Suche leeren" ${state.bundleSearchQuery ? '' : 'hidden'}>✕</button>
+          <input type="text" id="bundleSearchInput" value="${escapeHTML(state.bundleSearchQuery)}" placeholder="${escapeHTML(t('bundles.searchPlaceholder'))}" autocomplete="off">
+          <button type="button" id="clearBundleSearchBtn" class="clear-btn" title="${escapeHTML(t('toolbar.clearSearch'))}" ${state.bundleSearchQuery ? '' : 'hidden'}>✕</button>
         </div>
-        <span class="muted">${filtered.length} von ${visibleBundles.length} Bündel(n)</span>
+        <span class="muted">${escapeHTML(t('bundles.countSummary', { filtered: filtered.length, total: visibleBundles.length }))}</span>
       </div>
       ${filterBarHtml}
     </div>

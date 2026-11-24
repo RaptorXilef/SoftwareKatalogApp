@@ -1,6 +1,7 @@
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { closestEl, closestInput, closestSelect, qsInput } from '../utils/dom.js';
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -8,12 +9,12 @@ let activeMatcherToken = 0;
 
 function getStageBadge(entry) {
   if (entry.stage === 'installed') {
-    return '<span class="matcher-badge is-stage1">✅ Stufe 1 · PC-Treffer</span>';
+    return `<span class="matcher-badge is-stage1">✅ ${escapeHTML(t('wingetMatcher.stage1Badge'))}</span>`;
   }
   if (entry.stage === 'search') {
-    return '<span class="matcher-badge is-stage2">🔎 Stufe 2 · Vorschlag</span>';
+    return `<span class="matcher-badge is-stage2">🔎 ${escapeHTML(t('wingetMatcher.stage2Badge'))}</span>`;
   }
-  return '<span class="matcher-badge is-none">Ohne Treffer</span>';
+  return `<span class="matcher-badge is-none">${escapeHTML(t('wingetMatcher.noMatchBadge'))}</span>`;
 }
 
 export async function renderWingetMatcherModal() {
@@ -31,26 +32,26 @@ export async function renderWingetMatcherModal() {
   modal.innerHTML = `
     <div class="modal-header">
       <div>
-        <h2>🪄 Winget-IDs zuordnen</h2>
-        <span class="muted">Zweistufiger Assistent für Archiv-Ordner ohne Paket-ID</span>
+        <h2>🪄 ${escapeHTML(t('wingetMatcher.title'))}</h2>
+        <span class="muted">${escapeHTML(t('wingetMatcher.loadingSubtitle'))}</span>
       </div>
-      <button type="button" class="icon-btn" data-matcher-action="close" title="Schließen" aria-label="Schließen">✕</button>
+      <button type="button" class="icon-btn" data-matcher-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
     </div>
 
     <div class="modal-body matcher-body">
       <div class="matcher-loading-box">
-        <strong>⏳ Analysiere Archiv-Ordner und suche Winget-Kandidaten...</strong>
+        <strong>⏳ ${escapeHTML(t('wingetMatcher.loadingHeadline'))}</strong>
         <p class="muted">
-          Stufe 1 gleicht mit <code>winget export</code> (installierte PC-Programme) ab.<br>
-          Stufe 2 sucht für übrige Ordner gedrosselt via <code>winget search</code> (jederzeit oben in der Job-Leiste abbrechbar).
+          ${escapeHTML(t('wingetMatcher.loadingLine1'))}<br>
+          ${escapeHTML(t('wingetMatcher.loadingLine2'))}
         </p>
       </div>
     </div>
 
     <div class="modal-footer">
-      <span class="muted">Suche läuft...</span>
+      <span class="muted">${escapeHTML(t('wingetMatcher.searchingFooter'))}</span>
       <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-matcher-action="close">Schließen</button>
+        <button type="button" class="btn btn-ghost" data-matcher-action="close">${escapeHTML(t('common.close'))}</button>
       </div>
     </div>
   `;
@@ -68,18 +69,18 @@ export async function renderWingetMatcherModal() {
   if (!scanRes?.success) {
     modal.innerHTML = `
       <div class="modal-header">
-        <h2>🪄 Winget-IDs zuordnen</h2>
-        <button type="button" class="icon-btn" data-matcher-action="close" title="Schließen" aria-label="Schließen">✕</button>
+        <h2>🪄 ${escapeHTML(t('wingetMatcher.title'))}</h2>
+        <button type="button" class="icon-btn" data-matcher-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
       </div>
       <div class="modal-body">
         <div class="matcher-empty-box">
-          <strong>Zuordnung konnte nicht gestartet werden</strong>
-          <p class="muted">${escapeHTML(scanRes?.error || 'Unbekannter Fehler beim Winget-Abgleich.')}</p>
+          <strong>${escapeHTML(t('wingetMatcher.errorHeadline'))}</strong>
+          <p class="muted">${escapeHTML(scanRes?.error || t('wingetMatcher.errorUnknown'))}</p>
         </div>
       </div>
       <div class="modal-footer">
         <span></span>
-        <button type="button" class="btn btn-primary" data-matcher-action="close">Schließen</button>
+        <button type="button" class="btn btn-primary" data-matcher-action="close">${escapeHTML(t('common.close'))}</button>
       </div>
     `;
     modal.onclick = (e) => {
@@ -119,12 +120,12 @@ export async function renderWingetMatcherModal() {
       rows.length === 0
         ? `
           <div class="matcher-empty-box">
-            <strong>🎉 Alle ${scanRes.totalArchive || 0} Archiv-Ordner haben bereits eine Paket-ID!</strong>
-            <p class="muted">Es wurden keine nicht zugeordneten Archiv-Einträge gefunden.</p>
+            <strong>🎉 ${escapeHTML(t('wingetMatcher.allLinkedTitle', { total: scanRes.totalArchive || 0 }))}</strong>
+            <p class="muted">${escapeHTML(t('wingetMatcher.allLinkedDesc'))}</p>
           </div>
         `
         : filtered.length === 0
-          ? `<div class="matcher-empty-box"><span class="muted">Keine Einträge entsprechen dem aktuellen Filter.</span></div>`
+          ? `<div class="matcher-empty-box"><span class="muted">${escapeHTML(t('wingetMatcher.noFilterMatches'))}</span></div>`
           : filtered
               .map((row) => {
                 const hasCandidates = row.candidates.length > 0;
@@ -132,11 +133,14 @@ export async function renderWingetMatcherModal() {
                   ? row.candidates
                       .map((cand) => {
                         const verStr = cand.version ? ` (v${cand.version})` : '';
-                        const label = `${cand.name} — ${cand.packageId}${verStr}`;
+                        const label = `${cand.name} - ${cand.packageId}${verStr}`;
                         return `<option value="${escapeHTML(cand.packageId)}" ${row.selectedPackageId === cand.packageId ? 'selected' : ''}>${escapeHTML(label)}</option>`;
                       })
                       .join('')
-                  : '<option value="">Kein Winget-Kandidat gefunden</option>';
+                  : `<option value="">${escapeHTML(t('wingetMatcher.noCandidatesOption'))}</option>`;
+                const reasonText = row.matchReasonKey
+                  ? t(row.matchReasonKey, row.matchReasonParams || {})
+                  : row.matchReason || '';
 
                 return `
                   <div class="matcher-row ${row.checked ? 'is-checked' : ''} ${!hasCandidates ? 'is-disabled' : ''}" data-matcher-item-id="${escapeHTML(row.itemId)}">
@@ -150,7 +154,7 @@ export async function renderWingetMatcherModal() {
                       </div>
                       <div class="matcher-meta-line">
                         <code>${escapeHTML(row.folderName || row.itemPath)}</code>
-                        <span class="muted">${escapeHTML(row.matchReason || '')}</span>
+                        <span class="muted">${escapeHTML(reasonText)}</span>
                       </div>
                     </div>
                     <div class="matcher-select-col">
@@ -166,40 +170,38 @@ export async function renderWingetMatcherModal() {
     modal.innerHTML = `
       <div class="modal-header">
         <div>
-          <h2>🪄 Winget-IDs zuordnen</h2>
-          <span class="muted">${scanRes.alreadyLinked || 0} bereits verknüpft · ${rows.length} ohne Paket-ID</span>
+          <h2>🪄 ${escapeHTML(t('wingetMatcher.title'))}</h2>
+          <span class="muted">${escapeHTML(t('wingetMatcher.subtitleStats', { linked: scanRes.alreadyLinked || 0, unmatched: rows.length }))}</span>
         </div>
-        <button type="button" class="icon-btn" data-matcher-action="close" title="Schließen" aria-label="Schließen">✕</button>
+        <button type="button" class="icon-btn" data-matcher-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
       </div>
 
       <div class="modal-body matcher-body">
         ${
-          scanRes.partial
-            ? '<div class="pkg-stale-notice">⚠️ Suche wurde vorzeitig abgebrochen - bereits gefundene Treffer werden angezeigt.</div>'
-            : ''
+          scanRes.partial ? `<div class="pkg-stale-notice">⚠️ ${escapeHTML(t('wingetMatcher.partialNotice'))}</div>` : ''
         }
 
         <div class="matcher-summary-bar">
-          <div class="matcher-kpi"><strong>${stats.stage1}</strong><span>Stufe 1 (Sicher)</span></div>
-          <div class="matcher-kpi"><strong>${stats.stage2}</strong><span>Stufe 2 (Vorschläge)</span></div>
-          <div class="matcher-kpi"><strong>${stats.unmatched}</strong><span>Ohne Treffer</span></div>
-          <div class="matcher-kpi is-accent"><strong id="matcherSelectedCount">${selectedCount}</strong><span>Ausgewählt</span></div>
+          <div class="matcher-kpi"><strong>${stats.stage1}</strong><span>${escapeHTML(t('wingetMatcher.kpiStage1'))}</span></div>
+          <div class="matcher-kpi"><strong>${stats.stage2}</strong><span>${escapeHTML(t('wingetMatcher.kpiStage2'))}</span></div>
+          <div class="matcher-kpi"><strong>${stats.unmatched}</strong><span>${escapeHTML(t('wingetMatcher.kpiUnmatched'))}</span></div>
+          <div class="matcher-kpi is-accent"><strong id="matcherSelectedCount">${selectedCount}</strong><span>${escapeHTML(t('wingetMatcher.kpiSelected'))}</span></div>
         </div>
 
         ${
           rows.length > 0
             ? `
               <div class="matcher-controls-bar">
-                <input type="text" id="matcherSearchInput" value="${escapeHTML(filterText)}" placeholder="Ordner oder Winget-ID filtern...">
+                <input type="text" id="matcherSearchInput" value="${escapeHTML(filterText)}" placeholder="${escapeHTML(t('wingetMatcher.filterPlaceholder'))}">
                 <div class="matcher-filter-chips">
-                  <button type="button" class="origin-chip ${stageFilter === 'all' ? 'active' : ''}" data-matcher-stage="all">Alle (${rows.length})</button>
-                  <button type="button" class="origin-chip ${stageFilter === 'installed' ? 'active' : ''}" data-matcher-stage="installed">Stufe 1 (${stats.stage1})</button>
-                  <button type="button" class="origin-chip ${stageFilter === 'search' ? 'active' : ''}" data-matcher-stage="search">Stufe 2 (${stats.stage2})</button>
+                  <button type="button" class="origin-chip ${stageFilter === 'all' ? 'active' : ''}" data-matcher-stage="all">${escapeHTML(t('wingetMatcher.chipAll', { count: rows.length }))}</button>
+                  <button type="button" class="origin-chip ${stageFilter === 'installed' ? 'active' : ''}" data-matcher-stage="installed">${escapeHTML(t('wingetMatcher.chipStage1', { count: stats.stage1 }))}</button>
+                  <button type="button" class="origin-chip ${stageFilter === 'search' ? 'active' : ''}" data-matcher-stage="search">${escapeHTML(t('wingetMatcher.chipStage2', { count: stats.stage2 }))}</button>
                 </div>
                 <div class="matcher-bulk-btns">
-                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-stage1">Nur sichere</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-all">Alle mit Vorschlag</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-none">Keine</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-stage1">${escapeHTML(t('wingetMatcher.btnSelectStage1'))}</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-all">${escapeHTML(t('wingetMatcher.btnSelectAll'))}</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-matcher-action="select-none">${escapeHTML(t('wingetMatcher.btnSelectNone'))}</button>
                 </div>
               </div>
             `
@@ -212,11 +214,11 @@ export async function renderWingetMatcherModal() {
       </div>
 
       <div class="modal-footer">
-        <span class="muted">Erst nach Bestätigung wird <code>_metadata/meta.json</code> aktualisiert.</span>
+        <span class="muted">${escapeHTML(t('wingetMatcher.footerHint'))}</span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-matcher-action="close" ${isSaving ? 'disabled' : ''}>Abbrechen</button>
+          <button type="button" class="btn btn-ghost" data-matcher-action="close" ${isSaving ? 'disabled' : ''}>${escapeHTML(t('common.cancel'))}</button>
           <button type="button" class="btn btn-primary" id="btnApplyWingetMatches" data-matcher-action="apply" ${selectedCount === 0 || isSaving ? 'disabled' : ''}>
-            ${isSaving ? '⏳ Speichere...' : `💾 Ausgewählte übernehmen (${selectedCount})`}
+            ${isSaving ? `⏳ ${escapeHTML(t('common.saving'))}` : `💾 ${escapeHTML(t('wingetMatcher.applyBtn', { count: selectedCount }))}`}
           </button>
         </div>
       </div>
@@ -312,10 +314,10 @@ export async function renderWingetMatcherModal() {
       isSaving = false;
       if (res?.success) {
         await triggerCatalogReload();
-        showToast(`${res.savedCount} Winget-ID(s) in meta.json gespeichert.`, { type: 'success' });
+        showToast(t('wingetMatcher.savedToast', { count: res.savedCount }), { type: 'success' });
         closeModal();
       } else {
-        showToast(res?.errors?.[0] || 'Fehler beim Speichern der Zuordnungen.', { type: 'error', duration: 6000 });
+        showToast(res?.errors?.[0] || t('wingetMatcher.saveErrorToast'), { type: 'error', duration: 6000 });
         renderBody();
       }
     }

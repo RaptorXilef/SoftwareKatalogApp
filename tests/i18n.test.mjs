@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createI18nService, loadLocalesFromDirs } from '../src/main/i18n-core.js';
+import { formatInstallModeInfo } from '../src/shared/app-update-logic.js';
+import { formatBytes } from '../src/shared/archive-cleaner-logic.js';
+import { evaluateBundleStatus, planBundleExecution } from '../src/shared/bundles-logic.js';
 import {
   createI18n,
   extractLocaleMeta,
@@ -13,6 +16,9 @@ import {
   normalizeLocaleCode,
   resolveEffectiveLocale,
 } from '../src/shared/i18n.js';
+import { detectAdwareSignals, detectInstallerFromBuffer } from '../src/shared/installer-logic.js';
+import { evaluatePackagePolicy } from '../src/shared/policy-logic.js';
+import { formatProviderStatusBadge, groupProvidersByUiCategory } from '../src/shared/provider-lifecycle-logic.js';
 
 const ROOT_DIR = process.cwd();
 const BUILTIN_LOCALES_DIR = path.join(ROOT_DIR, 'src', 'locales');
@@ -34,6 +40,34 @@ function extractPlaceholders(text) {
     matches.add(m[1]);
   }
   return Array.from(matches).sort();
+}
+
+function hasBalancedBraces(text) {
+  let depth = 0;
+  for (const ch of String(text)) {
+    if (ch === '{') {
+      if (depth > 0) return false;
+      depth++;
+    } else if (ch === '}') {
+      if (depth === 0) return false;
+      depth--;
+    }
+  }
+  return depth === 0;
+}
+
+function collectJsFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'locales') continue;
+      out.push(...collectJsFiles(full));
+    } else if (entry.isFile() && /\.(?:js|mjs)$/i.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
 }
 
 after(() => {
@@ -195,35 +229,143 @@ describe('i18n-service: external community locales and runtime reloading', () =>
   });
 });
 
-describe('locales parity and packaging checks', () => {
-  it('maintains 100% key and placeholder parity between en.json and de.json with valid ASCII punctuation', () => {
+describe('locales parity, static key usage, and packaging checks', () => {
+  it('enforces 100% key parity, non-empty values, valid _meta, placeholders, and ASCII punctuation across all src/locales/*.json', () => {
     const enJson = readJson(path.join(BUILTIN_LOCALES_DIR, 'en.json'));
-    const deJson = readJson(path.join(BUILTIN_LOCALES_DIR, 'de.json'));
-
-    assert.equal(enJson._meta?.code, 'en');
-    assert.equal(deJson._meta?.code, 'de');
-    assert.ok(enJson._meta?.nativeName);
-    assert.ok(deJson._meta?.nativeName);
-
     const enFlat = flattenMessages(enJson);
-    const deFlat = flattenMessages(deJson);
-
     const enKeys = Object.keys(enFlat).sort();
-    const deKeys = Object.keys(deFlat).sort();
+    assert.ok(enKeys.length > 0, 'en.json must contain translation keys');
 
-    assert.deepEqual(deKeys, enKeys);
+    const localeFiles = fs.readdirSync(BUILTIN_LOCALES_DIR).filter((f) => f.endsWith('.json'));
+    assert.ok(localeFiles.includes('en.json'));
+    assert.ok(localeFiles.includes('de.json'));
 
-    for (const key of enKeys) {
-      assert.ok(enFlat[key].length > 0, `Empty EN string for ${key}`);
-      assert.ok(deFlat[key].length > 0, `Empty DE string for ${key}`);
-      assert.deepEqual(
-        extractPlaceholders(deFlat[key]),
-        extractPlaceholders(enFlat[key]),
-        `Placeholder mismatch for key "${key}"`
+    for (const fileName of localeFiles) {
+      const codeStem = path.basename(fileName, '.json').toLowerCase();
+      const dict = readJson(path.join(BUILTIN_LOCALES_DIR, fileName));
+
+      assert.ok(dict._meta && typeof dict._meta === 'object', `${fileName} must define _meta`);
+      assert.equal(
+        String(dict._meta.code || '')
+          .trim()
+          .toLowerCase(),
+        codeStem,
+        `${fileName} _meta.code must match filename`
       );
-      assert.doesNotMatch(enFlat[key], /[–—„“”’]/, `Forbidden typography character in EN "${key}"`);
-      assert.doesNotMatch(deFlat[key], /[–—„“”’]/, `Forbidden typography character in DE "${key}"`);
+      assert.ok(String(dict._meta.name || '').trim().length > 0, `${fileName} _meta.name must not be empty`);
+      assert.ok(
+        String(dict._meta.nativeName || '').trim().length > 0,
+        `${fileName} _meta.nativeName must not be empty`
+      );
+      assert.ok(String(dict._meta.author || '').trim().length > 0, `${fileName} _meta.author must not be empty`);
+
+      const flat = flattenMessages(dict);
+      const keys = Object.keys(flat).sort();
+      const missingKeys = enKeys.filter((k) => !Object.hasOwn(flat, k));
+      const extraKeys = keys.filter((k) => !Object.hasOwn(enFlat, k));
+
+      assert.deepEqual(missingKeys, [], `${fileName} is missing keys from en.json`);
+      assert.deepEqual(extraKeys, [], `${fileName} has extra keys not present in en.json`);
+
+      for (const key of enKeys) {
+        const val = flat[key];
+        assert.equal(typeof val, 'string', `${fileName} "${key}" must be a string`);
+        assert.ok(val.trim().length > 0, `${fileName} has empty string for "${key}"`);
+        assert.ok(hasBalancedBraces(val), `${fileName} has unbalanced braces in "${key}": ${val}`);
+        assert.deepEqual(
+          extractPlaceholders(val),
+          extractPlaceholders(enFlat[key]),
+          `${fileName} placeholder mismatch for key "${key}"`
+        );
+        assert.doesNotMatch(val, /[–—„“”’‘]/, `Forbidden typography character in ${fileName} "${key}"`);
+      }
     }
+  });
+
+  it('verifies all static t(...) calls and data-i18n* DOM attributes exist in en.json', () => {
+    const enJson = readJson(path.join(BUILTIN_LOCALES_DIR, 'en.json'));
+    const enFlat = flattenMessages(enJson);
+    const missing = [];
+
+    const jsDirs = [
+      path.join(ROOT_DIR, 'src', 'renderer'),
+      path.join(ROOT_DIR, 'src', 'main'),
+      path.join(ROOT_DIR, 'src', 'shared'),
+    ];
+    for (const dir of jsDirs) {
+      for (const filePath of collectJsFiles(dir)) {
+        const src = fs.readFileSync(filePath, 'utf-8');
+        for (const match of src.matchAll(/(?<![a-zA-Z0-9_$.])t\(\s*['"]([a-zA-Z0-9_]+\.[a-zA-Z0-9_.-]+)['"]/g)) {
+          const key = match[1];
+          if (!Object.hasOwn(enFlat, key)) {
+            missing.push(`${path.relative(ROOT_DIR, filePath)} -> ${key}`);
+          }
+        }
+      }
+    }
+
+    const indexHtml = fs.readFileSync(path.join(ROOT_DIR, 'src', 'renderer', 'index.html'), 'utf-8');
+    for (const match of indexHtml.matchAll(/data-i18n(?:-[a-z-]+)?=['"]([a-zA-Z0-9_.-]+)['"]/g)) {
+      const key = match[1];
+      if (!Object.hasOwn(enFlat, key)) {
+        missing.push(`src/renderer/index.html -> ${key}`);
+      }
+    }
+
+    assert.deepEqual(missing, [], `Referenced i18n keys missing in en.json:\n${missing.join('\n')}`);
+  });
+
+  it('translates shared helper outputs when passed an English i18n translator and locale', () => {
+    const enJson = readJson(path.join(BUILTIN_LOCALES_DIR, 'en.json'));
+    const enI18n = createI18n({ locale: 'en', configuredLanguage: 'en', messages: enJson, fallbackMessages: enJson });
+    const enT = enI18n.t;
+
+    assert.equal(formatBytes(1536, 'en'), '1.5 KB');
+    assert.equal(formatBytes(1536, 'de'), '1,5 KB');
+
+    const modeInfo = formatInstallModeInfo('installed', 'x64', { isAllUsersInstall: true, t: enT });
+    assert.equal(modeInfo.label, 'Installed (64-bit)');
+    assert.equal(modeInfo.detail, 'System-wide installation (All users)');
+
+    const badge = formatProviderStatusBadge({ id: 'winget', capabilities: {} }, { available: false }, { t: enT });
+    assert.equal(badge.text, '⚪ Not installed');
+
+    const groups = groupProvidersByUiCategory(
+      [
+        { id: 'archive', category: 'archive', name: 'Archiv' },
+        { id: 'npm', category: 'developer', name: 'npm' },
+      ],
+      { t: enT }
+    );
+    assert.deepEqual(
+      groups.map((g) => g.label),
+      ['Languages & Developers', 'Archive']
+    );
+
+    const policyEval = evaluatePackagePolicy(
+      { id: 'x', name: 'Foo', installMode: 'interactive-required' },
+      'update',
+      { enabled: true, shared: { listType: 'none', defaultExecutionMode: 'silent-only', entries: [] } },
+      false,
+      { t: enT }
+    );
+    assert.equal(policyEval.allowed, false);
+    assert.ok(policyEval.error.includes('adware protection'));
+
+    const adware = detectAdwareSignals({ name: 'Daemon Tools Lite', t: enT });
+    assert.equal(adware.flagged, true);
+    assert.ok(adware.reason.includes('Always Interactive'));
+
+    const unknownInstaller = detectInstallerFromBuffer('setup.bin', Buffer.from('random'), { t: enT });
+    assert.equal(unknownInstaller.label, 'Unknown');
+
+    const bundleStatus = evaluateBundleStatus(
+      { id: 'b1', name: 'Test', items: [{ source: 'winget', packageId: 'Foo.Bar', name: 'Foo' }] },
+      { packages: [], t: enT }
+    );
+    assert.equal(bundleStatus.items[0].statusLabel, '⬇️ Missing - install');
+    const plan = planBundleExecution(bundleStatus.items, { allowSilent: true, silentWinget: false, t: enT });
+    assert.ok(plan.interactiveNotice.includes('interactively'));
   });
 
   it('bundles src/locales via build.extraResources in package.json', () => {

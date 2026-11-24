@@ -23,12 +23,21 @@ import {
   SETTINGS_TABS,
   toggleDraftProvider,
 } from '../../shared/settings-draft-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { renderAdminSessionButton, renderAuthHeaderControls } from '../components/toolbar.js';
 import { applyAuthStatus, state } from '../state.js';
-import { applyI18nState, getAvailableLocales, getConfiguredLanguage, t } from '../utils/i18n.js';
+import {
+  applyI18nState,
+  getAvailableLocales,
+  getConfiguredLanguage,
+  getI18nLocale,
+  getLocalizedProviderBadge,
+  getLocalizedProviderDescription,
+  getLocalizedProviderName,
+  getLocalizedProviderUninstallWarning,
+  t,
+} from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -48,30 +57,32 @@ function getSelectEl(root, selector) {
 
 function renderArchiveRootsListHtml(archiveItems) {
   if (!Array.isArray(archiveItems) || archiveItems.length === 0) {
-    return '<div class="path-empty">Keine Archiv-Pfade konfiguriert.</div>';
+    return `<div class="path-empty">${escapeHTML(t('settings.archive.locationsEmpty'))}</div>`;
   }
 
   const canDelete = archiveItems.length > 1;
   return archiveItems
     .map((entry, idx) => {
-      const rankLabel = idx === 0 ? '#1 Primär' : `#${idx + 1}`;
+      const rankLabel = idx === 0 ? t('settings.archive.rankPrimary') : `#${idx + 1}`;
       const statusCls = entry.online ? 'is-online' : 'is-offline';
-      const statusText = entry.online ? '🟢 Online' : '🔴 Offline';
+      const statusText = entry.online
+        ? `🟢 ${t('settings.archive.statusOnline')}`
+        : `🔴 ${t('settings.archive.statusOffline')}`;
       const absHint = entry.absPath && entry.absPath !== entry.rawPath ? ` (${entry.absPath})` : '';
 
       return `
         <div class="archive-path-row" data-archive-idx="${idx}" draggable="${archiveItems.length > 1 ? 'true' : 'false'}">
-          <span class="archive-drag-handle" title="Per Drag & Drop verschieben" aria-hidden="true">⋮⋮</span>
+          <span class="archive-drag-handle" title="${escapeHTML(t('settings.archive.dragTitle'))}" aria-hidden="true">⋮⋮</span>
           <span class="archive-rank-pill ${idx === 0 ? 'is-primary' : ''}">${escapeHTML(rankLabel)}</span>
-          <span class="archive-status-pill ${statusCls}" title="${entry.online ? 'Verzeichnis erreichbar' : 'Verzeichnis aktuell nicht erreichbar'}">${statusText}</span>
+          <span class="archive-status-pill ${statusCls}" title="${escapeHTML(entry.online ? t('settings.archive.statusOnlineTitle') : t('settings.archive.statusOfflineTitle'))}">${escapeHTML(statusText)}</span>
           <span class="archive-path-text" title="${escapeHTML(`${entry.rawPath}${absHint}`)}">
             <strong class="archive-path-name">${escapeHTML(entry.label || getArchiveRootLabel(entry.rawPath, idx))}</strong>
             <code class="archive-path-raw">${escapeHTML(entry.rawPath)}</code>
           </span>
           <div class="archive-path-actions">
-            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="up" data-archive-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="Priorität erhöhen">↑</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="down" data-archive-idx="${idx}" ${idx === archiveItems.length - 1 ? 'disabled' : ''} title="Priorität verringern">↓</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-archive-remove="${idx}" ${canDelete ? '' : 'disabled'} title="${canDelete ? 'Archiv-Pfad entfernen' : 'Mindestens ein Archiv-Pfad ist erforderlich'}">🗑️</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="up" data-archive-idx="${idx}" ${idx === 0 ? 'disabled' : ''} title="${escapeHTML(t('settings.archive.moveUpTitle'))}">↑</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-move="down" data-archive-idx="${idx}" ${idx === archiveItems.length - 1 ? 'disabled' : ''} title="${escapeHTML(t('settings.archive.moveDownTitle'))}">↓</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-archive-remove="${idx}" ${canDelete ? '' : 'disabled'} title="${escapeHTML(canDelete ? t('settings.archive.removePathTitle') : t('settings.archive.minOnePathTitle'))}">🗑️</button>
           </div>
         </div>
       `;
@@ -177,10 +188,10 @@ export async function renderSettingsModal(initialTab = 'general') {
   };
 
   const getPolicyMatchTypeBadge = (matchType) => {
-    if (matchType === 'packageId') return 'Paket-ID';
-    if (matchType === 'archiveId') return 'Archiv-ID';
-    if (matchType === 'provider') return 'Paketmanager';
-    return 'Name';
+    if (matchType === 'packageId') return t('settings.policy.matchTypePackageId');
+    if (matchType === 'archiveId') return t('settings.policy.matchTypeArchiveId');
+    if (matchType === 'provider') return t('settings.policy.matchTypeProvider');
+    return t('settings.policy.matchTypeName');
   };
 
   const buildCandidateFromPackage = (pkg) => {
@@ -193,8 +204,8 @@ export async function renderSettingsModal(initialTab = 'general') {
         matchType: 'packageId',
         value: pid,
         label: String(pkg?.name || pid).trim(),
-        meta: `${pm || 'Paket'} · ${pid}`,
-        badge: pkg?.inArchive ? 'Archiv & PC' : 'Installiert',
+        meta: t('settings.policy.candidateMetaPackage', { pm: pm || t('settings.policy.matchTypeProvider'), id: pid }),
+        badge: pkg?.inArchive ? t('settings.policy.badgeArchivePc') : t('settings.policy.badgeInstalled'),
       };
     }
     if (pkg?.inArchive && pkg?.id) {
@@ -202,16 +213,16 @@ export async function renderSettingsModal(initialTab = 'general') {
         matchType: 'archiveId',
         value: String(pkg.id).trim(),
         label: String(pkg?.name || pkg.id).trim(),
-        meta: `Archiv-ID · ${pkg.id}`,
-        badge: 'Archiv',
+        meta: t('settings.policy.candidateMetaArchive', { id: pkg.id }),
+        badge: t('settings.policy.badgeArchive'),
       };
     }
     return {
       matchType: 'name',
       value: String(pkg?.name || '').trim(),
       label: String(pkg?.name || '').trim(),
-      meta: 'Name-Abgleich',
-      badge: pkg?.inArchive ? 'Archiv' : 'Installiert',
+      meta: t('settings.policy.candidateMetaName'),
+      badge: pkg?.inArchive ? t('settings.policy.badgeArchive') : t('settings.policy.badgeInstalled'),
     };
   };
 
@@ -225,17 +236,21 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     if (policySearchSource === 'provider') {
       const list = [
-        { id: 'archive', name: 'Archiv (lokal)', description: 'Programme aus dem lokalen Archiv' },
+        {
+          id: 'archive',
+          name: t('settings.policy.archiveLocalName'),
+          description: t('settings.policy.archiveLocalDesc'),
+        },
         ...providers.filter((p) => p.id !== 'archive'),
       ];
       return list
-        .filter((p) => matchesQuery(`${p.name} ${p.id} ${p.description || ''}`))
+        .filter((p) => matchesQuery(`${getLocalizedProviderName(p)} ${p.id} ${getLocalizedProviderDescription(p)}`))
         .map((p) => ({
           matchType: 'provider',
           value: p.id,
-          label: p.name,
-          meta: `Provider · ${p.id}`,
-          badge: 'Paketmanager',
+          label: getLocalizedProviderName(p),
+          meta: t('settings.policy.candidateMetaProvider', { id: p.id }),
+          badge: t('settings.policy.matchTypeProvider'),
         }));
     }
 
@@ -246,7 +261,7 @@ export async function renderSettingsModal(initialTab = 'general') {
           matchType: 'packageId',
           value: pid,
           label: String(pkg.name || pid).trim(),
-          meta: `Winget · ${pid}${pkg.version ? ` (v${pkg.version})` : ''}`,
+          meta: `Winget - ${pid}${pkg.version ? ` (v${pkg.version})` : ''}`,
           badge: 'Winget',
         };
       });
@@ -269,7 +284,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       candidates.push(cand);
     }
 
-    candidates.sort((a, b) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' }));
+    candidates.sort((a, b) => a.label.localeCompare(b.label, getI18nLocale() || 'en', { sensitivity: 'base' }));
     return candidates.slice(0, 40);
   };
 
@@ -283,25 +298,25 @@ export async function renderSettingsModal(initialTab = 'general') {
         <div class="policy-manual-form">
           <div class="policy-manual-grid">
             <label class="form-field">
-              <span>Regel-Typ</span>
+              <span>${escapeHTML(t('settings.policy.manualTypeLabel'))}</span>
               <select id="cfgPolicyManualType" ${isReadOnly ? 'disabled' : ''}>
-                <option value="packageId" ${policyManualMatchType === 'packageId' ? 'selected' : ''}>Paket-ID (z. B. VideoLAN.VLC)</option>
-                <option value="archiveId" ${policyManualMatchType === 'archiveId' ? 'selected' : ''}>Archiv-ID</option>
-                <option value="name" ${policyManualMatchType === 'name' ? 'selected' : ''}>Programmname (Wildcard * moeglich)</option>
-                <option value="provider" ${policyManualMatchType === 'provider' ? 'selected' : ''}>Paketmanager (winget, scoop, archive...)</option>
+                <option value="packageId" ${policyManualMatchType === 'packageId' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypePackageId'))}</option>
+                <option value="archiveId" ${policyManualMatchType === 'archiveId' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeArchiveId'))}</option>
+                <option value="name" ${policyManualMatchType === 'name' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeName'))}</option>
+                <option value="provider" ${policyManualMatchType === 'provider' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeProvider'))}</option>
               </select>
             </label>
             <label class="form-field">
-              <span>Wert / Muster</span>
-              <input type="text" id="cfgPolicyManualValue" value="${escapeHTML(policyManualValue)}" placeholder="z. B. VideoLAN.VLC oder *Adobe*" ${isReadOnly ? 'disabled' : ''}>
+              <span>${escapeHTML(t('settings.policy.manualValueLabel'))}</span>
+              <input type="text" id="cfgPolicyManualValue" value="${escapeHTML(policyManualValue)}" placeholder="${escapeHTML(t('settings.policy.manualValuePlaceholder'))}" ${isReadOnly ? 'disabled' : ''}>
             </label>
             <label class="form-field">
-              <span>Anzeigename (optional)</span>
-              <input type="text" id="cfgPolicyManualLabel" value="${escapeHTML(policyManualLabel)}" placeholder="z. B. VLC Media Player" ${isReadOnly ? 'disabled' : ''}>
+              <span>${escapeHTML(t('settings.policy.manualLabelLabel'))}</span>
+              <input type="text" id="cfgPolicyManualLabel" value="${escapeHTML(policyManualLabel)}" placeholder="${escapeHTML(t('settings.policy.manualLabelPlaceholder'))}" ${isReadOnly ? 'disabled' : ''}>
             </label>
           </div>
           <div class="policy-manual-actions">
-            <button type="button" class="btn btn-primary btn-xs" data-policy-action="add-manual" ${isReadOnly ? 'disabled' : ''}>➕ Regel hinzufuegen</button>
+            <button type="button" class="btn btn-primary btn-xs" data-policy-action="add-manual" ${isReadOnly ? 'disabled' : ''}>➕ ${escapeHTML(t('settings.policy.manualAddBtn'))}</button>
           </div>
         </div>
       `;
@@ -309,26 +324,26 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     if (policySearchSource === 'winget') {
       if (policyWingetLoading) {
-        return '<div class="policy-candidate-empty">⏳ Suche in Winget-Quellen...</div>';
+        return `<div class="policy-candidate-empty">⏳ ${escapeHTML(t('settings.policy.wingetSearching'))}</div>`;
       }
       if (policyWingetError) {
         return `<div class="policy-candidate-empty">${escapeHTML(policyWingetError)}</div>`;
       }
       if (policyWingetResults.length === 0) {
-        return '<div class="policy-candidate-empty">Gib oben einen Programmnamen ein und klicke auf "🔎 Winget suchen".</div>';
+        return `<div class="policy-candidate-empty">${escapeHTML(t('settings.policy.wingetSearchHint'))}</div>`;
       }
     }
 
     const candidates = getPolicyCandidateRows();
     if (candidates.length === 0) {
-      return '<div class="policy-candidate-empty">Keine passenden Programme gefunden.</div>';
+      return `<div class="policy-candidate-empty">${escapeHTML(t('settings.policy.candidatesEmpty'))}</div>`;
     }
 
     return candidates
       .map((cand) => {
         const key = getPolicyEntryKey(cand);
         const inList = existingKeys.has(key);
-        const badgeInfo = cand.matchType === 'provider' ? getProviderBadgeInfo(cand.value, providers) : null;
+        const badgeInfo = cand.matchType === 'provider' ? getLocalizedProviderBadge(cand.value, providers) : null;
         return `
           <div class="policy-candidate-row">
             <div class="policy-candidate-main">
@@ -347,7 +362,7 @@ export async function renderSettingsModal(initialTab = 'general') {
               data-match-label="${escapeHTML(cand.label)}"
               ${isReadOnly ? 'disabled' : ''}
             >
-              ${inList ? '✓ Entfernen' : '+ Hinzufuegen'}
+              ${inList ? `✓ ${escapeHTML(t('settings.policy.candidateRemove'))}` : `+ ${escapeHTML(t('settings.policy.candidateAdd'))}`}
             </button>
           </div>
         `;
@@ -364,29 +379,29 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (entries.length === 0) {
       const emptyHint =
         ruleSet.listType === 'whitelist'
-          ? 'Whitelist ist leer - fuer normale Nutzer sind aktuell alle Programme dieses Bereichs ausgeblendet.'
+          ? t('settings.policy.emptyWhitelist')
           : ruleSet.listType === 'blacklist'
-            ? 'Blacklist ist leer - aktuell ist kein Programm explizit gesperrt.'
-            : 'Noch keine Einzelregeln hinterlegt. Du kannst oben Programme zur Liste hinzufuegen.';
+            ? t('settings.policy.emptyBlacklist')
+            : t('settings.policy.emptyNone');
       return `<div class="policy-candidate-empty">${escapeHTML(emptyHint)}</div>`;
     }
 
     return entries
       .map((entry) => {
         const modeSelectHtml = isBlacklist
-          ? '<span class="policy-match-badge is-blacklist">🚫 Blockiert</span>'
+          ? `<span class="policy-match-badge is-blacklist">🚫 ${escapeHTML(t('settings.policy.badgeBlocked'))}</span>`
           : `
             <select
               class="policy-entry-mode-select"
               data-policy-entry-mode
               data-match-type="${escapeHTML(entry.matchType)}"
               data-match-value="${escapeHTML(entry.value)}"
-              title="Ausfuehrungsmodus fuer diesen Eintrag"
+              title="${escapeHTML(t('settings.policy.entryModeTitle'))}"
               ${isReadOnly ? 'disabled' : ''}
             >
-              <option value="inherit" ${entry.executionMode === 'inherit' ? 'selected' : ''}>Standard uebernehmen</option>
-              <option value="silent-only" ${entry.executionMode === 'silent-only' ? 'selected' : ''}>⚡ Nur Silent</option>
-              <option value="allow-interactive" ${entry.executionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ Silent &amp; Interaktiv</option>
+              <option value="inherit" ${entry.executionMode === 'inherit' ? 'selected' : ''}>${escapeHTML(t('settings.policy.entryModeInherit'))}</option>
+              <option value="silent-only" ${entry.executionMode === 'silent-only' ? 'selected' : ''}>⚡ ${escapeHTML(t('settings.policy.entryModeSilentOnly'))}</option>
+              <option value="allow-interactive" ${entry.executionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ ${escapeHTML(t('settings.policy.entryModeAllowInteractive'))}</option>
             </select>
           `;
 
@@ -407,7 +422,7 @@ export async function renderSettingsModal(initialTab = 'general') {
                 data-policy-remove-entry
                 data-match-type="${escapeHTML(entry.matchType)}"
                 data-match-value="${escapeHTML(entry.value)}"
-                title="Eintrag entfernen"
+                title="${escapeHTML(t('settings.policy.removeEntryTitle'))}"
                 ${isReadOnly ? 'disabled' : ''}
               >
                 🗑️
@@ -425,36 +440,36 @@ export async function renderSettingsModal(initialTab = 'general') {
     const activeRuleSet = getActivePolicyRuleSet();
     const isSeparate = draftPolicy.scopeMode === 'separate';
     const scopeLabel = !isSeparate
-      ? 'Gemeinsame Regeln (Updates & Installieren)'
+      ? t('settings.policy.scopeSharedLabel')
       : activePolicyScopeTab === 'install'
-        ? 'Regeln fuer Neu-Installationen'
-        : 'Regeln fuer Updates';
+        ? t('settings.policy.scopeInstallLabel')
+        : t('settings.policy.scopeUpdatesLabel');
 
     const sourceTabs = [
-      { id: 'all', label: '📦 Archiv & PC' },
-      { id: 'archive', label: '🗄️ Archiv' },
-      { id: 'installed', label: '💻 Installiert' },
-      { id: 'winget', label: '🪽 Winget (Online)' },
-      { id: 'provider', label: '🧩 Paketmanager' },
-      { id: 'manual', label: '✏️ Manuell' },
+      { id: 'all', label: `📦 ${t('settings.policy.sourceAll')}` },
+      { id: 'archive', label: `🗄️ ${t('settings.policy.sourceArchive')}` },
+      { id: 'installed', label: `💻 ${t('settings.policy.sourceInstalled')}` },
+      { id: 'winget', label: `🪽 ${t('settings.policy.sourceWinget')}` },
+      { id: 'provider', label: `🧩 ${t('settings.policy.sourceProvider')}` },
+      { id: 'manual', label: `✏️ ${t('settings.policy.sourceManual')}` },
     ];
 
     const subtabsHtml = isSeparate
       ? `
-        <div class="policy-subtabs" role="tablist" aria-label="Richtlinien-Bereich">
+        <div class="policy-subtabs" role="tablist" aria-label="${escapeHTML(t('settings.policy.subtabsAria'))}">
           <button
             type="button"
             class="policy-subtab-btn ${activePolicyScopeTab === 'updates' ? 'active' : ''}"
             data-policy-scope-tab="updates"
           >
-            ⬆️ Updates (${draftPolicy.updates.entries.length})
+            ⬆️ ${escapeHTML(t('settings.policy.subtabUpdates', { count: draftPolicy.updates.entries.length }))}
           </button>
           <button
             type="button"
             class="policy-subtab-btn ${activePolicyScopeTab === 'install' ? 'active' : ''}"
             data-policy-scope-tab="install"
           >
-            ⬇️ Neu installieren (${draftPolicy.install.entries.length})
+            ⬇️ ${escapeHTML(t('settings.policy.subtabInstall', { count: draftPolicy.install.entries.length }))}
           </button>
         </div>
       `
@@ -469,11 +484,11 @@ export async function renderSettingsModal(initialTab = 'general') {
               type="text"
               id="cfgPolicyCandidateSearch"
               value="${escapeHTML(policySearchQuery)}"
-              placeholder="${policySearchSource === 'winget' ? 'Winget-Paket suchen (z. B. 7zip, VLC)...' : 'Programme nach Name, Paket-ID oder Herausgeber filtern...'}"
+              placeholder="${escapeHTML(policySearchSource === 'winget' ? t('settings.policy.searchPlaceholderWinget') : t('settings.policy.searchPlaceholderLocal'))}"
             >
             ${
               policySearchSource === 'winget'
-                ? '<button type="button" class="btn btn-primary btn-xs" data-policy-action="search-winget">🔎 Winget suchen</button>'
+                ? `<button type="button" class="btn btn-primary btn-xs" data-policy-action="search-winget">🔎 ${escapeHTML(t('settings.policy.wingetSearchBtn'))}</button>`
                 : ''
             }
           </div>
@@ -482,21 +497,21 @@ export async function renderSettingsModal(initialTab = 'general') {
     return `
       <div class="policy-header-row">
         <div>
-          <h3>🛡️ Zugriffsrichtlinien (Whitelist / Blacklist &amp; Modus)</h3>
+          <h3>🛡️ ${escapeHTML(t('settings.policy.title'))}</h3>
           <p class="panel-hint">
-            Steuert fuer Endnutzer, welche Programme sichtbar sind und ob Setups nur still (<code>Nur Silent</code>) oder auch interaktiv laufen duerfen.
+            ${escapeHTML(t('settings.policy.hintPrefix'))}<code>${escapeHTML(t('settings.policy.hintCode'))}</code>${escapeHTML(t('settings.policy.hintSuffix'))}
           </p>
         </div>
         <div class="policy-header-actions">
-          ${isDirty ? '<span class="settings-dirty-badge">● Ungespeichert</span>' : ''}
-          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="export">📤 Exportieren</button>
-          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="import" ${isReadOnly ? 'disabled' : ''}>📥 Importieren</button>
+          ${isDirty ? `<span class="settings-dirty-badge">● ${escapeHTML(t('settings.policy.dirtyBadge'))}</span>` : ''}
+          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="export">📤 ${escapeHTML(t('common.export'))}</button>
+          <button type="button" class="btn btn-ghost btn-xs" data-policy-action="import" ${isReadOnly ? 'disabled' : ''}>📥 ${escapeHTML(t('common.import'))}</button>
         </div>
       </div>
 
       ${
         isReadOnly
-          ? '<div class="auth-integrity-banner is-warn" role="status">🔒 Die Policy-Datei ist schreibgeschuetzt. Zugriffsrichtlinien koennen hier nicht geaendert werden.</div>'
+          ? `<div class="auth-integrity-banner is-warn" role="status">🔒 ${escapeHTML(t('settings.policy.readOnlyBanner'))}</div>`
           : ''
       }
 
@@ -504,24 +519,24 @@ export async function renderSettingsModal(initialTab = 'general') {
         <div class="policy-master-toggles">
           <label class="check-row">
             <input type="checkbox" id="cfgPolicyEnabled" ${draftPolicy.enabled ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
-            <span><strong>Zugriffsrichtlinien aktivieren</strong></span>
+            <span><strong>${escapeHTML(t('settings.policy.enableLabel'))}</strong></span>
           </label>
           <label class="check-row">
             <input type="checkbox" id="cfgPolicyApplyToAdmin" ${draftPolicy.applyToAdmin ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
-            <span>Richtlinien auch auf angemeldete Administratoren anwenden (Standard: Aus - Admin sieht &amp; verwaltet immer alles)</span>
+            <span>${escapeHTML(t('settings.policy.applyToAdminLabel'))}</span>
           </label>
         </div>
 
         <div class="policy-scope-row">
-          <span class="policy-field-title">Geltungsbereich:</span>
-          <div class="policy-scope-switcher" role="group" aria-label="Geltungsbereich">
+          <span class="policy-field-title">${escapeHTML(t('settings.policy.scopeTitle'))}</span>
+          <div class="policy-scope-switcher" role="group" aria-label="${escapeHTML(t('settings.policy.scopeAria'))}">
             <button
               type="button"
               class="policy-scope-btn ${!isSeparate ? 'active' : ''}"
               data-policy-scope-mode="shared"
               ${isReadOnly ? 'disabled' : ''}
             >
-              🔗 Gemeinsam (Updates &amp; Installieren)
+              🔗 ${escapeHTML(t('settings.policy.scopeSharedBtn'))}
             </button>
             <button
               type="button"
@@ -529,7 +544,7 @@ export async function renderSettingsModal(initialTab = 'general') {
               data-policy-scope-mode="separate"
               ${isReadOnly ? 'disabled' : ''}
             >
-              🔀 Getrennt (Updates / Installieren)
+              🔀 ${escapeHTML(t('settings.policy.scopeSeparateBtn'))}
             </button>
           </div>
         </div>
@@ -543,18 +558,18 @@ export async function renderSettingsModal(initialTab = 'general') {
 
           <div class="form-grid-2">
             <label class="form-field">
-              <span>Listen-Modus</span>
+              <span>${escapeHTML(t('settings.policy.listModeLabel'))}</span>
               <select id="cfgPolicyListType" ${isReadOnly ? 'disabled' : ''}>
-                <option value="none" ${activeRuleSet.listType === 'none' ? 'selected' : ''}>Keine Listen-Filterung (alle sichtbar)</option>
-                <option value="whitelist" ${activeRuleSet.listType === 'whitelist' ? 'selected' : ''}>Whitelist (nur ausgewaehlte Programme erlauben)</option>
-                <option value="blacklist" ${activeRuleSet.listType === 'blacklist' ? 'selected' : ''}>Blacklist (ausgewaehlte Programme sperren)</option>
+                <option value="none" ${activeRuleSet.listType === 'none' ? 'selected' : ''}>${escapeHTML(t('settings.policy.listModeNone'))}</option>
+                <option value="whitelist" ${activeRuleSet.listType === 'whitelist' ? 'selected' : ''}>${escapeHTML(t('settings.policy.listModeWhitelist'))}</option>
+                <option value="blacklist" ${activeRuleSet.listType === 'blacklist' ? 'selected' : ''}>${escapeHTML(t('settings.policy.listModeBlacklist'))}</option>
               </select>
             </label>
             <label class="form-field">
-              <span>Standard-Ausfuehrungsmodus</span>
+              <span>${escapeHTML(t('settings.policy.defaultExecLabel'))}</span>
               <select id="cfgPolicyExecMode" ${isReadOnly ? 'disabled' : ''}>
-                <option value="allow-interactive" ${activeRuleSet.defaultExecutionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ Silent &amp; Interaktiv erlaubt</option>
-                <option value="silent-only" ${activeRuleSet.defaultExecutionMode === 'silent-only' ? 'selected' : ''}>⚡ Nur Silent (Adware-geschuetzte Setups werden blockiert)</option>
+                <option value="allow-interactive" ${activeRuleSet.defaultExecutionMode === 'allow-interactive' ? 'selected' : ''}>🖱️ ${escapeHTML(t('settings.policy.defaultExecAllow'))}</option>
+                <option value="silent-only" ${activeRuleSet.defaultExecutionMode === 'silent-only' ? 'selected' : ''}>⚡ ${escapeHTML(t('settings.policy.defaultExecSilentOnly'))}</option>
               </select>
             </label>
           </div>
@@ -576,10 +591,10 @@ export async function renderSettingsModal(initialTab = 'general') {
 
           <div class="policy-entries-box">
             <div class="policy-entries-head">
-              <strong>Aktive Eintraege (${activeRuleSet.entries.length})</strong>
+              <strong>${escapeHTML(t('settings.policy.activeEntriesHeading', { count: activeRuleSet.entries.length }))}</strong>
               ${
                 activeRuleSet.entries.length > 0
-                  ? `<button type="button" class="btn btn-ghost btn-xs" data-policy-action="clear-ruleset" ${isReadOnly ? 'disabled' : ''}>🗑️ Liste leeren</button>`
+                  ? `<button type="button" class="btn btn-ghost btn-xs" data-policy-action="clear-ruleset" ${isReadOnly ? 'disabled' : ''}>🗑️ ${escapeHTML(t('settings.policy.clearListBtn'))}</button>`
                   : ''
               }
             </div>
@@ -590,8 +605,8 @@ export async function renderSettingsModal(initialTab = 'general') {
         </div>
 
         <div class="auth-form-actions">
-          <span class="muted">Speicherung erfolgt manipulationssicher zusammen mit der Admin-Policy in <code>admin-policy.json</code>.</span>
-          <button type="button" class="btn btn-primary" data-policy-action="save" ${isReadOnly ? 'disabled' : ''}>🛡️ Zugriffsrichtlinien speichern</button>
+          <span class="muted">${escapeHTML(t('settings.policy.saveHintPrefix'))}<code>admin-policy.json</code>.</span>
+          <button type="button" class="btn btn-primary" data-policy-action="save" ${isReadOnly ? 'disabled' : ''}>🛡️ ${escapeHTML(t('settings.policy.saveBtn'))}</button>
         </div>
       </div>
     `;
@@ -612,45 +627,45 @@ export async function renderSettingsModal(initialTab = 'general') {
     const checksumShort = auth.integrityChecksum ? String(auth.integrityChecksum).slice(0, 12) : '';
     const sourceLabel =
       auth.pathSource === 'hklm'
-        ? 'Windows-Registry (HKLM)'
+        ? t('settings.auth.sourceHklm')
         : auth.pathSource === 'config'
-          ? 'Benutzerdefiniert (config.json)'
-          : 'Standard (data/admin-policy.json)';
+          ? t('settings.auth.sourceConfig')
+          : t('settings.auth.sourceDefault');
 
     const storageBadge = isHklmLocked
-      ? '<span class="auth-storage-badge is-hklm" title="Pfad durch Windows HKLM-Policy gesperrt">🏛️ Per HKLM gesperrt</span>'
+      ? `<span class="auth-storage-badge is-hklm" title="${escapeHTML(t('settings.auth.hklmLockedTitle'))}">🏛️ ${escapeHTML(t('settings.auth.hklmLockedBadge'))}</span>`
       : isReadOnly
-        ? '<span class="auth-storage-badge is-readonly" title="Nur-Lese-Zugriff auf die Policy-Datei">🔒 Schreibgeschützt</span>'
-        : '<span class="auth-storage-badge is-writable" title="Policy-Datei ist beschreibbar">🟢 Schreibbar</span>';
+        ? `<span class="auth-storage-badge is-readonly" title="${escapeHTML(t('settings.auth.readOnlyTitle'))}">🔒 ${escapeHTML(t('settings.auth.readOnlyBadge'))}</span>`
+        : `<span class="auth-storage-badge is-writable" title="${escapeHTML(t('settings.auth.writableTitle'))}">🟢 ${escapeHTML(t('settings.auth.writableBadge'))}</span>`;
 
     const readOnlySecondaryBadge =
       isHklmLocked && isReadOnly
-        ? '<span class="auth-storage-badge is-readonly" title="Nur-Lese-Zugriff auf die Policy-Datei">🔒 Schreibgeschützt</span>'
+        ? `<span class="auth-storage-badge is-readonly" title="${escapeHTML(t('settings.auth.readOnlyTitle'))}">🔒 ${escapeHTML(t('settings.auth.readOnlyBadge'))}</span>`
         : '';
 
     const integrityBadge = integrityValid
       ? checksumShort
-        ? `<span class="auth-storage-badge is-integrity-ok" title="SHA-256 Integrität geprüft: ${escapeHTML(auth.integrityChecksum || '')}">✓ Integrität OK (${escapeHTML(checksumShort)}...)</span>`
+        ? `<span class="auth-storage-badge is-integrity-ok" title="${escapeHTML(t('settings.auth.integrityOkTitle', { checksum: auth.integrityChecksum || '' }))}">✓ ${escapeHTML(t('settings.auth.integrityOkBadge', { checksum: checksumShort }))}</span>`
         : ''
-      : '<span class="auth-storage-badge is-integrity-bad" title="Integritätsprüfung fehlgeschlagen">⚠️ Integrität ungültig</span>';
+      : `<span class="auth-storage-badge is-integrity-bad" title="${escapeHTML(t('settings.auth.integrityBadTitle'))}">⚠️ ${escapeHTML(t('settings.auth.integrityBadBadge'))}</span>`;
 
     const timeoutVal = Number(auth.sessionTimeoutMinutes) || 0;
     const hklmDisabled = auth.platformSupportedForHklm === false;
 
     return `
-      <h3>🔐 Admin-Modus & Authentifizierung</h3>
+      <h3>🔐 ${escapeHTML(t('settings.auth.title'))}</h3>
 
       <div class="auth-status-card">
         <div class="auth-status-top">
           <div class="auth-badges-row">
             <span class="admin-session-status-badge ${isEnabled ? 'is-active' : 'is-off'}">
-              ${isEnabled ? `🔒 Schutz aktiv (${escapeHTML(auth.username || 'Admin')})` : '🔓 Schutz deaktiviert'}
+              ${isEnabled ? `🔒 ${escapeHTML(t('settings.auth.statusActive', { user: auth.username || 'Admin' }))}` : `🔓 ${escapeHTML(t('settings.auth.statusOff'))}`}
             </span>
             ${storageBadge}
             ${readOnlySecondaryBadge}
             ${integrityBadge}
           </div>
-          <span class="muted">Quelle: <strong>${escapeHTML(sourceLabel)}</strong></span>
+          <span class="muted">${escapeHTML(t('settings.auth.sourceLabel'))} <strong>${escapeHTML(sourceLabel)}</strong></span>
         </div>
 
         ${
@@ -661,90 +676,89 @@ export async function renderSettingsModal(initialTab = 'general') {
 
         ${
           isReadOnly
-            ? '<div class="auth-integrity-banner is-warn" role="status">🔒 Die Policy-Datei liegt schreibgeschützt (Nur-Lese-Zugriff). Lokale Änderungen an Benutzer/Passwort werden blockiert und müssen direkt durch einen Administrator am geschützten Speicherort erfolgen.</div>'
+            ? `<div class="auth-integrity-banner is-warn" role="status">🔒 ${escapeHTML(t('settings.auth.readOnlyBanner'))}</div>`
             : ''
         }
       </div>
 
       <div class="auth-policy-box">
-        <h4>👤 Admin-Konto & Zugriffsschutz</h4>
+        <h4>👤 ${escapeHTML(t('settings.auth.accountTitle'))}</h4>
         <label class="check-row">
           <input type="checkbox" id="cfgAuthEnabled" ${isEnabled ? 'checked' : ''} ${isReadOnly ? 'disabled' : ''}>
-          <span>Admin-Schutz für Einstellungen & Bearbeiten aktivieren</span>
+          <span>${escapeHTML(t('settings.auth.enableCheckbox'))}</span>
         </label>
 
         <div class="form-grid-2">
           <label class="form-field">
-            <span>Admin-Benutzername</span>
-            <input type="text" id="cfgAuthUsername" value="${escapeHTML(auth.username || '')}" placeholder="z. B. admin" ${isReadOnly ? 'disabled' : ''}>
+            <span>${escapeHTML(t('settings.auth.usernameLabel'))}</span>
+            <input type="text" id="cfgAuthUsername" value="${escapeHTML(auth.username || '')}" placeholder="${escapeHTML(t('settings.auth.usernamePlaceholder'))}" ${isReadOnly ? 'disabled' : ''}>
           </label>
           <label class="form-field">
-            <span>Inaktivitäts-Timeout</span>
+            <span>${escapeHTML(t('settings.auth.timeoutLabel'))}</span>
             <select id="cfgAuthTimeout" ${isReadOnly ? 'disabled' : ''}>
-              <option value="0" ${timeoutVal === 0 ? 'selected' : ''}>Kein Timeout (bis Logout / App-Ende)</option>
-              <option value="15" ${timeoutVal === 15 ? 'selected' : ''}>15 Minuten</option>
-              <option value="30" ${timeoutVal === 30 ? 'selected' : ''}>30 Minuten</option>
-              <option value="60" ${timeoutVal === 60 ? 'selected' : ''}>60 Minuten</option>
-              <option value="240" ${timeoutVal === 240 ? 'selected' : ''}>4 Stunden</option>
+              <option value="0" ${timeoutVal === 0 ? 'selected' : ''}>${escapeHTML(t('settings.auth.timeoutNever'))}</option>
+              <option value="15" ${timeoutVal === 15 ? 'selected' : ''}>${escapeHTML(t('settings.auth.timeout15'))}</option>
+              <option value="30" ${timeoutVal === 30 ? 'selected' : ''}>${escapeHTML(t('settings.auth.timeout30'))}</option>
+              <option value="60" ${timeoutVal === 60 ? 'selected' : ''}>${escapeHTML(t('settings.auth.timeout60'))}</option>
+              <option value="240" ${timeoutVal === 240 ? 'selected' : ''}>${escapeHTML(t('settings.auth.timeout240'))}</option>
             </select>
           </label>
           <label class="form-field">
-            <span>${auth.policyExists && isEnabled ? 'Neues Passwort (leer = beibehalten)' : 'Passwort (mind. 6 Zeichen)'}</span>
-            <input type="password" id="cfgAuthPassword" value="" placeholder="${auth.policyExists && isEnabled ? 'Leer lassen zum Beibehalten' : 'Sicheres Passwort vergeben'}" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
+            <span>${escapeHTML(auth.policyExists && isEnabled ? t('settings.auth.passwordNewLabel') : t('settings.auth.passwordCreateLabel'))}</span>
+            <input type="password" id="cfgAuthPassword" value="" placeholder="${escapeHTML(auth.policyExists && isEnabled ? t('settings.auth.passwordNewPlaceholder') : t('settings.auth.passwordCreatePlaceholder'))}" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
           </label>
           <label class="form-field">
-            <span>Passwort bestätigen</span>
-            <input type="password" id="cfgAuthPasswordConfirm" value="" placeholder="Passwort wiederholen" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
+            <span>${escapeHTML(t('settings.auth.passwordConfirmLabel'))}</span>
+            <input type="password" id="cfgAuthPasswordConfirm" value="" placeholder="${escapeHTML(t('settings.auth.passwordConfirmPlaceholder'))}" autocomplete="new-password" ${isReadOnly ? 'disabled' : ''}>
           </label>
         </div>
 
         <div class="auth-form-actions">
-          <span class="muted">Passwörter werden ausschließlich als <code>scrypt</code>-Hash mit 16-Byte-Salt gespeichert.</span>
-          <button type="button" class="btn btn-primary" data-settings-action="auth-save-config" ${isReadOnly ? 'disabled' : ''}>🔐 Zugangsdaten & Schutz speichern</button>
+          <span class="muted">${escapeHTML(t('settings.auth.scryptHintPrefix'))}<code>scrypt</code>${escapeHTML(t('settings.auth.scryptHintSuffix'))}</span>
+          <button type="button" class="btn btn-primary" data-settings-action="auth-save-config" ${isReadOnly ? 'disabled' : ''}>🔐 ${escapeHTML(t('settings.auth.saveConfigBtn'))}</button>
         </div>
       </div>
 
       <div class="auth-policy-box">
-        <h4>📁 Speicherort der Policy-Datei & Manipulationsschutz</h4>
+        <h4>📁 ${escapeHTML(t('settings.auth.storageTitle'))}</h4>
         <div class="auth-effective-path">
-          <span class="muted">Aktive Policy-Datei:</span>
+          <span class="muted">${escapeHTML(t('settings.auth.activePolicyFileLabel'))}</span>
           <code>${escapeHTML(auth.policyPath || '')}</code>
         </div>
 
         <label class="form-field">
-          <span>Benutzerdefinierter Pfad (z. B. schreibgeschütztes Netzlaufwerk / Archiv-Share)</span>
+          <span>${escapeHTML(t('settings.auth.customPathLabel'))}</span>
           <div class="input-action-row">
-            <input type="text" id="cfgAuthPolicyPath" value="${escapeHTML(auth.configuredPolicyPath || auth.policyPath || '')}" placeholder="Standard: data/admin-policy.json" ${isHklmLocked ? 'disabled' : ''}>
-            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-file" ${isHklmLocked ? 'disabled' : ''}>📂 Datei...</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-dir" ${isHklmLocked ? 'disabled' : ''}>📁 Ordner...</button>
+            <input type="text" id="cfgAuthPolicyPath" value="${escapeHTML(auth.configuredPolicyPath || auth.policyPath || '')}" placeholder="${escapeHTML(t('settings.auth.customPathPlaceholder'))}" ${isHklmLocked ? 'disabled' : ''}>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-file" ${isHklmLocked ? 'disabled' : ''}>📂 ${escapeHTML(t('settings.auth.browseFileBtn'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="auth-browse-dir" ${isHklmLocked ? 'disabled' : ''}>📁 ${escapeHTML(t('settings.auth.browseDirBtn'))}</button>
           </div>
         </label>
 
         <label class="check-row">
           <input type="checkbox" id="cfgAuthCopyPolicy" checked ${isHklmLocked ? 'disabled' : ''}>
-          <span>Aktuelle Policy-Datei automatisch an den neuen Ort kopieren (falls dort noch nicht vorhanden)</span>
+          <span>${escapeHTML(t('settings.auth.copyPolicyCheckbox'))}</span>
         </label>
 
         <div class="inline-btn-group">
-          <button type="button" class="btn btn-ghost" data-settings-action="auth-save-path" ${isHklmLocked ? 'disabled' : ''}>💾 Pfad übernehmen</button>
-          <button type="button" class="btn btn-ghost" data-settings-action="auth-reset-path" ${isHklmLocked || auth.pathSource === 'default' ? 'disabled' : ''}>↩️ Standardpfad</button>
+          <button type="button" class="btn btn-ghost" data-settings-action="auth-save-path" ${isHklmLocked ? 'disabled' : ''}>💾 ${escapeHTML(t('settings.auth.savePathBtn'))}</button>
+          <button type="button" class="btn btn-ghost" data-settings-action="auth-reset-path" ${isHklmLocked || auth.pathSource === 'default' ? 'disabled' : ''}>↩️ ${escapeHTML(t('settings.auth.resetPathBtn'))}</button>
         </div>
 
         <div class="auth-hklm-box">
           <div class="auth-hklm-info">
-            <strong>🏛️ Firmen- / Admin-Modus (HKLM-Registry-Sperre)</strong>
+            <strong>🏛️ ${escapeHTML(t('settings.auth.hklmTitle'))}</strong>
             <p class="panel-hint">
-              Schreibt den <code>PolicyFilePath</code> per UAC fest in <code>HKLM\\SOFTWARE\\Policies\\SoftwareKatalog</code>.
-              Normale Windows-Benutzer können diesen Pfad ohne Adminrechte weder in der App noch in der Config umbiegen.
+              ${escapeHTML(t('settings.auth.hklmDescPrefix'))}<code>PolicyFilePath</code>${escapeHTML(t('settings.auth.hklmDescMid'))}<code>HKLM\\SOFTWARE\\Policies\\SoftwareKatalog</code>${escapeHTML(t('settings.auth.hklmDescSuffix'))}
             </p>
           </div>
           <div class="auth-hklm-actions">
-            <button type="button" class="btn btn-primary" data-settings-action="auth-lock-hklm" ${hklmDisabled ? 'disabled' : ''} title="${hklmDisabled ? 'Nur unter Windows verfügbar' : 'Aktuellen oder gewählten Pfad per HKLM-Policy sperren'}">
-              🔒 Pfad per HKLM-Policy sperren (Admin)
+            <button type="button" class="btn btn-primary" data-settings-action="auth-lock-hklm" ${hklmDisabled ? 'disabled' : ''} title="${escapeHTML(hklmDisabled ? t('settings.auth.hklmWindowsOnlyTitle') : t('settings.auth.hklmLockTitle'))}">
+              🔒 ${escapeHTML(t('settings.auth.hklmLockBtn'))}
             </button>
             ${
               isHklmLocked
-                ? `<button type="button" class="btn btn-danger" data-settings-action="auth-unlock-hklm" ${hklmDisabled ? 'disabled' : ''} title="HKLM-Sperre entfernen (2x klicken)">🔓 HKLM-Sperre aufheben (Admin)</button>`
+                ? `<button type="button" class="btn btn-danger" data-settings-action="auth-unlock-hklm" ${hklmDisabled ? 'disabled' : ''} title="${escapeHTML(t('settings.auth.hklmUnlockTitle'))}">🔓 ${escapeHTML(t('settings.auth.hklmUnlockBtn'))}</button>`
                 : ''
             }
           </div>
@@ -757,39 +771,39 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (adminSt?.supported === false) {
       return {
         badgeCls: 'is-off',
-        badgeText: 'Nicht unterstützt',
-        desc: 'Der sitzungsbasierte Admin-Modus steht nur unter Windows zur Verfügung.',
+        badgeText: t('settings.security.adminUnsupportedBadge'),
+        desc: t('settings.security.adminUnsupportedDesc'),
         btnCls: 'btn-ghost',
-        btnText: 'Nicht verfügbar',
+        btnText: t('settings.security.adminUnsupportedBtn'),
         btnDisabled: true,
       };
     }
     if (adminSt?.mode === 'elevated' || adminSt?.isProcessElevated) {
       return {
         badgeCls: 'is-elevated',
-        badgeText: '🛡️ Läuft als Administrator',
-        desc: 'Die App läuft bereits als Administrator. Alle Befehle und Installer werden direkt erhöht ausgeführt.',
+        badgeText: `🛡️ ${t('header.adminModeElevated')}`,
+        desc: t('settings.security.adminElevatedDesc'),
         btnCls: 'btn-ghost',
-        btnText: '🛡️ Läuft als Administrator',
+        btnText: `🛡️ ${t('header.adminModeElevated')}`,
         btnDisabled: true,
       };
     }
     if (adminSt?.mode === 'active' || adminSt?.isSessionActive) {
       return {
         badgeCls: 'is-active',
-        badgeText: '🛡️ Admin-Sitzung aktiv',
-        desc: 'Hintergrund-Helper aktiv - Updates, Installer, Deinstallationen und Quellen laufen ohne weitere UAC-Abfragen.',
+        badgeText: `🛡️ ${t('header.adminModeActive')}`,
+        desc: t('settings.security.adminActiveDesc'),
         btnCls: 'btn-danger',
-        btnText: '🛡️ Admin-Sitzung beenden',
+        btnText: `🛡️ ${t('settings.security.adminActiveBtn')}`,
         btnDisabled: false,
       };
     }
     return {
       badgeCls: 'is-off',
-      badgeText: '🛡️ Admin-Modus: Aus',
-      desc: 'Startet auf Wunsch einmalig per UAC einen geschützten Hintergrund-Helper, sodass nachfolgende Updates ohne weitere UAC-Popups laufen.',
+      badgeText: `🛡️ ${t('header.adminModeOff')}`,
+      desc: t('settings.security.adminOffDesc'),
       btnCls: 'btn-primary',
-      btnText: '🛡️ Admin-Sitzung aktivieren (Einmalig UAC)',
+      btnText: `🛡️ ${t('settings.security.adminOffBtn')}`,
       btnDisabled: false,
     };
   };
@@ -841,9 +855,9 @@ export async function renderSettingsModal(initialTab = 'general') {
   const getDraftEnabledSet = () => new Set(draftSettings.enabledProviders);
 
   const renderProvidersHtml = () => {
-    const groups = groupProvidersByUiCategory(providers);
+    const groups = groupProvidersByUiCategory(providers, { t });
     if (groups.length === 0) {
-      return '<div class="path-empty">Keine Paketmanager registriert.</div>';
+      return `<div class="path-empty">${escapeHTML(t('settings.providers.empty'))}</div>`;
     }
 
     const enabledSet = getDraftEnabledSet();
@@ -855,29 +869,33 @@ export async function renderSettingsModal(initialTab = 'general') {
             const isEnabled = enabledSet.has(p.id);
             const checked = isEnabled ? 'checked' : '';
             const avail = availabilityById.get(p.id) || p.availability || null;
-            const badge = formatProviderStatusBadge(p, avail);
+            const badge = formatProviderStatusBadge(p, avail, { t });
             const isBusy = busyProviderIds.has(p.id);
             const showAdminPill = Boolean(
               avail && !avail.available && p.canInstallManager && p.requiresAdminForBootstrap
             );
+            const providerDisplayName = getLocalizedProviderName(p);
+            const providerDescription = getLocalizedProviderDescription(p);
 
             const actionBtns = [];
             const isConfigSourceMgr = ['npm', 'bun', 'pnpm', 'pip', 'uv'].includes(p.id);
             if (p.capabilities?.manageSources) {
               const sourcesDisabled = isBusy || (!isConfigSourceMgr && Boolean(avail && !avail.available));
               actionBtns.push(
-                `<button type="button" class="btn btn-ghost btn-xs" data-provider-sources="${escapeHTML(p.id)}" ${sourcesDisabled ? 'disabled' : ''} title="Bezugsquellen verwalten">🌐 Quellen</button>`
+                `<button type="button" class="btn btn-ghost btn-xs" data-provider-sources="${escapeHTML(p.id)}" ${sourcesDisabled ? 'disabled' : ''} title="${escapeHTML(t('settings.providers.sourcesTitle'))}">🌐 ${escapeHTML(t('settings.providers.sourcesBtn'))}</button>`
               );
             }
             if (isBusy) {
-              actionBtns.push('<button type="button" class="btn btn-ghost btn-xs" disabled>⏳ Läuft...</button>');
+              actionBtns.push(
+                `<button type="button" class="btn btn-ghost btn-xs" disabled>⏳ ${escapeHTML(t('common.running'))}</button>`
+              );
             } else if (avail && !avail.available && p.canInstallManager) {
               actionBtns.push(
-                `<button type="button" class="btn btn-primary btn-xs" data-provider-install="${escapeHTML(p.id)}" title="Paketmanager direkt installieren">⬇️ Installieren</button>`
+                `<button type="button" class="btn btn-primary btn-xs" data-provider-install="${escapeHTML(p.id)}" title="${escapeHTML(t('settings.providers.installTitle'))}">⬇️ ${escapeHTML(t('settings.providers.installBtn'))}</button>`
               );
             } else if (avail?.available && p.canUninstallManager) {
               actionBtns.push(
-                `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="Paketmanager deinstallieren (2x klicken)">🗑️ Deinstallieren</button>`
+                `<button type="button" class="btn btn-danger btn-xs" data-provider-uninstall="${escapeHTML(p.id)}" title="${escapeHTML(t('settings.providers.uninstallTitle'))}">🗑️ ${escapeHTML(t('settings.providers.uninstallBtn'))}</button>`
               );
             }
             const actionHtml = actionBtns.join('');
@@ -886,10 +904,10 @@ export async function renderSettingsModal(initialTab = 'general') {
               p.id === 'vcpkg'
                 ? `
                   <div class="provider-extra-setting">
-                    <span class="provider-extra-label"><code>VCPKG_ROOT</code> Ordner:</span>
+                    <span class="provider-extra-label"><code>VCPKG_ROOT</code> ${escapeHTML(t('settings.providers.vcpkgFolderSuffix'))}</span>
                     <div class="provider-extra-input-row">
-                      <input type="text" id="cfgVcpkgRoot" data-vcpkg-root-input value="${escapeHTML(draftSettings.vcpkgRoot)}" placeholder="Pfad zum vcpkg-Ordner (leer = %VCPKG_ROOT% / PATH)">
-                      <button type="button" class="btn btn-ghost btn-xs" data-settings-action="browse-vcpkg-root">📂 Ordner...</button>
+                      <input type="text" id="cfgVcpkgRoot" data-vcpkg-root-input value="${escapeHTML(draftSettings.vcpkgRoot)}" placeholder="${escapeHTML(t('settings.providers.vcpkgPlaceholder'))}">
+                      <button type="button" class="btn btn-ghost btn-xs" data-settings-action="browse-vcpkg-root">📂 ${escapeHTML(t('settings.providers.browseFolderBtn'))}</button>
                     </div>
                   </div>
                 `
@@ -897,17 +915,17 @@ export async function renderSettingsModal(initialTab = 'general') {
 
             return `
               <div class="provider-setting-row ${isEnabled ? '' : 'is-disabled'}" data-provider-row="${escapeHTML(p.id)}">
-                <label class="provider-toggle-switch" title="${isEnabled ? 'Quelle deaktivieren' : 'Quelle aktivieren'}">
+                <label class="provider-toggle-switch" title="${escapeHTML(isEnabled ? t('settings.providers.toggleDisableTitle') : t('settings.providers.toggleEnableTitle'))}">
                   <input type="checkbox" name="enabledProviderCheck" data-provider-toggle="${escapeHTML(p.id)}" value="${escapeHTML(p.id)}" ${checked}>
                   <span class="provider-toggle-slider" aria-hidden="true"></span>
                 </label>
                 <div class="provider-setting-info">
                   <div class="provider-setting-head">
-                    <strong>${escapeHTML(p.name)}</strong>
+                    <strong>${escapeHTML(providerDisplayName)}</strong>
                     <span class="provider-status-badge is-${escapeHTML(badge.kind)}" title="${escapeHTML(badge.title)}">${escapeHTML(badge.text)}</span>
-                    ${showAdminPill ? '<span class="provider-admin-pill" title="Erfordert Administratorrechte (UAC)">🛡️ Admin</span>' : ''}
+                    ${showAdminPill ? `<span class="provider-admin-pill" title="${escapeHTML(t('settings.providers.adminPillTitle'))}">🛡️ ${escapeHTML(t('settings.providers.adminPill'))}</span>` : ''}
                   </div>
-                  ${p.description ? `<span class="muted">${escapeHTML(p.description)}</span>` : ''}
+                  ${providerDescription ? `<span class="muted">${escapeHTML(providerDescription)}</span>` : ''}
                   ${extraSettingHtml}
                 </div>
                 ${actionHtml ? `<div class="provider-setting-actions">${actionHtml}</div>` : ''}
@@ -928,10 +946,12 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   const plannedHintText =
     plannedProviders.length > 0
-      ? `Künftig erweiterbar um weitere Quellen wie ${plannedProviders
-          .slice(0, 5)
-          .map((p) => p.name)
-          .join(', ')} u. a.`
+      ? t('settings.providers.plannedHint', {
+          names: plannedProviders
+            .slice(0, 5)
+            .map((p) => p.name)
+            .join(', '),
+        })
       : '';
 
   const hiddenCheckboxes =
@@ -971,6 +991,7 @@ export async function renderSettingsModal(initialTab = 'general') {
   const installModeInfo = formatInstallModeInfo(info.installKind, info.arch, {
     isPackaged: info.isPackaged,
     isAllUsersInstall: info.isAllUsersInstall,
+    t,
   });
 
   const getAutoUpdateCandidateRows = () => {
@@ -983,17 +1004,21 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     if (autoUpdateSearchSource === 'provider') {
       const list = [
-        { id: 'archive', name: 'Archiv (lokal)', description: 'Programme aus dem lokalen Archiv' },
+        {
+          id: 'archive',
+          name: t('settings.policy.archiveLocalName'),
+          description: t('settings.policy.archiveLocalDesc'),
+        },
         ...providers.filter((p) => p.id !== 'archive'),
       ];
       return list
-        .filter((p) => matchesQuery(`${p.name} ${p.id} ${p.description || ''}`))
+        .filter((p) => matchesQuery(`${getLocalizedProviderName(p)} ${p.id} ${getLocalizedProviderDescription(p)}`))
         .map((p) => ({
           matchType: 'provider',
           value: p.id,
-          label: p.name,
-          meta: `Provider · ${p.id}`,
-          badge: 'Paketmanager',
+          label: getLocalizedProviderName(p),
+          meta: t('settings.policy.candidateMetaProvider', { id: p.id }),
+          badge: t('settings.policy.matchTypeProvider'),
         }));
     }
 
@@ -1011,7 +1036,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       seen.add(key);
       candidates.push(cand);
     }
-    candidates.sort((a, b) => a.label.localeCompare(b.label, 'de', { sensitivity: 'base' }));
+    candidates.sort((a, b) => a.label.localeCompare(b.label, getI18nLocale() || 'en', { sensitivity: 'base' }));
     return candidates.slice(0, 40);
   };
 
@@ -1021,25 +1046,25 @@ export async function renderSettingsModal(initialTab = 'general') {
         <div class="policy-manual-form">
           <div class="policy-manual-grid">
             <label class="form-field">
-              <span>Regel-Typ</span>
+              <span>${escapeHTML(t('settings.policy.manualTypeLabel'))}</span>
               <select id="cfgAutoUpdateManualType">
-                <option value="packageId" ${autoUpdateManualMatchType === 'packageId' ? 'selected' : ''}>Paket-ID (z. B. VideoLAN.VLC)</option>
-                <option value="archiveId" ${autoUpdateManualMatchType === 'archiveId' ? 'selected' : ''}>Archiv-ID</option>
-                <option value="name" ${autoUpdateManualMatchType === 'name' ? 'selected' : ''}>Programmname (Wildcard * moeglich)</option>
-                <option value="provider" ${autoUpdateManualMatchType === 'provider' ? 'selected' : ''}>Paketmanager (winget, scoop, archive...)</option>
+                <option value="packageId" ${autoUpdateManualMatchType === 'packageId' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypePackageId'))}</option>
+                <option value="archiveId" ${autoUpdateManualMatchType === 'archiveId' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeArchiveId'))}</option>
+                <option value="name" ${autoUpdateManualMatchType === 'name' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeName'))}</option>
+                <option value="provider" ${autoUpdateManualMatchType === 'provider' ? 'selected' : ''}>${escapeHTML(t('settings.policy.manualTypeProvider'))}</option>
               </select>
             </label>
             <label class="form-field">
-              <span>Wert / Muster</span>
-              <input type="text" id="cfgAutoUpdateManualValue" value="${escapeHTML(autoUpdateManualValue)}" placeholder="z. B. VideoLAN.VLC oder *Adobe*">
+              <span>${escapeHTML(t('settings.policy.manualValueLabel'))}</span>
+              <input type="text" id="cfgAutoUpdateManualValue" value="${escapeHTML(autoUpdateManualValue)}" placeholder="${escapeHTML(t('settings.policy.manualValuePlaceholder'))}">
             </label>
             <label class="form-field">
-              <span>Anzeigename (optional)</span>
-              <input type="text" id="cfgAutoUpdateManualLabel" value="${escapeHTML(autoUpdateManualLabel)}" placeholder="z. B. VLC Media Player">
+              <span>${escapeHTML(t('settings.policy.manualLabelLabel'))}</span>
+              <input type="text" id="cfgAutoUpdateManualLabel" value="${escapeHTML(autoUpdateManualLabel)}" placeholder="${escapeHTML(t('settings.policy.manualLabelPlaceholder'))}">
             </label>
           </div>
           <div class="policy-manual-actions">
-            <button type="button" class="btn btn-primary btn-xs" data-autoupdate-action="add-manual">➕ Zur Liste hinzufügen</button>
+            <button type="button" class="btn btn-primary btn-xs" data-autoupdate-action="add-manual">➕ ${escapeHTML(t('settings.background.addManualBtn'))}</button>
           </div>
         </div>
       `;
@@ -1047,7 +1072,7 @@ export async function renderSettingsModal(initialTab = 'general') {
 
     const candidates = getAutoUpdateCandidateRows();
     if (candidates.length === 0) {
-      return '<div class="policy-candidate-empty">Keine passenden Programme gefunden.</div>';
+      return `<div class="policy-candidate-empty">${escapeHTML(t('settings.policy.candidatesEmpty'))}</div>`;
     }
 
     const existingKeys = new Set((draftSettings.autoUpdateEntries || []).map((e) => getPolicyEntryKey(e)));
@@ -1055,7 +1080,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       .map((cand) => {
         const key = getPolicyEntryKey(cand);
         const inList = existingKeys.has(key);
-        const badgeInfo = cand.matchType === 'provider' ? getProviderBadgeInfo(cand.value, providers) : null;
+        const badgeInfo = cand.matchType === 'provider' ? getLocalizedProviderBadge(cand.value, providers) : null;
         return `
           <div class="policy-candidate-row">
             <div class="policy-candidate-main">
@@ -1073,7 +1098,7 @@ export async function renderSettingsModal(initialTab = 'general') {
               data-match-value="${escapeHTML(cand.value)}"
               data-match-label="${escapeHTML(cand.label)}"
             >
-              ${inList ? '✓ Entfernen' : '+ Hinzufügen'}
+              ${inList ? `✓ ${escapeHTML(t('settings.policy.candidateRemove'))}` : `+ ${escapeHTML(t('settings.policy.candidateAdd'))}`}
             </button>
           </div>
         `;
@@ -1086,8 +1111,8 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (entries.length === 0) {
       const emptyHint =
         draftSettings.autoUpdateListType === 'whitelist'
-          ? 'Auto-Update-Whitelist ist leer - es werden aktuell keine Programme automatisch aktualisiert.'
-          : 'Auto-Update-Blacklist ist leer - es wird kein erlaubtes Paket ausgeschlossen.';
+          ? t('settings.background.emptyWhitelist')
+          : t('settings.background.emptyBlacklist');
       return `<div class="policy-candidate-empty">${escapeHTML(emptyHint)}</div>`;
     }
 
@@ -1104,14 +1129,14 @@ export async function renderSettingsModal(initialTab = 'general') {
               <code>${escapeHTML(entry.value)}</code>
             </div>
             <div class="policy-entry-controls">
-              <span class="policy-match-badge ${isBlacklist ? 'is-blacklist' : ''}">${isBlacklist ? '🚫 Ausgeschlossen' : '⚡ Auto-Update'}</span>
+              <span class="policy-match-badge ${isBlacklist ? 'is-blacklist' : ''}">${isBlacklist ? `🚫 ${escapeHTML(t('settings.background.badgeExcluded'))}` : `⚡ ${escapeHTML(t('settings.background.badgeAutoUpdate'))}`}</span>
               <button
                 type="button"
                 class="btn btn-ghost btn-xs"
                 data-autoupdate-remove-entry
                 data-match-type="${escapeHTML(entry.matchType)}"
                 data-match-value="${escapeHTML(entry.value)}"
-                title="Eintrag entfernen"
+                title="${escapeHTML(t('settings.policy.removeEntryTitle'))}"
               >🗑️</button>
             </div>
           </div>
@@ -1130,26 +1155,28 @@ export async function renderSettingsModal(initialTab = 'general') {
     const hasNormalAutostart = Boolean(currentAutostartStatus?.normalEnabled);
 
     const autostartBadge = !autostartSupported
-      ? '<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">Nicht unterstützt</span>'
+      ? `<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">${escapeHTML(t('settings.background.autostartUnsupported'))}</span>`
       : hasAdminTask
-        ? '<span class="admin-session-status-badge is-elevated" id="settingsAutostartBadge">🛡️ Aktiv (Als Admin - Aufgabenplanung)</span>'
+        ? `<span class="admin-session-status-badge is-elevated" id="settingsAutostartBadge">🛡️ ${escapeHTML(t('settings.background.autostartAdmin'))}</span>`
         : hasNormalAutostart
-          ? '<span class="admin-session-status-badge is-active" id="settingsAutostartBadge">🟢 Aktiv (Normal)</span>'
-          : '<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">⚪ Aus</span>';
+          ? `<span class="admin-session-status-badge is-active" id="settingsAutostartBadge">🟢 ${escapeHTML(t('settings.background.autostartNormal'))}</span>`
+          : `<span class="admin-session-status-badge is-off" id="settingsAutostartBadge">⚪ ${escapeHTML(t('settings.background.autostartOff'))}</span>`;
 
     const lastCheckText = currentBgStatus?.lastCheckAt
-      ? `Letzte Prüfung: ${new Date(currentBgStatus.lastCheckAt).toLocaleString('de-DE')}`
-      : 'Noch keine Hintergrund-Prüfung in dieser Sitzung';
+      ? t('settings.background.lastCheck', {
+          time: new Date(currentBgStatus.lastCheckAt).toLocaleString(getI18nLocale() || 'en'),
+        })
+      : t('settings.background.noCheckYet');
     const updateCountText = Number.isFinite(currentBgStatus?.availableUpdateCount)
-      ? `${currentBgStatus.availableUpdateCount} Update(s) erkannt`
+      ? t('settings.background.updatesDetected', { count: currentBgStatus.availableUpdateCount })
       : '';
 
     const autoUpdateSources = [
-      { id: 'all', label: '📦 Archiv & PC' },
-      { id: 'archive', label: '🗄️ Archiv' },
-      { id: 'installed', label: '💻 Installiert' },
-      { id: 'provider', label: '🧩 Paketmanager' },
-      { id: 'manual', label: '✏️ Manuell' },
+      { id: 'all', label: `📦 ${t('settings.policy.sourceAll')}` },
+      { id: 'archive', label: `🗄️ ${t('settings.policy.sourceArchive')}` },
+      { id: 'installed', label: `💻 ${t('settings.policy.sourceInstalled')}` },
+      { id: 'provider', label: `🧩 ${t('settings.policy.sourceProvider')}` },
+      { id: 'manual', label: `✏️ ${t('settings.policy.sourceManual')}` },
     ];
 
     const listEditorHtml =
@@ -1169,7 +1196,7 @@ export async function renderSettingsModal(initialTab = 'general') {
                 autoUpdateSearchSource !== 'manual'
                   ? `
                     <div class="policy-search-row">
-                      <input type="text" id="cfgAutoUpdateCandidateSearch" value="${escapeHTML(autoUpdateSearchQuery)}" placeholder="Programme für die Auto-Update-Liste filtern...">
+                      <input type="text" id="cfgAutoUpdateCandidateSearch" value="${escapeHTML(autoUpdateSearchQuery)}" placeholder="${escapeHTML(t('settings.background.searchPlaceholder'))}">
                     </div>
                   `
                   : ''
@@ -1180,10 +1207,14 @@ export async function renderSettingsModal(initialTab = 'general') {
             </div>
             <div class="policy-entries-box">
               <div class="policy-entries-head">
-                <strong>${draftSettings.autoUpdateListType === 'whitelist' ? 'Auto-Update-Whitelist' : 'Auto-Update-Blacklist'} (${draftSettings.autoUpdateEntries.length})</strong>
+                <strong>${escapeHTML(
+                  draftSettings.autoUpdateListType === 'whitelist'
+                    ? t('settings.background.whitelistHeading', { count: draftSettings.autoUpdateEntries.length })
+                    : t('settings.background.blacklistHeading', { count: draftSettings.autoUpdateEntries.length })
+                )}</strong>
                 ${
                   draftSettings.autoUpdateEntries.length > 0
-                    ? '<button type="button" class="btn btn-ghost btn-xs" data-autoupdate-action="clear-list">🗑️ Liste leeren</button>'
+                    ? `<button type="button" class="btn btn-ghost btn-xs" data-autoupdate-action="clear-list">🗑️ ${escapeHTML(t('settings.policy.clearListBtn'))}</button>`
                     : ''
                 }
               </div>
@@ -1196,122 +1227,122 @@ export async function renderSettingsModal(initialTab = 'general') {
         : '';
 
     const elevationNoticeHtml = isElevatedNow
-      ? '<div class="auth-integrity-banner is-ok bg-elevation-banner" role="status">🛡️ Die App läuft aktuell erhöht als Administrator - Silent-Auto-Update ist einsatzbereit.</div>'
+      ? `<div class="auth-integrity-banner is-ok bg-elevation-banner" role="status">🛡️ ${escapeHTML(t('settings.background.elevatedOkBanner'))}</div>`
       : `
           <div class="auth-integrity-banner is-warn bg-elevation-banner" role="status">
             <div class="bg-elevation-text">
-              <strong>⚠️ App läuft aktuell ohne Administratorrechte</strong>
-              <span>Automatische Silent-Updates laufen NUR, wenn Software Katalog als Admin gestartet wurde (z. B. über Admin-Autostart).</span>
+              <strong>⚠️ ${escapeHTML(t('settings.background.notElevatedTitle'))}</strong>
+              <span>${escapeHTML(t('settings.background.notElevatedDesc'))}</span>
             </div>
             ${
               autostartSupported && !hasAdminTask
-                ? '<button type="button" class="btn btn-primary btn-xs" data-settings-action="enable-admin-autostart">🛡️ Auf Admin-Autostart umstellen</button>'
+                ? `<button type="button" class="btn btn-primary btn-xs" data-settings-action="enable-admin-autostart">🛡️ ${escapeHTML(t('settings.background.enableAdminAutostartBtn'))}</button>`
                 : hasAdminTask
-                  ? '<span class="muted">Admin-Autostart ist aktiv (greift ab nächstem Windows-Start).</span>'
+                  ? `<span class="muted">${escapeHTML(t('settings.background.adminAutostartPendingHint'))}</span>`
                   : ''
             }
           </div>
         `;
 
     return `
-      <h3>🔔 Hintergrundbetrieb, System-Tray &amp; Auto-Update</h3>
+      <h3>🔔 ${escapeHTML(t('settings.background.title'))}</h3>
 
       ${
         isPortableMode
-          ? `<div class="auth-integrity-banner is-warn bg-portable-hint" role="status">ℹ️ Hinweis: System-Tray und Autostart sind primär für die installierte Version gedacht (aktuell: ${escapeHTML(installModeInfo.label)}).</div>`
+          ? `<div class="auth-integrity-banner is-warn bg-portable-hint" role="status">ℹ️ ${escapeHTML(t('settings.background.portableHint', { mode: installModeInfo.label }))}</div>`
           : ''
       }
 
       <div class="auth-policy-box bg-settings-group">
-        <h4>🖥️ System-Tray &amp; Fensterverhalten</h4>
+        <h4>🖥️ ${escapeHTML(t('settings.background.trayTitle'))}</h4>
         <label class="check-row">
           <input type="checkbox" id="cfgMinimizeToTrayOnClose" ${draftSettings.minimizeToTrayOnClose ? 'checked' : ''}>
-          <span>Beim Klick auf Schließen (✕) ins System-Tray minimieren statt zu beenden</span>
+          <span>${escapeHTML(t('settings.background.minimizeToTrayLabel'))}</span>
         </label>
         <p class="panel-hint">
-          Mit dem Start-Parameter <code>--tray</code> oder <code>--minimized</code> startet die App direkt im Infobereich.
+          ${escapeHTML(t('settings.background.trayArgsHintPrefix'))}<code>--tray</code>${escapeHTML(t('settings.background.trayArgsHintMid'))}<code>--minimized</code>${escapeHTML(t('settings.background.trayArgsHintSuffix'))}
         </p>
       </div>
 
       <div class="auth-policy-box bg-settings-group">
         <div class="auth-status-top">
-          <h4>🚀 Windows-Autostart</h4>
+          <h4>🚀 ${escapeHTML(t('settings.background.autostartTitle'))}</h4>
           ${autostartBadge}
         </div>
         <label class="check-row">
           <input type="checkbox" id="cfgAutostartEnabled" ${draftSettings.autostartEnabled ? 'checked' : ''} ${autostartSupported ? '' : 'disabled'}>
-          <span>Software Katalog beim Windows-Login automatisch im System-Tray starten (<code>--tray</code>)</span>
+          <span>${escapeHTML(t('settings.background.autostartCheckboxPrefix'))}<code>--tray</code>${escapeHTML(t('settings.background.autostartCheckboxSuffix'))}</span>
         </label>
         <label class="form-field">
-          <span>Autostart-Modus</span>
+          <span>${escapeHTML(t('settings.background.autostartModeLabel'))}</span>
           <select id="cfgAutostartMode" ${autostartSupported ? '' : 'disabled'}>
-            <option value="normal" ${draftSettings.autostartMode === 'normal' ? 'selected' : ''}>Normal (Standard-Autostart - UAC bei Bedarf)</option>
-            <option value="admin" ${draftSettings.autostartMode === 'admin' ? 'selected' : ''}>Als Admin starten (Windows-Aufgabenplanung ${escapeHTML(AUTOSTART_TASK_NAME)})</option>
+            <option value="normal" ${draftSettings.autostartMode === 'normal' ? 'selected' : ''}>${escapeHTML(t('settings.background.autostartModeNormal'))}</option>
+            <option value="admin" ${draftSettings.autostartMode === 'admin' ? 'selected' : ''}>${escapeHTML(t('settings.background.autostartModeAdmin', { taskName: AUTOSTART_TASK_NAME }))}</option>
           </select>
         </label>
         <p class="panel-hint">
-          Im Admin-Modus legt Software Katalog einmalig per UAC eine geplante Aufgabe (<code>AtLogOn</code>, höchste Rechte) an, damit Silent-Auto-Updates ohne weitere UAC-Dialoge laufen können.
+          ${escapeHTML(t('settings.background.autostartAdminHintPrefix'))}<code>AtLogOn</code>${escapeHTML(t('settings.background.autostartAdminHintSuffix'))}
         </p>
       </div>
 
       <div class="auth-policy-box bg-settings-group">
-        <h4>🔄 Periodische Hintergrund-Prüfung &amp; Benachrichtigungen</h4>
+        <h4>🔄 ${escapeHTML(t('settings.background.periodicTitle'))}</h4>
         <label class="check-row">
           <input type="checkbox" id="cfgBackgroundCheckEnabled" ${draftSettings.backgroundCheckEnabled ? 'checked' : ''}>
-          <span>Regelmäßig im Hintergrund nach Programm-Updates suchen</span>
+          <span>${escapeHTML(t('settings.background.periodicCheckbox'))}</span>
         </label>
         <div class="form-grid-2">
           <label class="form-field">
-            <span>Prüfintervall</span>
+            <span>${escapeHTML(t('settings.background.intervalLabel'))}</span>
             <select id="cfgBackgroundCheckIntervalMinutes">
-              <option value="60" ${draftSettings.backgroundCheckIntervalMinutes === 60 ? 'selected' : ''}>Stündlich (60 Min.)</option>
-              <option value="180" ${draftSettings.backgroundCheckIntervalMinutes === 180 ? 'selected' : ''}>Alle 3 Stunden</option>
-              <option value="360" ${draftSettings.backgroundCheckIntervalMinutes === 360 ? 'selected' : ''}>Alle 6 Stunden (Standard)</option>
-              <option value="720" ${draftSettings.backgroundCheckIntervalMinutes === 720 ? 'selected' : ''}>Alle 12 Stunden</option>
-              <option value="1440" ${draftSettings.backgroundCheckIntervalMinutes === 1440 ? 'selected' : ''}>Täglich (24 Stunden)</option>
+              <option value="60" ${draftSettings.backgroundCheckIntervalMinutes === 60 ? 'selected' : ''}>${escapeHTML(t('settings.background.interval60'))}</option>
+              <option value="180" ${draftSettings.backgroundCheckIntervalMinutes === 180 ? 'selected' : ''}>${escapeHTML(t('settings.background.interval180'))}</option>
+              <option value="360" ${draftSettings.backgroundCheckIntervalMinutes === 360 ? 'selected' : ''}>${escapeHTML(t('settings.background.interval360'))}</option>
+              <option value="720" ${draftSettings.backgroundCheckIntervalMinutes === 720 ? 'selected' : ''}>${escapeHTML(t('settings.background.interval720'))}</option>
+              <option value="1440" ${draftSettings.backgroundCheckIntervalMinutes === 1440 ? 'selected' : ''}>${escapeHTML(t('settings.background.interval1440'))}</option>
             </select>
           </label>
           <div class="form-field">
-            <span>Status</span>
+            <span>${escapeHTML(t('settings.background.statusLabel'))}</span>
             <div class="bg-status-bar">
               <div class="bg-status-info">
                 <span class="muted">${escapeHTML(lastCheckText)}${updateCountText ? ` - ${escapeHTML(updateCountText)}` : ''}</span>
               </div>
               <button type="button" class="btn btn-ghost btn-xs" data-settings-action="run-background-check" ${currentBgStatus?.isChecking ? 'disabled' : ''}>
-                ${currentBgStatus?.isChecking ? '⏳ Prüft...' : '🔄 Jetzt prüfen'}
+                ${currentBgStatus?.isChecking ? `⏳ ${escapeHTML(t('settings.background.checkingBtn'))}` : `🔄 ${escapeHTML(t('settings.background.checkNowBtn'))}`}
               </button>
             </div>
           </div>
         </div>
         <label class="check-row">
           <input type="checkbox" id="cfgNotifyOnUpdates" ${draftSettings.notifyOnUpdates ? 'checked' : ''}>
-          <span>Windows-Benachrichtigung senden, wenn neue Updates gefunden wurden (mit Anti-Spam-Schutz)</span>
+          <span>${escapeHTML(t('settings.background.notifyCheckbox'))}</span>
         </label>
       </div>
 
       <div class="auth-policy-box bg-settings-group">
         <div class="auth-status-top">
-          <h4>⚡ Automatischer Silent-Auto-Update-Modus</h4>
+          <h4>⚡ ${escapeHTML(t('settings.background.autoUpdateTitle'))}</h4>
           ${
             draftSettings.autoUpdateEnabled && currentBgStatus?.autoUpdatePaused
-              ? '<button type="button" class="btn btn-ghost btn-xs" data-settings-action="toggle-auto-update-pause">▶️ Auto-Update fortsetzen</button>'
+              ? `<button type="button" class="btn btn-ghost btn-xs" data-settings-action="toggle-auto-update-pause">▶️ ${escapeHTML(t('settings.background.resumeAutoUpdateBtn'))}</button>`
               : ''
           }
         </div>
         ${elevationNoticeHtml}
         <label class="check-row">
           <input type="checkbox" id="cfgAutoUpdateEnabled" ${draftSettings.autoUpdateEnabled ? 'checked' : ''}>
-          <span>Erlaubte Updates nach Hintergrund-Prüfung automatisch und still (<code>silent</code>) installieren</span>
+          <span>${escapeHTML(t('settings.background.autoUpdateCheckboxPrefix'))}<code>silent</code>${escapeHTML(t('settings.background.autoUpdateCheckboxSuffix'))}</span>
         </label>
         <p class="panel-hint">
-          🛡️ Programme mit Adware-Schutz (<code>interactive-required</code>), Einträge auf der Ignorierliste und durch Nutzer-Richtlinien gesperrte Pakete werden immer ausgeschlossen.
+          🛡️ ${escapeHTML(t('settings.background.autoUpdateHintPrefix'))}<code>interactive-required</code>${escapeHTML(t('settings.background.autoUpdateHintSuffix'))}
         </p>
         <label class="form-field">
-          <span>Auto-Update-Paketfilter (unabhängig von Nutzer-Richtlinien)</span>
+          <span>${escapeHTML(t('settings.background.autoUpdateFilterLabel'))}</span>
           <select id="cfgAutoUpdateListType">
-            <option value="all" ${draftSettings.autoUpdateListType === 'all' ? 'selected' : ''}>Alle erlaubten Programme automatisch aktualisieren</option>
-            <option value="whitelist" ${draftSettings.autoUpdateListType === 'whitelist' ? 'selected' : ''}>Eigene Whitelist (nur ausgewählte Programme)</option>
-            <option value="blacklist" ${draftSettings.autoUpdateListType === 'blacklist' ? 'selected' : ''}>Eigene Blacklist (ausgewählte Programme ausschließen)</option>
+            <option value="all" ${draftSettings.autoUpdateListType === 'all' ? 'selected' : ''}>${escapeHTML(t('settings.background.autoUpdateFilterAll'))}</option>
+            <option value="whitelist" ${draftSettings.autoUpdateListType === 'whitelist' ? 'selected' : ''}>${escapeHTML(t('settings.background.autoUpdateFilterWhitelist'))}</option>
+            <option value="blacklist" ${draftSettings.autoUpdateListType === 'blacklist' ? 'selected' : ''}>${escapeHTML(t('settings.background.autoUpdateFilterBlacklist'))}</option>
           </select>
         </label>
         ${listEditorHtml}
@@ -1410,67 +1441,67 @@ export async function renderSettingsModal(initialTab = 'general') {
       <section class="tab-panel" role="tabpanel" data-settings-panel="archive" ${activeTab === 'archive' ? '' : 'hidden'}>
         <section class="settings-section">
           <div class="field-header-row">
-            <h3>🗄️ Multi-Archiv-Pfade</h3>
-            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="add-archive-path">➕ Archiv-Pfad hinzufügen</button>
+            <h3>🗄️ ${escapeHTML(t('settings.archive.multiRootTitle'))}</h3>
+            <button type="button" class="btn btn-ghost btn-xs" data-settings-action="add-archive-path">➕ ${escapeHTML(t('settings.archive.addPathBtn'))}</button>
           </div>
           <div class="form-field">
-            <span>Archiv-Orte (Priorität von oben nach unten)</span>
+            <span>${escapeHTML(t('settings.archive.locationsLabel'))}</span>
             <div id="archivePathsList" class="archive-paths-list">
               ${renderArchiveRootsListHtml(archiveItems)}
             </div>
             <p class="panel-hint">
-              Eintrag #1 hat höchste Priorität. Duplikate über mehrere Archiv-Orte werden automatisch zusammengeführt; nicht erreichbare Quellen bleiben im Cache erhalten.
+              ${escapeHTML(t('settings.archive.locationsHint'))}
             </p>
           </div>
         </section>
 
         <section class="settings-section">
-          <h3>🔍 Scanner & Setup-Erkennung</h3>
+          <h3>🔍 ${escapeHTML(t('settings.archive.scannerTitle'))}</h3>
           <div class="form-grid-2">
             <label class="form-field">
-              <span>Setup-Dateiendungen (Priorität von links nach rechts)</span>
+              <span>${escapeHTML(t('settings.archive.autoExtensionsLabel'))}</span>
               <input type="text" id="cfgAutoExt" value="${escapeHTML(draftSettings.autoExtensions.join(', '))}">
             </label>
             <label class="form-field">
-              <span>Maximale Verschachtelungstiefe</span>
+              <span>${escapeHTML(t('settings.archive.nestedDepthLabel'))}</span>
               <input type="number" id="cfgNestedDepth" value="${draftSettings.nestedDepth}" min="1" max="5">
             </label>
           </div>
           <label class="check-row">
             <input type="checkbox" id="cfgScanNested" ${draftSettings.scanNested ? 'checked' : ''}>
-            <span>Nach Fund eines <code>_metadata</code>-Ordners auch tiefere Unterordner durchsuchen</span>
+            <span>${escapeHTML(t('settings.archive.scanNestedLabel'))}</span>
           </label>
         </section>
 
         <section class="settings-section">
-          <h3>⬇️ Downloads, Dateibenennung & Archiv-Speichermodus</h3>
+          <h3>⬇️ ${escapeHTML(t('settings.archive.downloadsTitle'))}</h3>
           <label class="form-field">
-            <span>Archiv-Speichermodus bei Erstinstallation/Update</span>
+            <span>${escapeHTML(t('settings.archive.saveModeLabel'))}</span>
             <select id="cfgArchiveSaveMode">
-              <option value="ask" ${draftSettings.archiveSaveMode === 'ask' ? 'selected' : ''}>Nachfragen (Standard)</option>
-              <option value="auto-id" ${draftSettings.archiveSaveMode === 'auto-id' ? 'selected' : ''}>Automatisch im Archiv speichern (Ordnername = Paket-ID, Anzeigename = Softwarename)</option>
-              <option value="none" ${draftSettings.archiveSaveMode === 'none' ? 'selected' : ''}>Nicht automatisch im Archiv speichern</option>
+              <option value="ask" ${draftSettings.archiveSaveMode === 'ask' ? 'selected' : ''}>${escapeHTML(t('settings.archive.saveModeAsk'))}</option>
+              <option value="auto-id" ${draftSettings.archiveSaveMode === 'auto-id' ? 'selected' : ''}>${escapeHTML(t('settings.archive.saveModeAutoId'))}</option>
+              <option value="none" ${draftSettings.archiveSaveMode === 'none' ? 'selected' : ''}>${escapeHTML(t('settings.archive.saveModeNone'))}</option>
             </select>
           </label>
           <label class="check-row">
             <input type="checkbox" id="cfgAutoSave" ${draftSettings.autoSaveDownloads ? 'checked' : ''}>
-            <span>Updates automatisch im Software-Ordner speichern (ohne "Speichern unter"-Dialog)</span>
+            <span>${escapeHTML(t('settings.archive.autoSaveLabel'))}</span>
           </label>
           <label class="check-row">
             <input type="checkbox" id="cfgKeepOriginal" ${draftSettings.keepOriginalNameIfVersioned ? 'checked' : ''}>
-            <span>Original-Dateinamen behalten, falls die Versionsnummer bereits enthalten ist</span>
+            <span>${escapeHTML(t('settings.archive.keepOriginalLabel'))}</span>
           </label>
           <div class="form-grid-2">
             <label class="form-field">
-              <span>Benennungs-Schema (bei fehlender Version)</span>
+              <span>${escapeHTML(t('settings.archive.filenamePatternLabel'))}</span>
               <input type="text" id="cfgFilenamePattern" value="${escapeHTML(draftSettings.filenamePattern)}">
             </label>
             <div class="form-field">
-              <span>Live-Vorschau (für "setup-x64.exe")</span>
+              <span>${escapeHTML(t('settings.archive.filenamePreviewLabel'))}</span>
               <div id="filenamePreview" class="filename-preview"></div>
             </div>
           </div>
-          <p class="panel-hint">Platzhalter: <code>{Name}</code>, <code>{Version}</code>, <code>{Arch}</code>, <code>{Ext}</code></p>
+          <p class="panel-hint">${escapeHTML(t('settings.archive.placeholdersPrefix'))} <code>{Name}</code>, <code>{Version}</code>, <code>{Arch}</code>, <code>{Ext}</code></p>
         </section>
       </section>
 
@@ -1478,11 +1509,11 @@ export async function renderSettingsModal(initialTab = 'general') {
       <section class="tab-panel" role="tabpanel" data-settings-panel="providers" ${activeTab === 'providers' ? '' : 'hidden'}>
         <section class="settings-section">
           <div class="field-header-row">
-            <h3>📦 Registrierte Paketmanager</h3>
-            <button type="button" class="btn btn-ghost btn-xs" id="btnRecheckProviders" data-settings-action="recheck-providers">🔄 Status prüfen</button>
+            <h3>📦 ${escapeHTML(t('settings.providers.title'))}</h3>
+            <button type="button" class="btn btn-ghost btn-xs" id="btnRecheckProviders" data-settings-action="recheck-providers">🔄 ${escapeHTML(t('settings.providers.recheckBtn'))}</button>
           </div>
           <p class="panel-hint">
-            Änderungen an Ein-/Aus-Schaltern und <code>VCPKG_ROOT</code> werden erst mit "Speichern & Anwenden" übernommen.
+            ${escapeHTML(t('settings.providers.hintPrefix'))}<code>VCPKG_ROOT</code>${escapeHTML(t('settings.providers.hintSuffix'))}
           </p>
           <div class="form-field">
             <div id="providerSettingsContainer" class="provider-groups-wrap">${renderProvidersHtml()}</div>
@@ -1491,16 +1522,16 @@ export async function renderSettingsModal(initialTab = 'general') {
         </section>
 
         <section class="settings-section">
-          <h3>🧹 Provider-Cache</h3>
+          <h3>🧹 ${escapeHTML(t('settings.providers.cacheTitle'))}</h3>
           <div class="cache-status-bar">
             <div class="cache-status-text">
-              <strong>Provider-Offline-Cache (7 Tage)</strong>
+              <strong>${escapeHTML(t('settings.providers.cacheSubtitle'))}</strong>
               <span id="providerCacheCount" class="muted">
-                ${totalCacheEntries} ${totalCacheEntries === 1 ? 'Eintrag' : 'Einträge'} gespeichert${expiredCacheEntries > 0 ? ` (${expiredCacheEntries} abgelaufen, offline verfügbar)` : ''}
+                ${totalCacheEntries} ${escapeHTML(totalCacheEntries === 1 ? t('settings.providers.cacheCountSingular') : t('settings.providers.cacheCountPlural'))}${expiredCacheEntries > 0 ? escapeHTML(t('settings.providers.cacheExpiredSuffix', { count: expiredCacheEntries })) : ''}
               </span>
             </div>
             <button type="button" class="btn btn-ghost btn-xs" id="btnClearProviderCache" data-settings-action="clear-provider-cache" ${totalCacheEntries === 0 ? 'disabled' : ''}>
-              🧹 Cache leeren
+              🧹 ${escapeHTML(t('settings.providers.cacheClearBtn'))}
             </button>
           </div>
         </section>
@@ -1509,29 +1540,29 @@ export async function renderSettingsModal(initialTab = 'general') {
       <!-- TAB 4: HINTERGRUND & UPDATES -->
       <section class="tab-panel" role="tabpanel" data-settings-panel="updates" ${activeTab === 'updates' ? '' : 'hidden'}>
         <section class="settings-section">
-          <h3>🚀 App-Updates</h3>
+          <h3>🚀 ${escapeHTML(t('settings.updates.appUpdatesTitle'))}</h3>
           <div class="form-grid-2">
             <label class="form-field">
-              <span>Automatisch nach App-Updates suchen</span>
+              <span>${escapeHTML(t('settings.updates.intervalLabel'))}</span>
               <select id="cfgUpdateInterval">
-                <option value="0" ${draftSettings.updateInterval === 0 ? 'selected' : ''}>Bei jedem Start</option>
-                <option value="24" ${draftSettings.updateInterval === 24 ? 'selected' : ''}>Täglich (24h)</option>
-                <option value="168" ${draftSettings.updateInterval === 168 ? 'selected' : ''}>Wöchentlich</option>
-                <option value="720" ${draftSettings.updateInterval === 720 ? 'selected' : ''}>Monatlich</option>
-                <option value="-1" ${draftSettings.updateInterval === -1 ? 'selected' : ''}>Nie</option>
+                <option value="0" ${draftSettings.updateInterval === 0 ? 'selected' : ''}>${escapeHTML(t('settings.updates.intervalStartup'))}</option>
+                <option value="24" ${draftSettings.updateInterval === 24 ? 'selected' : ''}>${escapeHTML(t('settings.updates.intervalDaily'))}</option>
+                <option value="168" ${draftSettings.updateInterval === 168 ? 'selected' : ''}>${escapeHTML(t('settings.updates.intervalWeekly'))}</option>
+                <option value="720" ${draftSettings.updateInterval === 720 ? 'selected' : ''}>${escapeHTML(t('settings.updates.intervalMonthly'))}</option>
+                <option value="-1" ${draftSettings.updateInterval === -1 ? 'selected' : ''}>${escapeHTML(t('settings.updates.intervalNever'))}</option>
               </select>
             </label>
             <div class="form-field">
-              <span>Installierte App-Version</span>
+              <span>${escapeHTML(t('settings.updates.installedVersionLabel'))}</span>
               <div class="app-update-box">
                 <strong>v${escapeHTML(info.version)}</strong>
                 <span class="app-install-mode-badge" id="appInstallModeBadge" title="${escapeHTML(installModeInfo.detail)}">${escapeHTML(installModeInfo.label)}</span>
-                <span id="appUpdateStatus" class="muted">Prüfe...</span>
-                <button type="button" class="btn btn-ghost btn-xs" id="btnCheckAppUpdate" data-settings-action="check-app-update">🔄 Jetzt prüfen</button>
+                <span id="appUpdateStatus" class="muted">${escapeHTML(t('common.checking'))}</span>
+                <button type="button" class="btn btn-ghost btn-xs" id="btnCheckAppUpdate" data-settings-action="check-app-update">🔄 ${escapeHTML(t('settings.updates.checkNowBtn'))}</button>
               </div>
               ${
                 info.installKind === 'installed' && info.dataDir
-                  ? `<span class="muted">Datenordner: <code>${escapeHTML(info.dataDir)}</code></span>`
+                  ? `<span class="muted">${escapeHTML(t('settings.updates.dataDirLabel'))} <code>${escapeHTML(info.dataDir)}</code></span>`
                   : ''
               }
             </div>
@@ -1546,11 +1577,11 @@ export async function renderSettingsModal(initialTab = 'general') {
       <!-- TAB 5: SICHERHEIT & RICHTLINIEN -->
       <section class="tab-panel" role="tabpanel" data-settings-panel="security" ${activeTab === 'security' ? '' : 'hidden'}>
         <section class="settings-section" id="settingsElevationSection">
-          <h3>🛡️ Sitzungsbasierter Admin-Ausführungsmodus (UAC)</h3>
+          <h3>🛡️ ${escapeHTML(t('settings.security.elevationTitle'))}</h3>
           <div class="admin-session-card" id="settingsAdminSessionCard">
             <div class="admin-session-card-info">
               <div class="admin-session-head">
-                <strong>Aktueller Status</strong>
+                <strong>${escapeHTML(t('settings.security.currentStatusLabel'))}</strong>
                 <span id="settingsAdminStatusBadge" class="admin-session-status-badge ${initialAdminMeta.badgeCls}">${escapeHTML(initialAdminMeta.badgeText)}</span>
               </div>
               <p id="settingsAdminStatusDesc" class="panel-hint">${escapeHTML(initialAdminMeta.desc)}</p>
@@ -1565,7 +1596,7 @@ export async function renderSettingsModal(initialTab = 'general') {
           </div>
           <label class="check-row">
             <input type="checkbox" id="cfgAutoRequestAdminForBatch" ${draftSettings.autoRequestAdminForBatch ? 'checked' : ''}>
-            <span>Bei Massen-Updates automatisch einmalig Admin-Sitzung anfragen</span>
+            <span>${escapeHTML(t('settings.security.autoRequestAdminBatch'))}</span>
           </label>
         </section>
 
@@ -1581,37 +1612,37 @@ export async function renderSettingsModal(initialTab = 'general') {
       <!-- TAB 6: WARTUNG & ÜBER -->
       <section class="tab-panel" role="tabpanel" data-settings-panel="maintenance" ${activeTab === 'maintenance' ? '' : 'hidden'}>
         <section class="settings-section">
-          <h3>💾 Backup & Speicherorte</h3>
+          <h3>💾 ${escapeHTML(t('settings.maintenance.backupTitle'))}</h3>
           <div class="inline-btn-group">
-            <button type="button" class="btn btn-primary" data-settings-action="backup-create">💾 Backup erstellen</button>
-            <button type="button" class="btn btn-ghost" data-settings-action="backup-restore">📂 Backup wiederherstellen</button>
+            <button type="button" class="btn btn-primary" data-settings-action="backup-create">💾 ${escapeHTML(t('settings.maintenance.backupCreateBtn'))}</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="backup-restore">📂 ${escapeHTML(t('settings.maintenance.backupRestoreBtn'))}</button>
           </div>
           <div class="inline-btn-group">
-            <button type="button" class="btn btn-ghost" data-settings-action="open-data-dir">📁 Datenordner (data/)</button>
-            <button type="button" class="btn btn-ghost" data-settings-action="open-state">📁 Lokaler State (Favoriten)</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="open-data-dir">📁 ${escapeHTML(t('settings.maintenance.openDataDirBtn'))}</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="open-state">📁 ${escapeHTML(t('settings.maintenance.openStateBtn'))}</button>
           </div>
         </section>
 
         <section class="settings-section">
-          <h3>⚠️ Zurücksetzen (Gefahrenzone)</h3>
+          <h3>⚠️ ${escapeHTML(t('settings.maintenance.dangerTitle'))}</h3>
           <div class="settings-danger-box">
-            <p class="panel-hint">Sicherheitsabfrage: Zum Ausführen der folgenden Aktionen bitte zweimal klicken.</p>
+            <p class="panel-hint">${escapeHTML(t('settings.maintenance.dangerHint'))}</p>
             <div class="inline-btn-group">
-              <button type="button" class="btn btn-danger" data-danger-action="reset-auto-paths">Auto-Pfade zurücksetzen</button>
-              <button type="button" class="btn btn-danger" data-danger-action="reset-manual-paths">Manuelle Pfade zurücksetzen</button>
-              <button type="button" class="btn btn-danger" data-danger-action="reset-local-ver">PC-Versionen zurücksetzen</button>
+              <button type="button" class="btn btn-danger" data-danger-action="reset-auto-paths">${escapeHTML(t('settings.maintenance.resetAutoPathsBtn'))}</button>
+              <button type="button" class="btn btn-danger" data-danger-action="reset-manual-paths">${escapeHTML(t('settings.maintenance.resetManualPathsBtn'))}</button>
+              <button type="button" class="btn btn-danger" data-danger-action="reset-local-ver">${escapeHTML(t('settings.maintenance.resetLocalVerBtn'))}</button>
             </div>
           </div>
         </section>
 
         <section class="settings-section">
-          <h3>ℹ️ Über Software Katalog</h3>
+          <h3>ℹ️ ${escapeHTML(t('settings.about.title'))}</h3>
           <div class="settings-about-row">
             <div>
-              <strong>Software Katalog v${escapeHTML(info.version)}</strong>
-              <div class="muted">Software Katalog by © Felix Maywald</div>
+              <strong>${escapeHTML(t('settings.about.versionTitle', { version: info.version }))}</strong>
+              <div class="muted">${escapeHTML(t('settings.about.subtitle'))}</div>
             </div>
-            <button type="button" class="btn btn-ghost" data-settings-action="open-github">GitHub Repository</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="open-github">${escapeHTML(t('settings.about.githubBtn'))}</button>
           </div>
         </section>
       </section>
@@ -1751,7 +1782,7 @@ export async function renderSettingsModal(initialTab = 'general') {
   const runWingetPolicySearch = async () => {
     const q = policySearchQuery.trim();
     if (q.length < 2) {
-      policyWingetError = 'Bitte mindestens 2 Zeichen fuer die Winget-Suche eingeben.';
+      policyWingetError = t('settings.policy.wingetSearchMinChars');
       policyWingetResults = [];
       refreshPolicyListsInPlace();
       return;
@@ -1772,7 +1803,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (modalToken !== activeSettingsToken || overlay.hidden) return;
       policyWingetLoading = false;
       policyWingetResults = [];
-      policyWingetError = err?.message || 'Winget-Suche fehlgeschlagen.';
+      policyWingetError = err?.message || t('settings.policy.wingetSearchFailed');
       refreshPolicyListsInPlace();
     }
   };
@@ -1913,29 +1944,29 @@ export async function renderSettingsModal(initialTab = 'general') {
     const checkBtn = modal.querySelector('#btnCheckAppUpdate');
     const box = modal.querySelector('#appUpdateStatus');
     if (checkBtn instanceof HTMLButtonElement) checkBtn.disabled = true;
-    if (manual && box) box.textContent = 'Prüfe...';
+    if (manual && box) box.textContent = t('common.checking');
     try {
       const res = await window.electronAPI.checkAppUpdate();
       if (modalToken !== activeSettingsToken || overlay.hidden) return;
       const liveBox = modal.querySelector('#appUpdateStatus');
       if (!liveBox) return;
       if (res?.error) {
-        liveBox.textContent = 'Prüfung fehlgeschlagen';
-        if (manual) showToast('App-Update-Prüfung fehlgeschlagen.', { type: 'error' });
+        liveBox.textContent = t('settings.updates.statusFailed');
+        if (manual) showToast(t('settings.updates.statusFailedToast'), { type: 'error' });
       } else if (res?.updateAvailable && res.updateAssetUrl) {
-        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-install-app-url="${escapeHTML(res.updateAssetUrl)}" data-install-kind="${escapeHTML(res.installKind || info.installKind || 'portable-dir')}" data-portable="${res.isPortable}">⬆️ Auf v${escapeHTML(res.latestVersion)} updaten</button>`;
-        if (manual) showToast(`Neue Version v${res.latestVersion} verfügbar.`, { type: 'info' });
+        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-install-app-url="${escapeHTML(res.updateAssetUrl)}" data-install-kind="${escapeHTML(res.installKind || info.installKind || 'portable-dir')}" data-portable="${res.isPortable}">⬆️ ${escapeHTML(t('settings.updates.updateBtn', { version: res.latestVersion }))}</button>`;
+        if (manual) showToast(t('settings.updates.updateToast', { version: res.latestVersion }), { type: 'info' });
       } else if (res?.updateAvailable) {
-        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-open-release="${escapeHTML(res.releaseUrl)}">🎁 v${escapeHTML(res.latestVersion)} auf GitHub</button>`;
-        if (manual) showToast(`Neue Version v${res.latestVersion} auf GitHub verfügbar.`, { type: 'info' });
+        liveBox.innerHTML = `<button type="button" class="btn btn-local btn-xs" data-open-release="${escapeHTML(res.releaseUrl)}">🎁 ${escapeHTML(t('settings.updates.githubBtn', { version: res.latestVersion }))}</button>`;
+        if (manual) showToast(t('settings.updates.githubToast', { version: res.latestVersion }), { type: 'info' });
       } else {
-        liveBox.innerHTML = '<span class="text-ok">✓ Aktuell</span>';
-        if (manual) showToast('App ist auf dem neuesten Stand.', { type: 'success' });
+        liveBox.innerHTML = `<span class="text-ok">✓ ${escapeHTML(t('settings.updates.statusUpToDate'))}</span>`;
+        if (manual) showToast(t('settings.updates.upToDateToast'), { type: 'success' });
       }
     } catch {
       if (modalToken !== activeSettingsToken || overlay.hidden) return;
       const liveBox = modal.querySelector('#appUpdateStatus');
-      if (liveBox) liveBox.textContent = 'Prüfung fehlgeschlagen';
+      if (liveBox) liveBox.textContent = t('settings.updates.statusFailed');
     } finally {
       if (checkBtn instanceof HTMLButtonElement) checkBtn.disabled = false;
     }
@@ -2051,7 +2082,9 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (row) row.classList.toggle('is-disabled', !toggle.checked);
       const switchLabel = toggle.closest('.provider-toggle-switch');
       if (switchLabel instanceof HTMLElement) {
-        switchLabel.title = toggle.checked ? 'Quelle deaktivieren' : 'Quelle aktivieren';
+        switchLabel.title = toggle.checked
+          ? t('settings.providers.toggleDisableTitle')
+          : t('settings.providers.toggleEnableTitle');
       }
       updateDirtyUi();
       return;
@@ -2111,7 +2144,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (auAct === 'add-manual') {
         const cleanVal = autoUpdateManualValue.trim();
         if (!cleanVal) {
-          showToast('Bitte einen Wert oder ein Muster eingeben.', { type: 'warn' });
+          showToast(t('settings.policy.missingValueToast'), { type: 'warn' });
           return;
         }
         draftSettings = {
@@ -2197,7 +2230,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       } else if (pAct === 'add-manual') {
         const cleanVal = policyManualValue.trim();
         if (!cleanVal) {
-          showToast('Bitte einen Wert oder ein Muster eingeben.', { type: 'warn' });
+          showToast(t('settings.policy.missingValueToast'), { type: 'warn' });
           return;
         }
         updateActivePolicyRuleSet((rs) => ({
@@ -2227,9 +2260,9 @@ export async function renderSettingsModal(initialTab = 'general') {
           }
           if (res?.success) {
             await triggerCatalogReload();
-            showToast('Zugriffsrichtlinien gespeichert.', { type: 'success' });
+            showToast(t('settings.policy.savedToast'), { type: 'success' });
           } else {
-            showToast(res?.error || 'Zugriffsrichtlinien konnten nicht gespeichert werden.', {
+            showToast(res?.error || t('settings.policy.saveErrorToast'), {
               type: 'error',
               duration: 6000,
             });
@@ -2242,7 +2275,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       } else if (pAct === 'export') {
         const res = await window.electronAPI.exportAccessPolicy();
         if (res?.success) {
-          showToast('Zugriffsrichtlinien erfolgreich exportiert.', { type: 'success' });
+          showToast(t('settings.policy.exportedToast'), { type: 'success' });
         } else if (res?.error && !res.canceled) {
           showToast(res.error, { type: 'error', duration: 6000 });
         }
@@ -2256,7 +2289,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         }
         if (res?.success) {
           await triggerCatalogReload();
-          showToast('Zugriffsrichtlinien importiert und aktiviert.', { type: 'success' });
+          showToast(t('settings.policy.importedToast'), { type: 'success' });
         } else if (res?.error && !res.canceled) {
           showToast(res.error, { type: 'error', duration: 6000 });
         }
@@ -2283,11 +2316,11 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (installProviderBtn instanceof HTMLButtonElement) {
       const providerId = installProviderBtn.dataset.providerInstall;
       if (!providerId || busyProviderIds.has(providerId)) return;
-      const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
+      const providerName = getLocalizedProviderName(providerId, providers);
 
       busyProviderIds.add(providerId);
       refreshProvidersSectionUi();
-      showToast(`Installiere ${providerName}...`, { type: 'info' });
+      showToast(t('settings.providers.installingToast', { name: providerName }), { type: 'info' });
 
       const res = await window.electronAPI.installProviderManager(providerId);
       if (modalToken !== activeSettingsToken) return;
@@ -2310,11 +2343,14 @@ export async function renderSettingsModal(initialTab = 'general') {
       await triggerCatalogReload({ rescanInstalled: Boolean(res?.success) });
 
       if (res?.canceled) {
-        showToast(`${providerName}-Installation abgebrochen.`, { type: 'info' });
+        showToast(t('settings.providers.installCanceledToast', { name: providerName }), { type: 'info' });
       } else if (res?.success) {
-        showToast(`${providerName} erfolgreich installiert.`, { type: 'success' });
+        showToast(t('settings.providers.installSuccessToast', { name: providerName }), { type: 'success' });
       } else {
-        showToast(res?.error || `${providerName} konnte nicht installiert werden.`, { type: 'error', duration: 6000 });
+        showToast(res?.error || t('settings.providers.installFailedToast', { name: providerName }), {
+          type: 'error',
+          duration: 6000,
+        });
       }
       return;
     }
@@ -2325,22 +2361,22 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (!providerId || busyProviderIds.has(providerId)) return;
 
       const providerObj = providers.find((p) => p.id === providerId);
-      const providerName = providerObj?.name || providerId;
-      const customWarning = providerObj?.uninstallWarning || '';
+      const providerName = getLocalizedProviderName(providerObj || providerId, providers);
+      const customWarning = getLocalizedProviderUninstallWarning(providerObj);
 
       if (customWarning) {
         const decision = await openNestedDialog({
           defaultAction: 'cancel',
           html: `
             <div class="modal-header">
-              <h2>⚠️ ${escapeHTML(providerName)} deinstallieren</h2>
-              <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+              <h2>⚠️ ${escapeHTML(t('settings.providers.uninstallDialogTitle', { name: providerName }))}</h2>
+              <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
             </div>
             <div class="modal-body collision-warning-body">
               <p>${escapeHTML(customWarning)}</p>
               <div class="collision-actions-grid">
-                <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
-                <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ Trotzdem deinstallieren</button>
+                <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+                <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ ${escapeHTML(t('settings.providers.uninstallForceBtn'))}</button>
               </div>
             </div>
           `,
@@ -2351,11 +2387,12 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (uninstallProviderBtn.dataset.armed !== 'true') {
           uninstallProviderBtn.dataset.armed = 'true';
           uninstallProviderBtn.dataset.origText = uninstallProviderBtn.textContent || '';
-          uninstallProviderBtn.textContent = '⚠️ Wirklich deinstallieren?';
+          uninstallProviderBtn.textContent = `⚠️ ${t('common.confirmUninstallArmed')}`;
           setTimeout(() => {
             if (uninstallProviderBtn.isConnected && uninstallProviderBtn.dataset.armed === 'true') {
               uninstallProviderBtn.dataset.armed = 'false';
-              uninstallProviderBtn.textContent = uninstallProviderBtn.dataset.origText || '🗑️ Deinstallieren';
+              uninstallProviderBtn.textContent =
+                uninstallProviderBtn.dataset.origText || `🗑️ ${t('settings.providers.uninstallBtn')}`;
             }
           }, 4000);
           return;
@@ -2365,7 +2402,7 @@ export async function renderSettingsModal(initialTab = 'general') {
 
       busyProviderIds.add(providerId);
       refreshProvidersSectionUi();
-      showToast(`Deinstalliere ${providerName}...`, { type: 'info' });
+      showToast(t('settings.providers.uninstallingToast', { name: providerName }), { type: 'info' });
 
       const res = await window.electronAPI.uninstallProviderManager(providerId);
       if (modalToken !== activeSettingsToken) return;
@@ -2388,11 +2425,11 @@ export async function renderSettingsModal(initialTab = 'general') {
       await triggerCatalogReload({ rescanInstalled: Boolean(res?.success) });
 
       if (res?.canceled) {
-        showToast(`${providerName}-Deinstallation abgebrochen.`, { type: 'info' });
+        showToast(t('settings.providers.uninstallCanceledToast', { name: providerName }), { type: 'info' });
       } else if (res?.success) {
-        showToast(`${providerName} erfolgreich deinstalliert.`, { type: 'success' });
+        showToast(t('settings.providers.uninstallSuccessToast', { name: providerName }), { type: 'success' });
       } else {
-        showToast(res?.error || `${providerName} konnte nicht deinstalliert werden.`, {
+        showToast(res?.error || t('settings.providers.uninstallFailedToast', { name: providerName }), {
           type: 'error',
           duration: 6000,
         });
@@ -2429,13 +2466,13 @@ export async function renderSettingsModal(initialTab = 'general') {
     if (installAppBtn instanceof HTMLButtonElement) {
       installAppBtn.disabled = true;
       closeModal();
-      showToast('App-Update wird im Hintergrund geladen...', { type: 'info' });
+      showToast(t('settings.updates.downloadingBgToast'), { type: 'info' });
       const targetInstallKind =
         installAppBtn.dataset.installKind ||
         (installAppBtn.dataset.portable === 'true' ? 'portable-exe' : 'portable-dir');
       const res = await window.electronAPI.installAppUpdate(installAppBtn.dataset.installAppUrl, targetInstallKind);
       if (!res.success && !res.canceled) {
-        showToast(`App-Update fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+        showToast(t('settings.updates.updateFailedToast', { error: res.error }), { type: 'error', duration: 6000 });
       }
       return;
     }
@@ -2452,7 +2489,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (dangerBtn.dataset.armed !== 'true') {
         dangerBtn.dataset.armed = 'true';
         dangerBtn.dataset.origText = dangerBtn.textContent || '';
-        dangerBtn.textContent = '⚠️ Wirklich ausführen?';
+        dangerBtn.textContent = `⚠️ ${t('settings.maintenance.confirmDangerArmed')}`;
         setTimeout(() => {
           if (dangerBtn.dataset.armed === 'true') {
             dangerBtn.dataset.armed = 'false';
@@ -2470,12 +2507,12 @@ export async function renderSettingsModal(initialTab = 'general') {
         const res = await window.electronAPI.resetPaths(dAct === 'reset-auto-paths' ? 'auto' : 'manual');
         if (res.success) {
           await triggerCatalogReload();
-          showToast(`${res.count} Programme bereinigt.`, { type: 'success' });
+          showToast(t('settings.maintenance.cleanedProgramsToast', { count: res.count }), { type: 'success' });
         }
       } else if (dAct === 'reset-local-ver') {
         await window.electronAPI.resetLocalVersions();
         await triggerCatalogReload();
-        showToast('Lokale PC-Versionen zurückgesetzt.', { type: 'success' });
+        showToast(t('settings.maintenance.localVerResetToast'), { type: 'success' });
       }
 
       dangerBtn.disabled = false;
@@ -2502,7 +2539,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       const sessionTimeoutMinutes = Number.parseInt(timeoutSel?.value || '0', 10) || 0;
 
       if (enabled && (password || passwordConfirm) && password !== passwordConfirm) {
-        showToast('Die eingegebenen Passwörter stimmen nicht überein.', { type: 'error' });
+        showToast(t('settings.auth.toastPasswordMismatch'), { type: 'error' });
         return;
       }
 
@@ -2517,11 +2554,11 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (res?.status) refreshAuthSectionUi(res.status);
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
-          showToast(enabled ? 'Admin-Schutz und Zugangsdaten gespeichert.' : 'Admin-Schutz wurde deaktiviert.', {
+          showToast(enabled ? t('settings.auth.toastConfigSaved') : t('settings.auth.toastConfigDisabled'), {
             type: 'success',
           });
         } else {
-          showToast(res?.error || 'Auth-Konfiguration konnte nicht gespeichert werden.', {
+          showToast(res?.error || t('settings.auth.toastConfigFailed'), {
             type: 'error',
             duration: 6000,
           });
@@ -2535,7 +2572,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       const pathInp = getInputEl(modal, '#cfgAuthPolicyPath');
       if (pathInp) pathInp.value = picked;
     } else if (act === 'auth-browse-dir') {
-      const dir = await window.electronAPI.selectDir({ title: 'Ordner für Admin-Policy auswählen' });
+      const dir = await window.electronAPI.selectDir({ title: t('settings.auth.selectPolicyDirTitle') });
       if (!dir || modalToken !== activeSettingsToken) return;
       const sep = dir.includes('\\') ? '\\' : '/';
       const cleanDir = dir.endsWith('\\') || dir.endsWith('/') ? dir.slice(0, -1) : dir;
@@ -2552,9 +2589,9 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
-          showToast('Speicherort der Policy-Datei wurde aktualisiert.', { type: 'success' });
+          showToast(t('settings.auth.toastPathUpdated'), { type: 'success' });
         } else {
-          showToast(res?.error || 'Policy-Pfad konnte nicht geändert werden.', { type: 'error', duration: 6000 });
+          showToast(res?.error || t('settings.auth.toastPathFailed'), { type: 'error', duration: 6000 });
         }
       } finally {
         if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
@@ -2566,9 +2603,9 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
-          showToast('Auf Standardpfad (data/admin-policy.json) zurückgesetzt.', { type: 'info' });
+          showToast(t('settings.auth.toastPathReset'), { type: 'info' });
         } else {
-          showToast(res?.error || 'Standardpfad konnte nicht gesetzt werden.', { type: 'error', duration: 6000 });
+          showToast(res?.error || t('settings.auth.toastPathResetFailed'), { type: 'error', duration: 6000 });
         }
       } finally {
         if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
@@ -2582,11 +2619,11 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
-          showToast('Policy-Pfad fest in HKLM-Registry gesperrt.', { type: 'success' });
+          showToast(t('settings.auth.toastHklmLocked'), { type: 'success' });
         } else if (res?.canceled) {
-          showToast('UAC-Abfrage abgebrochen - HKLM-Policy nicht gesetzt.', { type: 'info' });
+          showToast(t('settings.auth.toastHklmLockCanceled'), { type: 'info' });
         } else {
-          showToast(res?.error || 'HKLM-Sperre konnte nicht gesetzt werden.', { type: 'error', duration: 6000 });
+          showToast(res?.error || t('settings.auth.toastHklmLockFailed'), { type: 'error', duration: 6000 });
         }
       } finally {
         if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
@@ -2596,11 +2633,11 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (btn.dataset.armed !== 'true') {
           btn.dataset.armed = 'true';
           btn.dataset.origText = btn.textContent || '';
-          btn.textContent = '⚠️ Sperre wirklich aufheben?';
+          btn.textContent = `⚠️ ${t('settings.auth.hklmUnlockArmed')}`;
           setTimeout(() => {
             if (btn.isConnected && btn.dataset.armed === 'true') {
               btn.dataset.armed = 'false';
-              btn.textContent = btn.dataset.origText || '🔓 HKLM-Sperre aufheben (Admin)';
+              btn.textContent = btn.dataset.origText || `🔓 ${t('settings.auth.hklmUnlockBtn')}`;
             }
           }, 4000);
           return;
@@ -2613,11 +2650,11 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (res?.status) refreshAuthSectionUi(res.status, { syncPolicy: true });
         if (modalToken !== activeSettingsToken) return;
         if (res?.success) {
-          showToast('HKLM-Policy-Sperre wurde entfernt.', { type: 'success' });
+          showToast(t('settings.auth.toastHklmUnlocked'), { type: 'success' });
         } else if (res?.canceled) {
-          showToast('UAC-Abfrage abgebrochen - HKLM-Sperre bleibt aktiv.', { type: 'info' });
+          showToast(t('settings.auth.toastHklmUnlockCanceled'), { type: 'info' });
         } else {
-          showToast(res?.error || 'HKLM-Sperre konnte nicht aufgehoben werden.', { type: 'error', duration: 6000 });
+          showToast(res?.error || t('settings.auth.toastHklmUnlockFailed'), { type: 'error', duration: 6000 });
         }
       } finally {
         if (btn instanceof HTMLButtonElement && btn.isConnected) btn.disabled = false;
@@ -2656,15 +2693,15 @@ export async function renderSettingsModal(initialTab = 'general') {
         }
 
         if (isCurrentlyActive) {
-          showToast('Admin-Sitzung wurde beendet.', { type: 'info' });
+          showToast(t('toasts.adminSessionEnded'), { type: 'info' });
         } else if (res?.alreadyElevated) {
-          showToast('App läuft bereits als Administrator.', { type: 'info' });
+          showToast(t('toasts.adminAlreadyElevated'), { type: 'info' });
         } else if (res?.success) {
-          showToast('Admin-Sitzung aktiv - weitere Updates laufen ohne UAC-Abfragen.', { type: 'success' });
+          showToast(t('toasts.adminSessionStarted'), { type: 'success' });
         } else if (res?.canceled) {
-          showToast('UAC-Abfrage abgebrochen - Admin-Modus bleibt aus.', { type: 'info' });
+          showToast(t('toasts.adminSessionCanceled'), { type: 'info' });
         } else {
-          showToast(`Admin-Sitzung konnte nicht gestartet werden: ${res?.error || 'Unbekannter Fehler'}`, {
+          showToast(t('toasts.adminSessionStartFailed', { error: res?.error || t('common.unknownError') }), {
             type: 'error',
             duration: 6000,
           });
@@ -2675,7 +2712,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       }
     } else if (act === 'browse-vcpkg-root') {
       const dir = await window.electronAPI.selectDir({
-        title: 'VCPKG_ROOT Ordner auswählen',
+        title: t('settings.providers.vcpkgBrowseTitle'),
         defaultPath: draftSettings.vcpkgRoot || undefined,
       });
       if (!dir || modalToken !== activeSettingsToken) return;
@@ -2688,7 +2725,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       updateDirtyUi();
     } else if (act === 'recheck-providers') {
       await runProvidersAvailabilityCheck();
-      showToast('Paketmanager-Status aktualisiert.', { type: 'info' });
+      showToast(t('settings.providers.recheckToast'), { type: 'info' });
     } else if (act === 'check-app-update') {
       await runAppUpdateCheck({ manual: true });
     } else if (act === 'open-github') window.electronAPI.openUrl('https://github.com/RaptorXilef/SoftwareKatalogApp');
@@ -2696,14 +2733,14 @@ export async function renderSettingsModal(initialTab = 'general') {
     else if (act === 'open-locales-dir' && userLocalesDir) window.electronAPI.openPath(userLocalesDir);
     else if (act === 'open-state') window.electronAPI.openPath(s.statePath);
     else if (act === 'add-archive-path') {
-      const dir = await window.electronAPI.selectDir({ title: 'Archiv-Pfad hinzufügen' });
+      const dir = await window.electronAPI.selectDir({ title: t('settings.archive.addPathDialogTitle') });
       if (!dir || modalToken !== activeSettingsToken) return;
       const newKey = normalizePathKey(dir);
       const duplicate = archiveItems.some(
         (item) => normalizePathKey(item.rawPath) === newKey || normalizePathKey(item.absPath) === newKey
       );
       if (duplicate) {
-        showToast('Dieser Archiv-Pfad ist bereits in der Liste enthalten.', { type: 'info' });
+        showToast(t('settings.archive.duplicatePathToast'), { type: 'info' });
         return;
       }
       const checked = await window.electronAPI.checkArchivePath(dir, archiveItems.length);
@@ -2720,22 +2757,22 @@ export async function renderSettingsModal(initialTab = 'general') {
       const res = await window.electronAPI.clearProviderCache();
       if (res?.success) {
         const countEl = modal.querySelector('#providerCacheCount');
-        if (countEl) countEl.textContent = '0 Einträge gespeichert';
-        showToast('Provider-Cache wurde geleert.', { type: 'success' });
+        if (countEl) countEl.textContent = t('settings.providers.cacheClearedText');
+        showToast(t('settings.providers.cacheClearedToast'), { type: 'success' });
       } else {
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
-        showToast('Cache konnte nicht geleert werden.', { type: 'error' });
+        showToast(t('settings.providers.cacheClearFailedToast'), { type: 'error' });
       }
     } else if (act === 'backup-create') {
       const res = await window.electronAPI.createBackup();
-      if (res.success) showToast('Backup erfolgreich gespeichert.', { type: 'success' });
+      if (res.success) showToast(t('settings.maintenance.backupSavedToast'), { type: 'success' });
       else if (res.error) showToast(res.error, { type: 'error' });
     } else if (act === 'backup-restore') {
       const res = await window.electronAPI.restoreBackup();
       if (res.success) {
         closeModal();
         await triggerCatalogReload();
-        showToast('Backup wiederhergestellt.', { type: 'success' });
+        showToast(t('settings.maintenance.backupRestoredToast'), { type: 'success' });
       } else if (res.error) {
         showToast(res.error, { type: 'error' });
       }
@@ -2748,14 +2785,14 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (modalToken !== activeSettingsToken) return;
         if (res?.status) currentBgStatus = res.status;
         if (res?.alreadyRunning) {
-          showToast('Hintergrund-Prüfung läuft bereits.', { type: 'info' });
+          showToast(t('settings.background.toastBgAlreadyRunning'), { type: 'info' });
         } else if (res?.success) {
           await triggerCatalogReload();
-          showToast(`Hintergrund-Prüfung abgeschlossen (${res.updateCount || 0} Updates erkannt).`, {
+          showToast(t('settings.background.toastBgDone', { count: res.updateCount || 0 }), {
             type: 'success',
           });
         } else if (res?.error) {
-          showToast(`Hintergrund-Prüfung fehlgeschlagen: ${res.error}`, { type: 'error' });
+          showToast(t('settings.background.toastBgFailed', { error: res.error }), { type: 'error' });
         }
       } finally {
         if (modalToken === activeSettingsToken) {
@@ -2769,9 +2806,14 @@ export async function renderSettingsModal(initialTab = 'general') {
       if (modalToken !== activeSettingsToken) return;
       if (nextStatus) currentBgStatus = nextStatus;
       refreshBackgroundSectionUi();
-      showToast(currentBgStatus?.autoUpdatePaused ? 'Auto-Update pausiert.' : 'Auto-Update fortgesetzt.', {
-        type: 'info',
-      });
+      showToast(
+        currentBgStatus?.autoUpdatePaused
+          ? t('settings.background.toastAutoUpdatePaused')
+          : t('settings.background.toastAutoUpdateResumed'),
+        {
+          type: 'info',
+        }
+      );
     } else if (act === 'enable-admin-autostart') {
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       try {
@@ -2793,11 +2835,11 @@ export async function renderSettingsModal(initialTab = 'general') {
             autoUpdateEnabled: true,
           });
           refreshBackgroundSectionUi();
-          showToast('Admin-Autostart (Aufgabenplanung) wurde aktiviert.', { type: 'success' });
+          showToast(t('settings.background.toastAdminAutostartEnabled'), { type: 'success' });
         } else if (autoRes?.canceled) {
-          showToast('UAC-Abfrage abgebrochen - Admin-Autostart wurde nicht eingerichtet.', { type: 'info' });
+          showToast(t('settings.background.toastAdminAutostartCanceled'), { type: 'info' });
         } else {
-          showToast(autoRes?.error || 'Admin-Autostart konnte nicht eingerichtet werden.', {
+          showToast(autoRes?.error || t('settings.background.toastAdminAutostartFailed'), {
             type: 'error',
             duration: 6000,
           });
@@ -2824,8 +2866,8 @@ export async function renderSettingsModal(initialTab = 'general') {
           if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
           showToast(
             autoRes?.canceled
-              ? 'UAC-Abfrage abgebrochen - Autostart-Einstellung wurde nicht gespeichert.'
-              : autoRes?.error || 'Autostart konnte nicht konfiguriert werden.',
+              ? t('settings.toasts.uacAutostartCanceled')
+              : autoRes?.error || t('settings.toasts.autostartFailed'),
             { type: autoRes?.canceled ? 'info' : 'error', duration: 6000 }
           );
           return;
@@ -2840,7 +2882,7 @@ export async function renderSettingsModal(initialTab = 'general') {
         }
         if (!policyRes?.success) {
           if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
-          showToast(policyRes?.error || 'Zugriffsrichtlinien konnten nicht gespeichert werden.', {
+          showToast(policyRes?.error || t('settings.policy.saveErrorToast'), {
             type: 'error',
             duration: 6000,
           });
@@ -2853,7 +2895,9 @@ export async function renderSettingsModal(initialTab = 'general') {
         if (modalToken !== activeSettingsToken) return;
         if (!res?.success) {
           if (saveBtn instanceof HTMLButtonElement && saveBtn.isConnected) saveBtn.disabled = false;
-          showToast(`Speicherfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error' });
+          showToast(t('settings.toasts.saveError', { error: res?.error || t('common.unknownError') }), {
+            type: 'error',
+          });
           return;
         }
         if (plan.languageChanged && typeof window.electronAPI?.getI18nState === 'function') {
@@ -2865,19 +2909,16 @@ export async function renderSettingsModal(initialTab = 'general') {
 
       closeModal();
       if (settingsChanged && plan.needsRescan) {
-        showToast(
-          policyChanged
-            ? 'Einstellungen & Zugriffsrichtlinien gespeichert - aktualisiere Archiv...'
-            : 'Einstellungen gespeichert - aktualisiere Archiv...',
-          { type: 'info' }
-        );
+        showToast(policyChanged ? t('settings.toasts.savedAndRescanPolicy') : t('settings.toasts.savedAndRescan'), {
+          type: 'info',
+        });
         await window.electronAPI.runScan('smart');
       } else if (policyChanged && settingsChanged) {
-        showToast('Einstellungen & Zugriffsrichtlinien gespeichert.', { type: 'success' });
+        showToast(t('settings.toasts.savedBoth'), { type: 'success' });
       } else if (policyChanged) {
-        showToast('Zugriffsrichtlinien gespeichert.', { type: 'success' });
+        showToast(t('settings.toasts.savedPolicyOnly'), { type: 'success' });
       } else {
-        showToast('Einstellungen gespeichert.', { type: 'success' });
+        showToast(t('settings.toasts.savedSettingsOnly'), { type: 'success' });
       }
 
       await triggerCatalogReload({

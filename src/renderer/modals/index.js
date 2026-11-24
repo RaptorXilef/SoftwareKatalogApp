@@ -1,4 +1,5 @@
 import { state } from '../state.js';
+import { t } from '../utils/i18n.js';
 import { savePackageToArchive } from './archive-target-modal.js';
 import { renderBundleEditorModal } from './bundle-editor-modal.js';
 import { renderBundleRunnerModal } from './bundle-runner-modal.js';
@@ -68,7 +69,7 @@ export function openDetailModal(id, options = {}) {
 
 export async function openEditModal(id, initialTab = 'general') {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Zum Bearbeiten von Software-Details ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonEdit'),
   });
   if (!ok) return false;
   state.currentModalKind = 'edit';
@@ -78,7 +79,7 @@ export async function openEditModal(id, initialTab = 'general') {
 
 export async function openSettingsModal(initialTab = 'general') {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Zum Öffnen der Einstellungen ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonSettings'),
   });
   if (!ok) return false;
   state.currentModalKind = 'settings';
@@ -92,7 +93,7 @@ export function openProviderPackageModal(providerId, packageId, summary = {}, op
 
 export async function openArchiveLinkModal(pkg, options = {}) {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Zum Aufnehmen von Paketen ins Archiv ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonAddArchive'),
   });
   if (!ok) return { success: false, canceled: true };
   const defaultMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
@@ -112,7 +113,7 @@ export { openProviderSourcesModal };
 
 export async function openWingetMatcherModal() {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Für die Winget-ID-Zuordnung ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonWingetMatcher'),
   });
   if (!ok) return false;
   state.currentModalKind = 'winget-matcher';
@@ -121,7 +122,7 @@ export async function openWingetMatcherModal() {
 
 export async function openCleanupModal() {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Für den Archiv-Aufräumer ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonCleanup'),
   });
   if (!ok) return false;
   state.currentModalKind = 'cleanup';
@@ -135,7 +136,7 @@ export function openIgnoreListModal() {
 
 export async function openBundleEditorModal(options = {}) {
   const ok = await ensureAdminAuthenticated({
-    reason: 'Zum Erstellen oder Bearbeiten von Paketbündeln ist eine Admin-Anmeldung erforderlich.',
+    reason: t('modals.authReasonBundleEditor'),
   });
   if (!ok) return false;
   state.currentModalKind = 'bundle-editor';

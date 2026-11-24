@@ -1,5 +1,6 @@
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
+import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { triggerCatalogReload } from './index.js';
 
@@ -68,50 +69,49 @@ export function openNestedDialog({ html, onAction, defaultAction = 'cancel' }) {
  * 4. Abbrechen
  */
 function showArchiveCollisionModal({ targetDir, existingMeta = null, softwareName = '', packageId = '' }) {
-  const existingName = existingMeta?.name || 'Bestehender Eintrag';
+  const existingName = existingMeta?.name || t('archiveTarget.existingEntryFallback');
   const existingPkgId = existingMeta?.packageId || existingMeta?.wingetId || '';
-  const targetLabel = softwareName || packageId || 'Neue Software';
+  const targetLabel = softwareName || packageId || t('archiveTarget.newSoftwareFallback');
 
   return openNestedDialog({
     defaultAction: 'cancel',
     html: `
       <div class="modal-header">
-        <h2>⚠️ Ordner enthält bereits Metadaten</h2>
-        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <h2>⚠️ ${escapeHTML(t('archiveTarget.collisionTitle'))}</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
 
       <div class="modal-body collision-warning-body">
         <p>
-          Im gewählten Zielordner existiert bereits ein <code>_metadata</code>-Verzeichnis.
-          Wie möchtest du für <strong>${escapeHTML(targetLabel)}</strong> fortfahren?
+          ${escapeHTML(t('archiveTarget.collisionBodyPrefix'))}<code>_metadata</code>${escapeHTML(t('archiveTarget.collisionBodyMid'))}<strong>${escapeHTML(targetLabel)}</strong>${escapeHTML(t('archiveTarget.collisionBodySuffix'))}
         </p>
 
         <div class="collision-meta-card">
           <div class="tech-row">
-            <span>Zielordner</span>
+            <span>${escapeHTML(t('archiveTarget.targetFolder'))}</span>
             <code>${escapeHTML(targetDir)}</code>
           </div>
           <div class="tech-row">
-            <span>Vorhandener Eintrag</span>
+            <span>${escapeHTML(t('archiveTarget.existingEntry'))}</span>
             <strong>${escapeHTML(existingName)}</strong>
           </div>
           ${
             existingPkgId
-              ? `<div class="tech-row"><span>Verknüpfte Paket-ID</span><code>${escapeHTML(existingPkgId)}</code></div>`
+              ? `<div class="tech-row"><span>${escapeHTML(t('archiveTarget.linkedPackageId'))}</span><code>${escapeHTML(existingPkgId)}</code></div>`
               : ''
           }
           ${
             existingMeta?.keepAllVersions
-              ? '<div class="tech-row"><span>Aufräum-Schutz</span><strong>🔒 Alle Versionen behalten aktiv</strong></div>'
+              ? `<div class="tech-row"><span>${escapeHTML(t('archiveTarget.cleanupProtection'))}</span><strong>🔒 ${escapeHTML(t('archiveTarget.keepAllVersionsActive'))}</strong></div>`
               : ''
           }
         </div>
 
         <div class="collision-actions-grid">
-          <button type="button" class="btn btn-primary" data-dialog-action="link">🔗 Verknüpfen (Bestehende Infos behalten)</button>
-          <button type="button" class="btn btn-danger" data-dialog-action="overwrite">⚠️ Überschreiben</button>
-          <button type="button" class="btn btn-ghost" data-dialog-action="other">📂 Anderen Ordner wählen</button>
-          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="link">🔗 ${escapeHTML(t('archiveTarget.actionLink'))}</button>
+          <button type="button" class="btn btn-danger" data-dialog-action="overwrite">⚠️ ${escapeHTML(t('archiveTarget.actionOverwrite'))}</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="other">📂 ${escapeHTML(t('archiveTarget.actionOtherFolder'))}</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
         </div>
       </div>
     `,
@@ -129,27 +129,27 @@ function showOutsideArchiveDialog({ targetDir, error = '' }) {
       : [state.settings.absTargetPath || state.settings.targetPath].filter(Boolean);
   const rootsHtml =
     configuredRoots.length > 0
-      ? `<div class="tech-row"><span>Erlaubte Archiv-Pfade</span><code>${configuredRoots.map(escapeHTML).join('<br>')}</code></div>`
+      ? `<div class="tech-row"><span>${escapeHTML(t('archiveTarget.outsideAllowedRoots'))}</span><code>${configuredRoots.map(escapeHTML).join('<br>')}</code></div>`
       : '';
 
   return openNestedDialog({
     defaultAction: 'cancel',
     html: `
       <div class="modal-header">
-        <h2>⚠️ Ungültiger Zielordner</h2>
-        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <h2>⚠️ ${escapeHTML(t('archiveTarget.outsideTitle'))}</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
 
       <div class="modal-body collision-warning-body">
-        <p>${escapeHTML(error || 'Der gewählte Ordner liegt nicht innerhalb eines konfigurierten Archiv-Verzeichnisses.')}</p>
-        ${targetDir || rootsHtml ? `<div class="collision-meta-card">${targetDir ? `<div class="tech-row"><span>Gewählt</span><code>${escapeHTML(targetDir)}</code></div>` : ''}${rootsHtml}</div>` : ''}
+        <p>${escapeHTML(error || t('archiveTarget.outsideDefaultError'))}</p>
+        ${targetDir || rootsHtml ? `<div class="collision-meta-card">${targetDir ? `<div class="tech-row"><span>${escapeHTML(t('archiveTarget.outsideSelected'))}</span><code>${escapeHTML(targetDir)}</code></div>` : ''}${rootsHtml}</div>` : ''}
       </div>
 
       <div class="modal-footer">
         <span></span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
-          <button type="button" class="btn btn-primary" data-dialog-action="retry">📂 Anderen Ordner wählen</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="retry">📂 ${escapeHTML(t('archiveTarget.actionOtherFolder'))}</button>
         </div>
       </div>
     `,
@@ -162,12 +162,12 @@ function showOutsideArchiveDialog({ targetDir, error = '' }) {
  * und klärt eine eventuelle `_metadata`-Kollision direkt im In-App-Dialog.
  */
 export async function pickArchiveTargetFolder({ softwareName = '', packageId = '' } = {}) {
-  const displayName = softwareName || packageId || 'Software';
+  const displayName = softwareName || packageId || t('archiveTarget.softwareFallback');
 
   while (true) {
     const selectedDir = await window.electronAPI.selectDir({
       defaultToArchive: true,
-      title: `Zielordner im Archiv für "${displayName}" wählen`,
+      title: t('archiveTarget.pickTitle', { name: displayName }),
     });
     if (!selectedDir) {
       return { canceled: true };
@@ -300,12 +300,12 @@ export async function executeArchiveLink(pkg, targetSpec, { downloadSetup = true
     }
 
     if (!res?.success) {
-      showToast(res?.error || 'Aufnahme ins Archiv fehlgeschlagen.', { type: 'error', duration: 6000 });
+      showToast(res?.error || t('archiveTarget.linkFailed'), { type: 'error', duration: 6000 });
       return res || { success: false };
     }
 
     await triggerCatalogReload();
-    showToast(`${softwareName} wurde erfolgreich im Archiv aufgenommen.`, { type: 'success' });
+    showToast(t('archiveTarget.linkSuccess', { name: softwareName }), { type: 'success' });
     onLinked?.(res);
     return res;
   }
@@ -320,11 +320,16 @@ export async function savePackageToArchive(pkg, { mode = null, downloadSetup = t
     return { success: false, canceled: targetSpec.canceled, skipped: targetSpec.skipped };
   }
 
-  const softwareName = String(pkg?.name || pkg?.packageId || 'Software').trim();
+  const softwareName = String(pkg?.name || pkg?.packageId || t('archiveTarget.softwareFallback')).trim();
   if (pkg?.packageId || pkg?.wingetId) {
-    showToast(downloadSetup ? `Speichere ${softwareName} im Archiv...` : `Lege ${softwareName} im Archiv an...`, {
-      type: 'info',
-    });
+    showToast(
+      downloadSetup
+        ? t('archiveTarget.savingToast', { name: softwareName })
+        : t('archiveTarget.creatingToast', { name: softwareName }),
+      {
+        type: 'info',
+      }
+    );
   }
 
   return executeArchiveLink(pkg, targetSpec, { downloadSetup, onLinked });
@@ -335,25 +340,24 @@ export async function savePackageToArchive(pkg, { mode = null, downloadSetup = t
  * für ein Nicht-Archiv-Programm nach dem Umgang mit dem Archiv.
  */
 export function askBatchArchiveSaveChoice({ softwareName = '', packageId = '', index = 1, total = 1 } = {}) {
-  const titleLabel = softwareName || packageId || 'Programm';
+  const titleLabel = softwareName || packageId || t('archiveTarget.programFallback');
   return openNestedDialog({
     defaultAction: 'cancel',
     html: `
       <div class="modal-header">
-        <h2>📥 Archiv-Speicherung (${index}/${total})</h2>
-        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <h2>📥 ${escapeHTML(t('archiveTarget.batchChoiceTitle', { index, total }))}</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
 
       <div class="modal-body collision-warning-body">
         <p>
-          <strong>${escapeHTML(titleLabel)}</strong> ist noch nicht im Archiv hinterlegt.
-          In den Einstellungen ist für neue Pakete "Jedes Mal fragen" aktiviert.
+          <strong>${escapeHTML(titleLabel)}</strong>${escapeHTML(t('archiveTarget.batchChoiceDesc'))}
         </p>
-        ${packageId ? `<div class="collision-meta-card"><div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(packageId)}</code></div></div>` : ''}
+        ${packageId ? `<div class="collision-meta-card"><div class="tech-row"><span>${escapeHTML(t('archiveTarget.packageIdLabel'))}</span><code>${escapeHTML(packageId)}</code></div></div>` : ''}
         <div class="collision-actions-grid">
-          <button type="button" class="btn btn-primary" data-dialog-action="pick">📂 Zielordner im Archiv wählen</button>
-          <button type="button" class="btn btn-ghost" data-dialog-action="skip-archive">⏭️ Nur auf PC aktualisieren</button>
-          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="pick">📂 ${escapeHTML(t('archiveTarget.batchActionPick'))}</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="skip-archive">⏭️ ${escapeHTML(t('archiveTarget.batchActionSkip'))}</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
         </div>
       </div>
     `,

@@ -1,12 +1,7 @@
 import { getInstallModeBadge } from '../../shared/installer-logic.js';
 import { formatScanProgressBanner, formatSourceNameList } from '../../shared/scan-progress-logic.js';
 import { scoreCatalogItem } from '../../shared/search.js';
-import {
-  canDownloadOnline,
-  getProviderBadgeInfo,
-  isPackageVisible,
-  matchesProviderFilter,
-} from '../../shared/unified-packages.js';
+import { canDownloadOnline, isPackageVisible, matchesProviderFilter } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import {
   evaluateItemPolicy,
@@ -20,7 +15,7 @@ import {
   isProviderUsable,
   state,
 } from '../state.js';
-import { getI18nLocale, t } from '../utils/i18n.js';
+import { getI18nLocale, getLocalizedProviderBadge, t } from '../utils/i18n.js';
 import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { updateNavCounts } from './toolbar.js';
 
@@ -389,7 +384,7 @@ function renderCardHtml(item, st) {
       ? `<span class="card-chip chip-origin-archive" title="${escapeHTML(t('cards.chipOriginArchiveTitle'))}">${escapeHTML(t('cards.chipOriginArchive'))}</span>`
       : `<span class="card-chip chip-origin-pc" title="${escapeHTML(t('cards.chipOriginPcTitle'))}">${escapeHTML(t('cards.chipOriginPc'))}</span>`;
 
-    const providerBadge = getProviderBadgeInfo(item.packageManager, state.providers);
+    const providerBadge = getLocalizedProviderBadge(item.packageManager, state.providers);
     if (providerBadge) {
       providerTag = `<span class="provider-badge ${escapeHTML(providerBadge.badgeClass)}">${escapeHTML(providerBadge.label)}</span>`;
     }

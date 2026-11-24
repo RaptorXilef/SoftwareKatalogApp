@@ -1,9 +1,9 @@
 import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { renderBundlesView } from '../components/bundles-view.js';
 import { showToast } from '../components/toast.js';
 import { buildBundleItemPolicyPkg, evaluateItemPolicy, state } from '../state.js';
 import { closestEl, closestInput, qsInput } from '../utils/dom.js';
+import { getLocalizedPolicyError, getLocalizedProviderBadge, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -11,9 +11,9 @@ import { closeModal, resetModalContent, triggerCatalogReload } from './index.js'
 let activeRunnerToken = 0;
 
 function getArchiveSaveModeLabel(mode) {
-  if (mode === 'auto-id') return 'Automatisch im Archiv unter Paket-ID speichern';
-  if (mode === 'none') return 'Nicht automatisch ins Archiv speichern';
-  return 'Jedes Mal fragen (Ordner im Archiv wählen)';
+  if (mode === 'auto-id') return t('bundleRunner.saveModeAutoId');
+  if (mode === 'none') return t('bundleRunner.saveModeNone');
+  return t('bundleRunner.saveModeAsk');
 }
 
 export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
@@ -23,7 +23,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
 
   const bundle = state.bundles.find((b) => b.id === bundleId);
   if (!bundle) {
-    showToast('Bündel nicht gefunden.', { type: 'error' });
+    showToast(t('bundleRunner.notFoundToast'), { type: 'error' });
     return;
   }
 
@@ -43,6 +43,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     const rawEval = evaluateBundleStatus(bundle, {
       packages: state.packages,
       versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+      t,
     });
     const visibleItems = [];
     let installedCount = 0;
@@ -87,7 +88,10 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
         missingCount,
         adwareProtectedCount,
         silentReadyCount,
-        statusText: total === 0 ? 'Keine sichtbaren Pakete' : `${installedCount} von ${total} bereits installiert`,
+        statusText:
+          total === 0
+            ? t('bundleRunner.noVisiblePackages')
+            : t('bundles.installedOfTotal', { installed: installedCount, total }),
       },
     };
   };
@@ -103,13 +107,13 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     const { items, summary } = evaluation;
 
     const selectedEntries = items.filter((it) => selectedKeys.has(it.key) && !it.archiveMissing && !it.policyBlocked);
-    const plan = planBundleExecution(selectedEntries, { allowSilent, silentWinget });
+    const plan = planBundleExecution(selectedEntries, { allowSilent, silentWinget, t });
     const planByKey = new Map(plan.orderedQueue.map((entry) => [entry.key, entry]));
     const saveMode = state.settings.archiveSaveMode || 'ask';
 
     const rowsHtml =
       items.length === 0
-        ? '<div class="bundle-items-empty">Dieses Bündel enthält keine für diesen Benutzer sichtbaren Pakete.</div>'
+        ? `<div class="bundle-items-empty">${escapeHTML(t('bundleRunner.emptyVisible'))}</div>`
         : items
             .map((entry) => {
               const rowDisabled = entry.archiveMissing || entry.policyBlocked;
@@ -122,39 +126,41 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
               else if (entry.status === 'outdated') statusClass = 'is-outdated';
 
               const statusText = entry.policyBlocked
-                ? '🚫 Durch Richtlinie blockiert'
+                ? `🚫 ${t('bundleRunner.statusPolicyBlocked')}`
                 : entry.archiveMissing
-                  ? '⚠️ Nicht im Archiv gefunden'
+                  ? `⚠️ ${t('bundleRunner.statusArchiveMissing')}`
                   : entry.statusLabel;
 
               let versionNote = '';
               if (entry.installedVersion && entry.availableVersion && entry.status === 'outdated') {
                 versionNote = `v${entry.installedVersion} → v${entry.availableVersion}`;
               } else if (entry.installedVersion) {
-                versionNote = `Installiert: v${entry.installedVersion}`;
+                versionNote = t('bundleRunner.versionInstalled', { version: entry.installedVersion });
               } else if (entry.availableVersion) {
-                versionNote = `Verfügbar: v${entry.availableVersion}`;
+                versionNote = t('bundleRunner.versionAvailable', { version: entry.availableVersion });
               }
+
+              const policyErrText = entry.policyBlocked
+                ? getLocalizedPolicyError(entry.policyEval, 'bundleRunner.statusPolicyBlocked')
+                : '';
 
               let phaseBadgeHtml = '';
               if (entry.policyAdwareConflict) {
-                phaseBadgeHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(entry.policyEval?.error || '')}">🚫 Adware vs. Nur Silent</span>`;
+                phaseBadgeHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(policyErrText)}">🚫 ${escapeHTML(t('bundleRunner.badgeAdwareConflict'))}</span>`;
               } else if (entry.adwareProtected) {
-                phaseBadgeHtml =
-                  '<span class="card-chip chip-install-protected" title="Silent-Parameter werden wegen Adware-Schutz immer ignoriert">🛡️ Adware-Schutz</span>';
+                phaseBadgeHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(t('bundleRunner.badgeAdwareProtectedTitle'))}">🛡️ ${escapeHTML(t('bundleRunner.badgeAdwareProtected'))}</span>`;
               } else if (entry.policySilentOnly) {
-                phaseBadgeHtml =
-                  '<span class="card-chip chip-install-silent" title="Zugriffsrichtlinie erzwingt stille Ausführung">🔒 Nur Silent</span>';
+                phaseBadgeHtml = `<span class="card-chip chip-install-silent" title="${escapeHTML(t('bundleRunner.badgePolicySilentOnlyTitle'))}">🔒 ${escapeHTML(t('bundleRunner.badgePolicySilentOnly'))}</span>`;
               } else if (planned?.willRunSilent) {
-                phaseBadgeHtml = '<span class="card-chip chip-install-silent">⚡ Phase 1: Still</span>';
+                phaseBadgeHtml = `<span class="card-chip chip-install-silent">⚡ ${escapeHTML(t('bundleRunner.badgePhaseSilent'))}</span>`;
               } else if (checked) {
-                phaseBadgeHtml = '<span class="card-chip">🖱️ Phase 2: Interaktiv</span>';
+                phaseBadgeHtml = `<span class="card-chip">🖱️ ${escapeHTML(t('bundleRunner.badgePhaseInteractive'))}</span>`;
               }
 
-              const entryBadge = getProviderBadgeInfo(entry.source, state.providers);
+              const entryBadge = getLocalizedProviderBadge(entry.source, state.providers);
 
               return `
-                <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${rowDisabled ? 'is-disabled' : ''}" ${entry.policyBlocked ? `title="${escapeHTML(entry.policyEval?.error || '')}"` : ''}>
+                <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${rowDisabled ? 'is-disabled' : ''}" ${entry.policyBlocked ? `title="${escapeHTML(policyErrText)}"` : ''}>
                   <input
                     type="checkbox"
                     class="bundle-runner-check"
@@ -167,7 +173,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
                     <div class="bundle-item-title">
                       <strong>${escapeHTML(entry.name)}</strong>
                       <span class="provider-badge ${escapeHTML(entryBadge?.badgeClass || '')}">${escapeHTML(entryBadge?.label || entry.source)}</span>
-                      ${entry.optional ? '<span class="card-chip">Optional</span>' : ''}
+                      ${entry.optional ? `<span class="card-chip">${escapeHTML(t('common.optional'))}</span>` : ''}
                       ${phaseBadgeHtml}
                     </div>
                     <div class="bundle-item-meta">
@@ -183,12 +189,12 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
 
     const phaseNoticeHtml =
       selectedEntries.length === 0
-        ? '<div class="bundle-phase-banner">ℹ️ Keine Pakete ausgewählt. Wähle fehlende oder veraltete Programme aus.</div>'
+        ? `<div class="bundle-phase-banner">ℹ️ ${escapeHTML(t('bundleRunner.phaseNoneSelected'))}</div>`
         : `
           <div class="bundle-phase-banner ${plan.stats.adwareProtectedCount > 0 ? 'has-protected' : ''}">
             <div>
-              <strong>Ausführungsplan:</strong>
-              <span>⚡ ${plan.stats.silentCount} still zuerst · 🖱️ ${plan.stats.interactiveCount} interaktiv am Ende</span>
+              <strong>${escapeHTML(t('bundleRunner.phasePlanTitle'))}</strong>
+              <span>${escapeHTML(t('bundleRunner.phasePlanSummary', { silentCount: plan.stats.silentCount, interactiveCount: plan.stats.interactiveCount }))}</span>
             </div>
             ${plan.interactiveNotice ? `<p class="muted">${escapeHTML(plan.interactiveNotice)}</p>` : ''}
           </div>
@@ -198,41 +204,41 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       <div class="modal-header">
         <div>
           <h2>${escapeHTML(currentBundle.icon || '📦')} ${escapeHTML(currentBundle.name)}</h2>
-          <span class="muted">${escapeHTML(currentBundle.description || 'PC-Status prüfen und ausgewählte Pakete installieren oder aktualisieren')}</span>
+          <span class="muted">${escapeHTML(currentBundle.description || t('bundleRunner.defaultSubtitle'))}</span>
         </div>
-        <button type="button" class="icon-btn" data-runner-action="close" title="Schließen" aria-label="Schließen">✕</button>
+        <button type="button" class="icon-btn" data-runner-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
       </div>
 
       <div class="modal-body bundle-runner-body">
         <div class="matcher-summary-bar">
-          <div class="matcher-kpi is-accent"><strong>${selectedEntries.length}</strong><span>Ausgewählt</span></div>
-          <div class="matcher-kpi"><strong>${summary.missingCount}</strong><span>⬇️ Fehlt</span></div>
-          <div class="matcher-kpi"><strong>${summary.outdatedCount}</strong><span>⬆️ Veraltet</span></div>
-          <div class="matcher-kpi"><strong>${summary.upToDateCount}</strong><span>✅ Aktuell</span></div>
+          <div class="matcher-kpi is-accent"><strong>${selectedEntries.length}</strong><span>${escapeHTML(t('bundleRunner.kpiSelected'))}</span></div>
+          <div class="matcher-kpi"><strong>${summary.missingCount}</strong><span>⬇️ ${escapeHTML(t('bundleRunner.kpiMissing'))}</span></div>
+          <div class="matcher-kpi"><strong>${summary.outdatedCount}</strong><span>⬆️ ${escapeHTML(t('bundleRunner.kpiOutdated'))}</span></div>
+          <div class="matcher-kpi"><strong>${summary.upToDateCount}</strong><span>✅ ${escapeHTML(t('bundleRunner.kpiUpToDate'))}</span></div>
         </div>
 
         <div class="bundle-runner-toolbar">
           <div class="bundle-runner-quick-btns">
-            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-needed" ${isStarting ? 'disabled' : ''}>Fehlende &amp; Veraltete</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-all" ${isStarting ? 'disabled' : ''}>Alle</button>
-            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-none" ${isStarting ? 'disabled' : ''}>Keine</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-needed" ${isStarting ? 'disabled' : ''}>${escapeHTML(t('bundleRunner.btnSelectNeeded'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-all" ${isStarting ? 'disabled' : ''}>${escapeHTML(t('bundleRunner.btnSelectAll'))}</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-runner-action="select-none" ${isStarting ? 'disabled' : ''}>${escapeHTML(t('bundleRunner.btnSelectNone'))}</button>
           </div>
           <button type="button" class="btn btn-local btn-xs" data-runner-action="rescan-pc" ${isRescanning || isStarting ? 'disabled' : ''}>
-            ${isRescanning ? '⏳ Prüfe PC...' : '💻 PC-Status neu prüfen'}
+            ${isRescanning ? `⏳ ${escapeHTML(t('bundleRunner.btnRescanning'))}` : `💻 ${escapeHTML(t('bundleRunner.btnRescanPc'))}`}
           </button>
         </div>
 
         <div class="bundle-runner-options">
           <label class="check-row">
             <input type="checkbox" id="chkBundleAllowSilent" ${allowSilent ? 'checked' : ''} ${isStarting ? 'disabled' : ''}>
-            <span>⚡ Konfigurierte Silent-Archiv-Pakete still ausführen (Phase 1 vor interaktiven Setups)</span>
+            <span>⚡ ${escapeHTML(t('bundleRunner.chkAllowSilent'))}</span>
           </label>
           <label class="check-row">
             <input type="checkbox" id="chkBundleSilentWinget" ${silentWinget ? 'checked' : ''} ${isStarting ? 'disabled' : ''}>
-            <span>⚡ Saubere Paketmanager-Pakete still installieren (Opt-in · 🛡️ Adware-Kandidaten bleiben immer interaktiv)</span>
+            <span>⚡ ${escapeHTML(t('bundleRunner.chkSilentWinget'))}</span>
           </label>
           <div class="bundle-save-mode-hint muted">
-            Archiv-Speicherung für Nicht-Archiv-Winget-Pakete: <strong>${escapeHTML(getArchiveSaveModeLabel(saveMode))}</strong>
+            ${escapeHTML(t('bundleRunner.saveModeHintPrefix'))} <strong>${escapeHTML(getArchiveSaveModeLabel(saveMode))}</strong>
           </div>
         </div>
 
@@ -244,11 +250,11 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       </div>
 
       <div class="modal-footer">
-        <span class="muted">${summary.statusText}</span>
+        <span class="muted">${escapeHTML(summary.statusText)}</span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-runner-action="close" ${isStarting ? 'disabled' : ''}>Abbrechen</button>
+          <button type="button" class="btn btn-ghost" data-runner-action="close" ${isStarting ? 'disabled' : ''}>${escapeHTML(t('common.cancel'))}</button>
           <button type="button" class="btn btn-primary" data-runner-action="start" ${selectedEntries.length === 0 || isStarting || state.isBundleInstallRunning ? 'disabled' : ''}>
-            ${isStarting ? '⏳ Starte Queue...' : `🚀 Installation starten (${selectedEntries.length})`}
+            ${isStarting ? `⏳ ${escapeHTML(t('bundleRunner.btnStarting'))}` : `🚀 ${escapeHTML(t('bundleRunner.btnStart', { count: selectedEntries.length }))}`}
           </button>
         </div>
       </div>
@@ -389,7 +395,9 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       state.isBundleInstallRunning = true;
       closeModal();
       if (state.activeTab === 'bundles') renderBundlesView();
-      showToast(`Starte Bündel "${bundle.name}" (${selectedEntries.length} Paket(e))...`, { type: 'info' });
+      showToast(t('bundleRunner.startingToast', { name: bundle.name, count: selectedEntries.length }), {
+        type: 'info',
+      });
 
       try {
         const res = await window.electronAPI.runBundleInstall(
@@ -407,17 +415,21 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
         await triggerCatalogReload({ rescanInstalled: true });
 
         if (res?.alreadyRunning) {
-          showToast('Es läuft bereits eine Bündel-Installation.', { type: 'warn' });
+          showToast(t('bundleRunner.alreadyRunningToast'), { type: 'warn' });
         } else if (res?.canceled) {
-          showToast('Bündel-Installation wurde abgebrochen.', { type: 'info' });
+          showToast(t('bundleRunner.canceledToast'), { type: 'info' });
         } else if (res?.success) {
           const type = res.failed > 0 ? 'warn' : 'success';
           showToast(
-            `Bündel abgeschlossen: ${res.completed} installiert/aktualisiert (${res.skipped} übersprungen, ${res.failed} Fehler).`,
+            t('bundleRunner.finishedToast', {
+              completed: res.completed,
+              skipped: res.skipped,
+              failed: res.failed,
+            }),
             { type, duration: 6000 }
           );
         } else if (res?.error) {
-          showToast(`Bündel-Fehler: ${res.error}`, { type: 'error', duration: 6000 });
+          showToast(t('bundleRunner.errorToast', { error: res.error }), { type: 'error', duration: 6000 });
         }
       } finally {
         state.isBundleInstallRunning = false;

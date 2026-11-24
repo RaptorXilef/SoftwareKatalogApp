@@ -34,24 +34,37 @@ export function isCleanupCandidateFile(filename, autoExtensions = ['.exe', '.msi
 }
 
 /**
- * Formatiert eine Byte-Größe menschenlesbar (B, KB, MB, GB).
+ * Formatiert eine Byte-Groesse menschenlesbar (B, KB, MB, GB) gemaess aktivem Locale.
+ * @param {number} bytes
+ * @param {string} [locale]
+ * @returns {string}
  */
-export function formatBytes(bytes) {
+export function formatBytes(bytes, locale = 'de') {
   const num = Number(bytes);
   if (!Number.isFinite(num) || num <= 0) return '0 B';
   if (num < 1024) return `${Math.round(num)} B`;
+  const effectiveLocale = locale || 'de';
+  const formatVal = (val, fractionDigits) =>
+    new Intl.NumberFormat(effectiveLocale, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+      useGrouping: false,
+    }).format(val);
   const kb = num / 1024;
-  if (kb < 1024) return `${kb.toFixed(1).replace('.', ',')} KB`;
+  if (kb < 1024) return `${formatVal(kb, 1)} KB`;
   const mb = kb / 1024;
-  if (mb < 1024) return `${mb.toFixed(1).replace('.', ',')} MB`;
+  if (mb < 1024) return `${formatVal(mb, 1)} MB`;
   const gb = mb / 1024;
-  return `${gb.toFixed(2).replace('.', ',')} GB`;
+  return `${formatVal(gb, 2)} GB`;
 }
 
 /**
  * Sortiert Dateien absteigend von der neuesten zur ältesten Version.
+ * @param {Array<Record<string, any>>} [files]
+ * @param {string} [locale]
  */
-function sortVersionedFilesDescending(files = []) {
+function sortVersionedFilesDescending(files = [], locale = 'de') {
+  const effectiveLocale = locale || 'de';
   return [...(files || [])]
     .map((file) => ({
       ...file,
@@ -65,24 +78,26 @@ function sortVersionedFilesDescending(files = []) {
         const cmp = compareVersions(b.version, a.version, 0);
         if (cmp !== 0) return cmp;
         if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
-        return b.name.localeCompare(a.name, 'de', { numeric: true, sensitivity: 'base' });
+        return b.name.localeCompare(a.name, effectiveLocale, { numeric: true, sensitivity: 'base' });
       }
       if (a.version !== b.version) {
         if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
         return a.version ? -1 : 1;
       }
       if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
-      return b.name.localeCompare(a.name, 'de', { numeric: true, sensitivity: 'base' });
+      return b.name.localeCompare(a.name, effectiveLocale, { numeric: true, sensitivity: 'base' });
     });
 }
 
 /**
  * Wählt anhand der `keepVersions` neuesten Versions-Slots die zu behaltenden und zu entfernenden Dateien.
  * Dateien mit gleicher erkannter Versionsnummer (z. B. x64 + x86) teilen sich einen Versions-Slot.
+ * @param {Array<Record<string, any>>} [files]
+ * @param {{ keepVersions?: number, locale?: string }} [options]
  */
-export function selectFilesForCleanup(files = [], { keepVersions = DEFAULT_KEEP_VERSIONS } = {}) {
+export function selectFilesForCleanup(files = [], { keepVersions = DEFAULT_KEEP_VERSIONS, locale = 'de' } = {}) {
   const keepLimit = clampKeepVersions(keepVersions);
-  const sorted = sortVersionedFilesDescending(files);
+  const sorted = sortVersionedFilesDescending(files, locale);
 
   const keptFiles = [];
   const filesToRemove = [];
@@ -114,8 +129,11 @@ export function selectFilesForCleanup(files = [], { keepVersions = DEFAULT_KEEP_
  * Erstellt den vollständigen Aufräum-Plan.
  * Zwingender Schutz: Programme mit `hasLastDir: true` (`_last`) oder `keepAllVersions: true`
  * werden NIEMALS in `candidates` aufgenommen, sondern unter `protectedItems` geführt.
+ * @param {Array<Record<string, any>>} [programEntries]
+ * @param {{ keepVersions?: number, locale?: string }} [options]
  */
-export function buildCleanupPlan(programEntries = [], { keepVersions = DEFAULT_KEEP_VERSIONS } = {}) {
+export function buildCleanupPlan(programEntries = [], { keepVersions = DEFAULT_KEEP_VERSIONS, locale = 'de' } = {}) {
+  const effectiveLocale = locale || 'de';
   const clampedKeep = clampKeepVersions(keepVersions);
   const candidates = [];
   const protectedItems = [];
@@ -147,7 +165,7 @@ export function buildCleanupPlan(programEntries = [], { keepVersions = DEFAULT_K
       continue;
     }
 
-    const selection = selectFilesForCleanup(files, { keepVersions: clampedKeep });
+    const selection = selectFilesForCleanup(files, { keepVersions: clampedKeep, locale: effectiveLocale });
     if (selection.filesToRemove.length > 0) {
       candidates.push({
         id: entry.id,
@@ -167,9 +185,9 @@ export function buildCleanupPlan(programEntries = [], { keepVersions = DEFAULT_K
   }
 
   candidates.sort(
-    (a, b) => b.reclaimBytes - a.reclaimBytes || a.name.localeCompare(b.name, 'de', { sensitivity: 'base' })
+    (a, b) => b.reclaimBytes - a.reclaimBytes || a.name.localeCompare(b.name, effectiveLocale, { sensitivity: 'base' })
   );
-  protectedItems.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
+  protectedItems.sort((a, b) => a.name.localeCompare(b.name, effectiveLocale, { sensitivity: 'base' }));
 
   return {
     keepVersions: clampedKeep,

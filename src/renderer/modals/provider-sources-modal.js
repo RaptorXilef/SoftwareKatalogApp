@@ -1,4 +1,5 @@
 import { showToast } from '../components/toast.js';
+import { getLocalizedProviderName, getLocalizedSourceTemplateDescription, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 function getDialogElements() {
@@ -11,28 +12,36 @@ function getDialogElements() {
 function renderSourceMetaBadges(providerId, src) {
   const badges = [];
   if (src.builtIn) {
-    badges.push('<span class="provider-source-badge">Standard</span>');
+    badges.push(`<span class="provider-source-badge">${escapeHTML(t('providerSources.badgeBuiltIn'))}</span>`);
   }
   if (src.active) {
-    badges.push('<span class="provider-source-badge is-active">Aktiv</span>');
+    badges.push(`<span class="provider-source-badge is-active">${escapeHTML(t('providerSources.badgeActive'))}</span>`);
   }
   if (src.enabled === false) {
-    badges.push('<span class="provider-source-badge is-disabled">Deaktiviert</span>');
+    badges.push(
+      `<span class="provider-source-badge is-disabled">${escapeHTML(t('providerSources.badgeDisabled'))}</span>`
+    );
   }
   if (src.trusted === true) {
-    badges.push('<span class="provider-source-badge is-trusted">Vertraut</span>');
+    badges.push(
+      `<span class="provider-source-badge is-trusted">${escapeHTML(t('providerSources.badgeTrusted'))}</span>`
+    );
   }
   if (src.explicit === true) {
-    badges.push('<span class="provider-source-badge">Explizit</span>');
+    badges.push(`<span class="provider-source-badge">${escapeHTML(t('providerSources.badgeExplicit'))}</span>`);
   }
   if (src.adminOnly === true) {
-    badges.push('<span class="provider-source-badge is-warn">Admin</span>');
+    badges.push(`<span class="provider-source-badge is-warn">${escapeHTML(t('providerSources.badgeAdmin'))}</span>`);
   }
   if (typeof src.manifests === 'number') {
-    badges.push(`<span class="provider-source-badge">${src.manifests} Pakete</span>`);
+    badges.push(
+      `<span class="provider-source-badge">${escapeHTML(t('providerSources.badgeManifests', { count: src.manifests }))}</span>`
+    );
   }
   if (providerId === 'chocolatey' && typeof src.priority === 'number' && src.priority !== 0) {
-    badges.push(`<span class="provider-source-badge">Prio ${src.priority}</span>`);
+    badges.push(
+      `<span class="provider-source-badge">${escapeHTML(t('providerSources.badgePriority', { priority: src.priority }))}</span>`
+    );
   }
   return badges.join('');
 }
@@ -49,7 +58,7 @@ export function openProviderSourcesModal(provider) {
 
   const { overlay, dialog } = els;
   const providerId = String(provider.id).trim().toLowerCase();
-  const providerName = provider.name || providerId;
+  const providerName = getLocalizedProviderName(provider);
   const isScoop = providerId === 'scoop';
   const isWinget = providerId === 'winget';
 
@@ -85,11 +94,11 @@ export function openProviderSourcesModal(provider) {
 
       let listHtml = '';
       if (isLoading) {
-        listHtml = '<div class="path-empty">⏳ Lade konfigurierte Quellen...</div>';
+        listHtml = `<div class="path-empty">⏳ ${escapeHTML(t('providerSources.loading'))}</div>`;
       } else if (loadError) {
         listHtml = `<div class="path-empty">${escapeHTML(loadError)}</div>`;
       } else if (sources.length === 0) {
-        listHtml = '<div class="path-empty">Noch keine Quellen eingetragen.</div>';
+        listHtml = `<div class="path-empty">${escapeHTML(t('providerSources.empty'))}</div>`;
       } else {
         listHtml = `
           <div class="provider-sources-list">
@@ -97,8 +106,8 @@ export function openProviderSourcesModal(provider) {
               .map((src) => {
                 const badgesHtml = renderSourceMetaBadges(providerId, src);
                 const removeBtnHtml = src.builtIn
-                  ? '<span class="muted">Standard-Fallback</span>'
-                  : `<button type="button" class="btn btn-danger btn-xs" data-source-remove="${escapeHTML(src.name)}" ${isBusy ? 'disabled' : ''}>🗑️ Entfernen</button>`;
+                  ? `<span class="muted">${escapeHTML(t('providerSources.builtInFallback'))}</span>`
+                  : `<button type="button" class="btn btn-danger btn-xs" data-source-remove="${escapeHTML(src.name)}" ${isBusy ? 'disabled' : ''}>🗑️ ${escapeHTML(t('common.remove'))}</button>`;
                 return `
                   <div class="provider-source-row ${src.enabled === false ? 'is-disabled' : ''}">
                     <div class="provider-source-info">
@@ -106,8 +115,8 @@ export function openProviderSourcesModal(provider) {
                         <strong>${escapeHTML(src.name)}</strong>
                         ${badgesHtml}
                       </div>
-                      ${src.url ? `<code class="provider-source-url" title="${escapeHTML(src.url)}">${escapeHTML(src.url)}</code>` : '<span class="muted">Standard-Bucket-Quelle</span>'}
-                      ${src.updated ? `<span class="muted">Aktualisiert: ${escapeHTML(src.updated)}</span>` : ''}
+                      ${src.url ? `<code class="provider-source-url" title="${escapeHTML(src.url)}">${escapeHTML(src.url)}</code>` : `<span class="muted">${escapeHTML(t('providerSources.defaultBucketSource'))}</span>`}
+                      ${src.updated ? `<span class="muted">${escapeHTML(t('providerSources.updatedLabel', { value: src.updated }))}</span>` : ''}
                     </div>
                     <div class="provider-source-actions">${removeBtnHtml}</div>
                   </div>
@@ -122,7 +131,7 @@ export function openProviderSourcesModal(provider) {
         templates.length > 0
           ? `
             <div class="form-field">
-              <span>Schnellvorlagen (per Klick hinzufuegen)</span>
+              <span>${escapeHTML(t('providerSources.templatesLabel'))}</span>
               <div class="provider-source-templates">
                 ${templates
                   .map((tpl, idx) => {
@@ -133,7 +142,7 @@ export function openProviderSourcesModal(provider) {
                         class="btn btn-ghost btn-xs provider-template-btn ${alreadyPresent ? 'is-present' : ''}"
                         data-source-template-idx="${idx}"
                         ${alreadyPresent || isBusy || isLoading ? 'disabled' : ''}
-                        title="${escapeHTML(tpl.description || tpl.url || tpl.name)}"
+                        title="${escapeHTML(getLocalizedSourceTemplateDescription(providerId, tpl))}"
                       >
                         ${alreadyPresent ? '✓' : '+'} ${escapeHTML(tpl.name)}
                       </button>
@@ -145,64 +154,65 @@ export function openProviderSourcesModal(provider) {
           `
           : '';
 
+      const effectiveHint = mode === 'config' ? t('providerSources.configModeHint') : hintText;
       const noticeHtml =
-        hintText || requiresAdmin || mode === 'config'
+        effectiveHint || requiresAdmin || mode === 'config'
           ? `
             <div class="provider-source-hint">
-              ${requiresAdmin ? '<strong>🛡️ Hinweis:</strong> Aenderungen erfordern unter Windows ggf. eine UAC-Admin-Bestaetigung. ' : ''}
-              <span>${escapeHTML(hintText || '')}</span>
+              ${requiresAdmin ? `<strong>🛡️ ${escapeHTML(t('providerSources.adminNoticeTitle'))}</strong> ${escapeHTML(t('providerSources.adminNoticeBody'))} ` : ''}
+              <span>${escapeHTML(effectiveHint || '')}</span>
             </div>
           `
           : '';
 
       dialog.innerHTML = `
         <div class="modal-header">
-          <h2>🌐 Quellen verwalten - ${escapeHTML(providerName)}</h2>
-          <button type="button" class="icon-btn" data-sources-action="close" title="Schliessen" aria-label="Schliessen">✕</button>
+          <h2>🌐 ${escapeHTML(t('providerSources.title', { name: providerName }))}</h2>
+          <button type="button" class="icon-btn" data-sources-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
         </div>
 
         <div class="modal-body provider-sources-body">
           ${noticeHtml}
           <div class="form-field">
-            <span>Aktive Quellen</span>
+            <span>${escapeHTML(t('providerSources.activeSourcesLabel'))}</span>
             ${listHtml}
           </div>
 
           ${templatesHtml}
 
           <div class="provider-source-form">
-            <h4>Eigene Quelle hinzufuegen</h4>
+            <h4>${escapeHTML(t('providerSources.addFormTitle'))}</h4>
             <div class="form-grid-2">
               <label class="form-field">
-                <span>Name</span>
-                <input type="text" id="srcAddName" placeholder="${isScoop ? 'z. B. mein-bucket' : 'z. B. firma-feed'}" ${isBusy ? 'disabled' : ''}>
+                <span>${escapeHTML(t('providerSources.nameLabel'))}</span>
+                <input type="text" id="srcAddName" placeholder="${escapeHTML(isScoop ? t('providerSources.namePlaceholderScoop') : t('providerSources.namePlaceholderGeneric'))}" ${isBusy ? 'disabled' : ''}>
               </label>
               <label class="form-field">
-                <span>${isScoop ? 'Repository-URL (optional)' : 'Quellen-URL'}</span>
-                <input type="url" id="srcAddUrl" placeholder="${isScoop ? 'https://github.com/user/scoop-bucket' : 'https://...'}" ${isBusy ? 'disabled' : ''}>
+                <span>${escapeHTML(isScoop ? t('providerSources.urlLabelScoop') : t('providerSources.urlLabelGeneric'))}</span>
+                <input type="url" id="srcAddUrl" placeholder="${escapeHTML(isScoop ? t('providerSources.urlPlaceholderScoop') : t('providerSources.urlPlaceholderGeneric'))}" ${isBusy ? 'disabled' : ''}>
               </label>
             </div>
             ${
               isWinget
                 ? `
                   <label class="form-field">
-                    <span>Typ (optional, fuer Winget)</span>
-                    <input type="text" id="srcAddType" placeholder="z. B. Microsoft.PreIndexed.Package oder Microsoft.Rest" ${isBusy ? 'disabled' : ''}>
+                    <span>${escapeHTML(t('providerSources.typeLabel'))}</span>
+                    <input type="text" id="srcAddType" placeholder="${escapeHTML(t('providerSources.typePlaceholder'))}" ${isBusy ? 'disabled' : ''}>
                   </label>
                 `
                 : ''
             }
             <div class="provider-source-form-actions">
               <button type="button" class="btn btn-primary" data-sources-action="add" ${isBusy || isLoading ? 'disabled' : ''}>
-                ${isBusy ? '⏳ Arbeite...' : '➕ Quelle hinzufuegen'}
+                ${isBusy ? `⏳ ${escapeHTML(t('common.working'))}` : `➕ ${escapeHTML(t('providerSources.addBtn'))}`}
               </button>
             </div>
           </div>
         </div>
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-ghost" data-sources-action="refresh" ${isBusy || isLoading ? 'disabled' : ''}>🔄 Aktualisieren</button>
-          <button type="button" class="btn btn-primary" data-sources-action="close">Schliessen</button>
+          <button type="button" class="btn btn-ghost" data-sources-action="refresh" ${isBusy || isLoading ? 'disabled' : ''}>🔄 ${escapeHTML(t('common.refresh'))}</button>
+          <button type="button" class="btn btn-primary" data-sources-action="close">${escapeHTML(t('common.close'))}</button>
         </div>
       `;
     };
@@ -221,7 +231,7 @@ export function openProviderSourcesModal(provider) {
           requiresAdmin = Boolean(res?.requiresAdmin);
           mode = res?.mode || 'cli';
           hintText = res?.hint || '';
-          loadError = res?.error || 'Quellen konnten nicht geladen werden.';
+          loadError = res?.error || t('providerSources.loadFailed');
         } else {
           sources = Array.isArray(res.sources) ? res.sources : [];
           templates = Array.isArray(res.templates) ? res.templates : [];
@@ -233,7 +243,7 @@ export function openProviderSourcesModal(provider) {
       } catch (err) {
         if (settled) return;
         isLoading = false;
-        loadError = err?.message || 'Fehler beim Laden der Quellen.';
+        loadError = err?.message || t('providerSources.loadError');
       }
       render();
     };
@@ -247,22 +257,22 @@ export function openProviderSourcesModal(provider) {
         if (settled) return;
         isBusy = false;
         if (res?.canceled) {
-          showToast('Vorgang abgebrochen.', { type: 'info' });
+          showToast(t('common.operationCanceled'), { type: 'info' });
           render();
           return;
         }
         if (!res?.success) {
-          showToast(res?.error || 'Quelle konnte nicht hinzugefuegt werden.', { type: 'error', duration: 6000 });
+          showToast(res?.error || t('providerSources.addFailed'), { type: 'error', duration: 6000 });
           render();
           return;
         }
         hasChanged = true;
-        showToast(`Quelle "${name}" hinzugefuegt.`, { type: 'success' });
+        showToast(t('providerSources.addedToast', { name }), { type: 'success' });
         await loadSources();
       } catch (err) {
         if (settled) return;
         isBusy = false;
-        showToast(err?.message || 'Fehler beim Hinzufuegen.', { type: 'error', duration: 6000 });
+        showToast(err?.message || t('providerSources.addError'), { type: 'error', duration: 6000 });
         render();
       }
     };
@@ -314,12 +324,12 @@ export function openProviderSourcesModal(provider) {
 
         if (removeBtn.dataset.armed !== 'true') {
           removeBtn.dataset.armed = 'true';
-          removeBtn.dataset.origText = removeBtn.textContent || '🗑️ Entfernen';
-          removeBtn.textContent = '⚠️ Wirklich entfernen?';
+          removeBtn.dataset.origText = removeBtn.textContent || `🗑️ ${t('common.remove')}`;
+          removeBtn.textContent = `⚠️ ${t('common.confirmRemoveArmed')}`;
           setTimeout(() => {
             if (removeBtn.isConnected && removeBtn.dataset.armed === 'true') {
               removeBtn.dataset.armed = 'false';
-              removeBtn.textContent = removeBtn.dataset.origText || '🗑️ Entfernen';
+              removeBtn.textContent = removeBtn.dataset.origText || `🗑️ ${t('common.remove')}`;
             }
           }, 4000);
           return;
@@ -333,22 +343,22 @@ export function openProviderSourcesModal(provider) {
           if (settled) return;
           isBusy = false;
           if (res?.canceled) {
-            showToast('Vorgang abgebrochen.', { type: 'info' });
+            showToast(t('common.operationCanceled'), { type: 'info' });
             render();
             return;
           }
           if (!res?.success) {
-            showToast(res?.error || 'Quelle konnte nicht entfernt werden.', { type: 'error', duration: 6000 });
+            showToast(res?.error || t('providerSources.removeFailed'), { type: 'error', duration: 6000 });
             render();
             return;
           }
           hasChanged = true;
-          showToast(`Quelle "${sourceName}" entfernt.`, { type: 'info' });
+          showToast(t('providerSources.removedToast', { name: sourceName }), { type: 'info' });
           await loadSources();
         } catch (err) {
           if (settled) return;
           isBusy = false;
-          showToast(err?.message || 'Fehler beim Entfernen.', { type: 'error', duration: 6000 });
+          showToast(err?.message || t('providerSources.removeError'), { type: 'error', duration: 6000 });
           render();
         }
         return;
@@ -371,11 +381,11 @@ export function openProviderSourcesModal(provider) {
         const type = typeEl instanceof HTMLInputElement ? typeEl.value.trim() : '';
 
         if (!name) {
-          showToast('Bitte einen Quellennamen angeben.', { type: 'warn' });
+          showToast(t('providerSources.missingNameToast'), { type: 'warn' });
           return;
         }
         if (!isScoop && !url) {
-          showToast('Bitte eine gueltige URL angeben.', { type: 'warn' });
+          showToast(t('providerSources.missingUrlToast'), { type: 'warn' });
           return;
         }
         await executeAdd({ name, url, type });

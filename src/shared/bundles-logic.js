@@ -341,10 +341,26 @@ export function resolveImportedBundleId(importedId, existingIds, generateId) {
   return candidate;
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
  * Liefert alle sichtbaren Archiv-Programme für den Bündel-Editor (ohne 20er-Limit).
+ * @param {Array<Record<string, any>>} [catalog]
+ * @param {{ query?: string, visibleHiddenCats?: string[], locale?: string }} [options]
  */
-export function getBundleEditorArchiveCandidates(catalog = [], { query = '', visibleHiddenCats = [] } = {}) {
+export function getBundleEditorArchiveCandidates(
+  catalog = [],
+  { query = '', visibleHiddenCats = [], locale = 'de' } = {}
+) {
+  const effectiveLocale = locale || 'de';
   const q = String(query || '').trim();
   const scored = [];
 
@@ -359,7 +375,7 @@ export function getBundleEditorArchiveCandidates(catalog = [], { query = '', vis
   scored.sort(
     (a, b) =>
       b.score - a.score ||
-      String(a.item.name || '').localeCompare(String(b.item.name || ''), 'de', { sensitivity: 'base' })
+      String(a.item.name || '').localeCompare(String(b.item.name || ''), effectiveLocale, { sensitivity: 'base' })
   );
 
   return scored.map(({ item }) => {
@@ -387,8 +403,14 @@ export function getBundleEditorArchiveCandidates(catalog = [], { query = '', vis
 
 /**
  * Liefert bekannte & installierte Pakete eines Paketmanagers (z. B. Winget) zur Sofortauswahl.
+ * @param {Array<Record<string, any>>} [packages]
+ * @param {{ providerId?: string, query?: string, t?: (key: string, params?: Record<string, unknown>) => string, locale?: string }} [options]
  */
-export function getKnownProviderPackages(packages = [], { providerId = 'winget', query = '' } = {}) {
+export function getKnownProviderPackages(
+  packages = [],
+  { providerId = 'winget', query = '', t = undefined, locale = 'de' } = {}
+) {
+  const effectiveLocale = locale || 'de';
   const targetPm = String(providerId || 'winget')
     .trim()
     .toLowerCase();
@@ -440,7 +462,7 @@ export function getKnownProviderPackages(packages = [], { providerId = 'winget',
 
   filtered.sort((a, b) => {
     if (a.isInstalled !== b.isInstalled) return Number(b.isInstalled) - Number(a.isInstalled);
-    return a.name.localeCompare(b.name, 'de', { sensitivity: 'base' });
+    return a.name.localeCompare(b.name, effectiveLocale, { sensitivity: 'base' });
   });
 
   return filtered.map((entry) => ({
@@ -451,7 +473,11 @@ export function getKnownProviderPackages(packages = [], { providerId = 'winget',
     version: entry.version,
     isInstalled: entry.isInstalled,
     inArchive: entry.inArchive,
-    shortDescription: entry.publisher || (entry.isInstalled ? 'Auf diesem PC installiert' : 'Aus Archiv bekannt'),
+    shortDescription:
+      entry.publisher ||
+      (entry.isInstalled
+        ? tr(t, 'bundleEditor.knownInstalled', {}, 'Auf diesem PC installiert')
+        : tr(t, 'bundleEditor.knownArchive', {}, 'Aus Archiv bekannt')),
     editorItem: {
       source: targetPm,
       refId: '',
@@ -569,7 +595,12 @@ function findMatchingPackageForBundleItem(item, packages = []) {
   return matches.find((p) => p.inArchive && p.isInstalled) || matches.find((p) => p.isInstalled) || matches[0];
 }
 
-export function evaluateBundleItemStatus(item, packages = [], { versionCompareDepth = 3 } = {}) {
+/**
+ * @param {Record<string, any>} item
+ * @param {Array<Record<string, any>>} [packages]
+ * @param {{ versionCompareDepth?: number, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
+ */
+export function evaluateBundleItemStatus(item, packages = [], { versionCompareDepth = 3, t = undefined } = {}) {
   const rawSrc = String(item?.source || '')
     .trim()
     .toLowerCase();
@@ -615,15 +646,15 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
 
   let status = 'missing';
   let action = 'install';
-  let statusLabel = '⬇️ Fehlt - installieren';
+  let statusLabel = `⬇️ ${tr(t, 'bundles.statusMissing', {}, 'Fehlt - installieren')}`;
   if (isInstalled && isOutdated) {
     status = 'outdated';
     action = 'update';
-    statusLabel = '⬆️ Veraltet - aktualisieren';
+    statusLabel = `⬆️ ${tr(t, 'bundles.statusOutdated', {}, 'Veraltet - aktualisieren')}`;
   } else if (isInstalled) {
     status = 'up-to-date';
     action = 'skip';
-    statusLabel = '✅ Bereits aktuell - überspringen';
+    statusLabel = `✅ ${tr(t, 'bundles.statusUpToDate', {}, 'Bereits aktuell - überspringen')}`;
   }
 
   const installMode = normalizeInstallMode(matchedPackage?.installMode);
@@ -634,12 +665,15 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
     fileName: primaryFileName,
     packageId: normalizedItem.packageId || matchedPackage?.packageId || matchedPackage?.wingetId || '',
     publisher: matchedPackage?.publisher || '',
+    t,
   });
 
   const adwareProtected = installMode === 'interactive-required' || adwareSignal.flagged;
   const adwareReason =
     adwareSignal.reason ||
-    (installMode === 'interactive-required' ? 'Als Immer Interaktiv (Adware-Schutz) markiert.' : '');
+    (installMode === 'interactive-required'
+      ? tr(t, 'bundles.adwareMarkedReason', {}, 'Als Immer Interaktiv (Adware-Schutz) markiert.')
+      : '');
 
   const canRunArchiveSilent =
     normalizedItem.source === 'archive' && !adwareProtected && installMode === 'silent' && silentArgs.length > 0;
@@ -690,9 +724,13 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
   };
 }
 
-export function evaluateBundleStatus(bundle, { packages = [], versionCompareDepth = 3 } = {}) {
+/**
+ * @param {Record<string, any>} bundle
+ * @param {{ packages?: Array<Record<string, any>>, versionCompareDepth?: number, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
+ */
+export function evaluateBundleStatus(bundle, { packages = [], versionCompareDepth = 3, t = undefined } = {}) {
   const items = sortBundleItems(bundle?.items || []).map((item) =>
-    evaluateBundleItemStatus(item, packages, { versionCompareDepth })
+    evaluateBundleItemStatus(item, packages, { versionCompareDepth, t })
   );
 
   let installedCount = 0;
@@ -713,7 +751,15 @@ export function evaluateBundleStatus(bundle, { packages = [], versionCompareDept
   }
 
   const total = items.length;
-  const statusText = total === 0 ? 'Noch keine Pakete' : `${installedCount} von ${total} bereits installiert`;
+  const statusText =
+    total === 0
+      ? tr(t, 'bundles.noPackagesYet', {}, 'Noch keine Pakete')
+      : tr(
+          t,
+          'bundles.installedOfTotal',
+          { installed: installedCount, total },
+          `${installedCount} von ${total} bereits installiert`
+        );
 
   return {
     items,
@@ -730,7 +776,14 @@ export function evaluateBundleStatus(bundle, { packages = [], versionCompareDept
   };
 }
 
-export function planBundleExecution(evaluatedItems = [], { allowSilent = true, silentWinget = false } = {}) {
+/**
+ * @param {Array<Record<string, any>>} [evaluatedItems]
+ * @param {{ allowSilent?: boolean, silentWinget?: boolean, t?: (key: string, params?: Record<string, unknown>) => string }} [options]
+ */
+export function planBundleExecution(
+  evaluatedItems = [],
+  { allowSilent = true, silentWinget = false, t = undefined } = {}
+) {
   const ordered = [...(evaluatedItems || [])].sort((a, b) => (Number(a?.order) || 0) - (Number(b?.order) || 0));
 
   const silentItems = [];
@@ -770,12 +823,27 @@ export function planBundleExecution(evaluatedItems = [], { allowSilent = true, s
   if (interactiveCount > 0) {
     const protectedSuffix =
       adwareProtectedCount > 0
-        ? ` (davon ${adwareProtectedCount} mit 🛡️ Adware-Schutz - Silent-Parameter werden ignoriert)`
+        ? tr(
+            t,
+            'bundleRunner.noticeProtectedSuffix',
+            { count: adwareProtectedCount },
+            ` (davon ${adwareProtectedCount} mit 🛡️ Adware-Schutz - Silent-Parameter werden ignoriert)`
+          )
         : '';
     interactiveNotice =
       silentCount > 0
-        ? `Nach ${silentCount} stillen Paket(en) folgen am Ende ${interactiveCount} interaktive Setup(s)${protectedSuffix}.`
-        : `${interactiveCount} Paket(e) werden interaktiv installiert${protectedSuffix}.`;
+        ? tr(
+            t,
+            'bundleRunner.noticeMixed',
+            { silentCount, interactiveCount, suffix: protectedSuffix },
+            `Nach ${silentCount} stillen Paket(en) folgen am Ende ${interactiveCount} interaktive Setup(s)${protectedSuffix}.`
+          )
+        : tr(
+            t,
+            'bundleRunner.noticeInteractiveOnly',
+            { interactiveCount, suffix: protectedSuffix },
+            `${interactiveCount} Paket(e) werden interaktiv installiert${protectedSuffix}.`
+          );
   }
 
   return {
@@ -792,7 +860,14 @@ export function planBundleExecution(evaluatedItems = [], { allowSilent = true, s
   };
 }
 
-export function buildBundleDraftFromInstalled(packages = [], { name = '', description = '', icon = '💻' } = {}) {
+/**
+ * @param {Array<Record<string, any>>} [packages]
+ * @param {{ name?: string, description?: string, icon?: string, t?: (key: string, params?: Record<string, unknown>) => string, locale?: string }} [options]
+ */
+export function buildBundleDraftFromInstalled(
+  packages = [],
+  { name = '', description = '', icon = '💻', t = undefined, locale = 'de-DE' } = {}
+) {
   const seenKeys = new Set();
   const seenProviderKeys = new Set();
   const rawItems = [];
@@ -855,14 +930,22 @@ export function buildBundleDraftFromInstalled(packages = [], { name = '', descri
     excludedCount++;
   }
 
-  rawItems.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
+  const effectiveLocale = locale || 'de-DE';
+  rawItems.sort((a, b) => a.name.localeCompare(b.name, effectiveLocale, { sensitivity: 'base' }));
   const items = rawItems.map((item, idx) => ({ ...item, order: idx + 1 }));
 
-  const dateStr = new Date().toLocaleDateString('de-DE');
-  const resolvedName = String(name || '').trim() || `PC-Snapshot (${dateStr})`;
+  const dateStr = new Date().toLocaleDateString(effectiveLocale);
+  const resolvedName =
+    String(name || '').trim() ||
+    tr(t, 'bundleEditor.snapshotDefaultName', { date: dateStr }, `PC-Snapshot (${dateStr})`);
   const resolvedDesc =
     String(description || '').trim() ||
-    'Automatischer Snapshot der installierten Programme dieses PCs (Archiv & Paketmanager).';
+    tr(
+      t,
+      'bundleEditor.snapshotDefaultDesc',
+      {},
+      'Automatischer Snapshot der installierten Programme dieses PCs (Archiv & Paketmanager).'
+    );
 
   return {
     draft: {

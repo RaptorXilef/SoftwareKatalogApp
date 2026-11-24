@@ -303,6 +303,7 @@ export function createI18n(initialState = {}) {
 export const i18n = createI18n();
 
 export const t = (key, params = {}) => i18n.t(key, params);
+export const hasI18nKey = (key) => i18n.hasKey(key);
 export const setI18nState = (nextState) => i18n.setState(nextState);
 export const getI18nLocale = () => i18n.getLocale();
 export const getConfiguredLanguage = () => i18n.getConfiguredLanguage();

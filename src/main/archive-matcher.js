@@ -6,6 +6,7 @@ import {
   getUnmatchedArchiveItems,
   matchArchiveWithInstalledWinget,
 } from '../shared/archive-matcher-logic.js';
+import { getI18nLocale } from '../shared/i18n.js';
 import { mergeInstalledSoftware } from '../shared/installed-merger.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { isInsideTargetDir } from './config.js';
@@ -75,10 +76,11 @@ function buildInstalledWingetPool(wingetExports, registryEntries, catalogItems) 
 
 function sortChecklistEntries(entries) {
   const stageOrder = { installed: 0, search: 1, none: 2 };
+  const locale = getI18nLocale() || 'en';
   return [...entries].sort((a, b) => {
     const diff = (stageOrder[a.stage] ?? 9) - (stageOrder[b.stage] ?? 9);
     if (diff !== 0) return diff;
-    return String(a.itemName || '').localeCompare(String(b.itemName || ''), 'de', { sensitivity: 'base' });
+    return String(a.itemName || '').localeCompare(String(b.itemName || ''), locale, { sensitivity: 'base' });
   });
 }
 
@@ -172,7 +174,7 @@ export async function runWingetMatcherScan({ includeStage2 = true } = {}) {
 
           if (job.signal.aborted) break;
 
-          stage2Entries.push(buildStage2Entry(item, searchResults, { query }));
+          stage2Entries.push(buildStage2Entry(item, searchResults, { query, locale: getI18nLocale() || 'en' }));
           processed++;
           const pct = 25 + (processed / remaining.length) * 73;
           job.update(pct, `Stufe 2: Suche "${query || item.name}" (${processed}/${remaining.length})...`);
@@ -185,8 +187,9 @@ export async function runWingetMatcherScan({ includeStage2 = true } = {}) {
 
       await Promise.all(Array.from({ length: Math.min(concurrency, remaining.length) }, () => worker()));
     } else if (!includeStage2) {
+      const locale = getI18nLocale() || 'en';
       for (const item of remaining) {
-        stage2Entries.push(buildStage2Entry(item, [], { query: buildWingetSearchQuery(item) }));
+        stage2Entries.push(buildStage2Entry(item, [], { query: buildWingetSearchQuery(item), locale }));
       }
     }
 

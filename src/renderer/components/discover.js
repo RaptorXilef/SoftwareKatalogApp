@@ -1,8 +1,14 @@
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { openNestedDialog, pickArchiveTargetFolder } from '../modals/archive-target-modal.js';
 import { evaluateItemPolicy, isProviderUsable, state } from '../state.js';
 import { closestButton, closestEl, qsInput } from '../utils/dom.js';
+import {
+  getLocalizedPolicyError,
+  getLocalizedProviderBadge,
+  getLocalizedProviderDescription,
+  getLocalizedProviderName,
+  t,
+} from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
 
@@ -93,24 +99,25 @@ function renderSourceChips() {
 
   const searchable = getSearchableProviders();
   if (searchable.length === 0) {
-    container.innerHTML =
-      '<span class="muted">Keine aktiven &amp; installierten Quellen verfügbar (in den Einstellungen aktivieren/installieren).</span>';
+    container.innerHTML = `<span class="muted">${escapeHTML(t('discover.noUsableSources'))}</span>`;
     return;
   }
 
   container.innerHTML = searchable
     .map((p) => {
       const active = state.discoverSelectedProviders.includes(p.id);
+      const provName = getLocalizedProviderName(p);
+      const provDesc = getLocalizedProviderDescription(p) || provName;
       return `
         <button
           type="button"
           class="source-chip ${active ? 'active' : ''}"
           data-discover-provider="${escapeHTML(p.id)}"
           aria-pressed="${active ? 'true' : 'false'}"
-          title="${escapeHTML(p.description || p.name)}"
+          title="${escapeHTML(provDesc)}"
         >
           <span>${active ? '✓' : '+'}</span>
-          <span>${escapeHTML(p.name)}</span>
+          <span>${escapeHTML(provName)}</span>
         </button>
       `;
     })
@@ -134,22 +141,22 @@ function renderLocalActions() {
 
   container.hidden = false;
   container.innerHTML = `
-    <span class="discover-sources-label">Lokale Pakete:</span>
+    <span class="discover-sources-label">${escapeHTML(t('discover.localPackagesLabel'))}</span>
     <button type="button" class="btn btn-local btn-xs" id="btnInstallLocalMsi">
-      📦 Lokale .msi-Datei installieren
+      📦 ${escapeHTML(t('discover.installLocalMsiButton'))}
     </button>
   `;
 }
 
 async function runLocalMsiWizard({ onReload }) {
   const filePath = await window.electronAPI.selectFile(
-    [{ name: 'Windows Installer (*.msi)', extensions: ['msi'] }],
+    [{ name: t('discover.msiPickerFilter'), extensions: ['msi'] }],
     true
   );
   if (!filePath) return;
 
   const meta = await window.electronAPI.inspectMsiFile(filePath);
-  const pkgName = meta?.name || filePath.split(/[\\/]/).pop() || 'MSI-Paket';
+  const pkgName = meta?.name || filePath.split(/[\\/]/).pop() || t('discover.msiDefaultName');
   const pkgVer = meta?.version || '';
   const pkgPublisher = meta?.publisher || '';
   const productCode = meta?.productCode || '';
@@ -165,7 +172,7 @@ async function runLocalMsiWizard({ onReload }) {
     'install'
   );
   if (!msiPolicy.allowed) {
-    showToast(msiPolicy.error || 'MSI-Installation durch Zugriffsrichtlinie blockiert.', {
+    showToast(getLocalizedPolicyError(msiPolicy, 'discover.msiPolicyBlocked'), {
       type: 'error',
       duration: 6000,
     });
@@ -178,8 +185,8 @@ async function runLocalMsiWizard({ onReload }) {
           <label class="radio-card">
             <input type="radio" name="msiInstallMode" value="silent" checked>
             <div>
-              <strong>⚡ Silent (<code>/qn /norestart</code>) · 🔒 Richtlinie: Nur Silent</strong>
-              <p>Zugriffsrichtlinie erzwingt die stille Hintergrundinstallation.</p>
+              <strong>⚡ ${escapeHTML(t('discover.msiModeSilentOnlyTitle'))}</strong>
+              <p>${escapeHTML(t('discover.msiModeSilentOnlyDesc'))}</p>
             </div>
           </label>
         </div>
@@ -189,15 +196,15 @@ async function runLocalMsiWizard({ onReload }) {
           <label class="radio-card">
             <input type="radio" name="msiInstallMode" value="interactive" checked>
             <div>
-              <strong>🖱️ Interaktiv (Standard)</strong>
-              <p>Startet den Windows-Installer-Assistenten mit sichtbaren Dialogen.</p>
+              <strong>🖱️ ${escapeHTML(t('discover.msiModeInteractiveTitle'))}</strong>
+              <p>${escapeHTML(t('discover.msiModeInteractiveDesc'))}</p>
             </div>
           </label>
           <label class="radio-card">
             <input type="radio" name="msiInstallMode" value="silent">
             <div>
-              <strong>⚡ Silent (<code>/qn /norestart</code>)</strong>
-              <p>Installiert im Hintergrund ohne Rückfragen (Opt-in).</p>
+              <strong>⚡ ${escapeHTML(t('discover.msiModeSilentTitle'))}</strong>
+              <p>${escapeHTML(t('discover.msiModeSilentDesc'))}</p>
             </div>
           </label>
         </div>
@@ -207,32 +214,32 @@ async function runLocalMsiWizard({ onReload }) {
     defaultAction: 'cancel',
     html: `
       <div class="modal-header">
-        <h2>📦 Lokale .msi-Datei installieren</h2>
-        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <h2>📦 ${escapeHTML(t('discover.msiModalTitle'))}</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
 
       <div class="modal-body collision-warning-body">
         <div class="collision-meta-card">
-          <div class="tech-row"><span>Paketname</span><strong>${escapeHTML(pkgName)}</strong></div>
-          ${pkgVer ? `<div class="tech-row"><span>Version</span><code>v${escapeHTML(pkgVer)}</code></div>` : ''}
-          ${pkgPublisher ? `<div class="tech-row"><span>Herausgeber</span><span>${escapeHTML(pkgPublisher)}</span></div>` : ''}
-          ${productCode ? `<div class="tech-row"><span>ProductCode</span><code>${escapeHTML(productCode)}</code></div>` : ''}
-          <div class="tech-row"><span>Datei</span><code>${escapeHTML(filePath)}</code></div>
+          <div class="tech-row"><span>${escapeHTML(t('discover.msiFieldPackageName'))}</span><strong>${escapeHTML(pkgName)}</strong></div>
+          ${pkgVer ? `<div class="tech-row"><span>${escapeHTML(t('discover.msiFieldVersion'))}</span><code>v${escapeHTML(pkgVer)}</code></div>` : ''}
+          ${pkgPublisher ? `<div class="tech-row"><span>${escapeHTML(t('discover.msiFieldPublisher'))}</span><span>${escapeHTML(pkgPublisher)}</span></div>` : ''}
+          ${productCode ? `<div class="tech-row"><span>${escapeHTML(t('discover.msiFieldProductCode'))}</span><code>${escapeHTML(productCode)}</code></div>` : ''}
+          <div class="tech-row"><span>${escapeHTML(t('discover.msiFieldFile'))}</span><code>${escapeHTML(filePath)}</code></div>
         </div>
 
         ${msiModeOptionsHtml}
 
         <label class="check-row">
           <input type="checkbox" id="chkMsiSaveToArchive">
-          <span>🗄️ .msi-Datei nach erfolgreicher Installation zusätzlich im Archiv ablegen</span>
+          <span>🗄️ ${escapeHTML(t('discover.msiSaveToArchiveLabel'))}</span>
         </label>
       </div>
 
       <div class="modal-footer">
         <span></span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
-          <button type="button" class="btn btn-primary" data-dialog-action="install">▶️ Installieren</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="install">▶️ ${escapeHTML(t('common.install'))}</button>
         </div>
       </div>
     `,
@@ -260,7 +267,7 @@ async function runLocalMsiWizard({ onReload }) {
     collisionMode = picked.collisionMode;
   }
 
-  showToast(`Starte MSI-Installation für ${pkgName}...`, { type: 'info' });
+  showToast(t('discover.msiStarting', { name: pkgName }), { type: 'info' });
   const res = await window.electronAPI.installLocalMsi({
     filePath,
     silent: choice.silent,
@@ -271,20 +278,26 @@ async function runLocalMsiWizard({ onReload }) {
   });
 
   if (res?.alreadyRunning) {
-    showToast('Für diese .msi-Datei läuft bereits eine Installation.', { type: 'warn' });
+    showToast(t('discover.msiAlreadyRunning'), { type: 'warn' });
   } else if (res?.canceled) {
-    showToast('MSI-Installation wurde abgebrochen.', { type: 'info' });
+    showToast(t('discover.msiCanceled'), { type: 'info' });
   } else if (res?.success) {
     await onReload?.({ rescanInstalled: true });
     if (choice.saveToArchive && res.archived) {
-      showToast(`${pkgName} installiert und im Archiv gespeichert!`, { type: 'success' });
+      showToast(t('discover.msiInstalledAndArchived', { name: pkgName }), { type: 'success' });
     } else if (choice.saveToArchive && res.archiveError) {
-      showToast(`${pkgName} installiert (Archiv-Fehler: ${res.archiveError})`, { type: 'warn', duration: 6000 });
+      showToast(t('discover.msiInstalledArchiveError', { name: pkgName, error: res.archiveError }), {
+        type: 'warn',
+        duration: 6000,
+      });
     } else {
-      showToast(`${pkgName} erfolgreich installiert!`, { type: 'success' });
+      showToast(t('discover.msiInstalled', { name: pkgName }), { type: 'success' });
     }
   } else {
-    showToast(`MSI-Installationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+    showToast(t('discover.msiFailed', { error: res?.error || t('common.unknownError') }), {
+      type: 'error',
+      duration: 6000,
+    });
   }
 }
 
@@ -313,8 +326,8 @@ function renderResults() {
   if (state.discoverLoading) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>⏳ Durchsuche ausgewählte Quellen...</h3>
-        <p>Bitte einen Moment Geduld.</p>
+        <h3>⏳ ${escapeHTML(t('discover.searchingTitle'))}</h3>
+        <p>${escapeHTML(t('discover.searchingDesc'))}</p>
       </div>
     `;
     return;
@@ -323,8 +336,8 @@ function renderResults() {
   if (!state.discoverHasSearched) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>Neue Software entdecken & installieren</h3>
-        <p>Gib oben einen Programmnamen oder eine Paket-ID ein und wähle die gewünschten Quellen (z. B. Winget oder Archiv).</p>
+        <h3>${escapeHTML(t('discover.emptyTitle'))}</h3>
+        <p>${escapeHTML(t('discover.emptyDesc'))}</p>
       </div>
     `;
     return;
@@ -341,12 +354,10 @@ function renderResults() {
   if (visibleEntries.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
-        <h3>${state.discoverResults.length > 0 ? 'Treffer durch Zugriffsrichtlinie ausgeblendet' : 'Keine Pakete gefunden'}</h3>
-        <p>${
-          state.discoverResults.length > 0
-            ? 'Die gefundenen Pakete sind fuer Endnutzer durch die aktive Whitelist/Blacklist ausgeblendet.'
-            : 'Prüfe den Suchbegriff oder aktiviere weitere Quellen.'
-        }</p>
+        <h3>${escapeHTML(state.discoverResults.length > 0 ? t('discover.hiddenByPolicyTitle') : t('discover.noResultsTitle'))}</h3>
+        <p>${escapeHTML(
+          state.discoverResults.length > 0 ? t('discover.hiddenByPolicyDesc') : t('discover.noResultsDesc')
+        )}</p>
       </div>
     `;
     return;
@@ -355,8 +366,9 @@ function renderResults() {
   container.innerHTML = visibleEntries
     .map(({ pkg, idx, policy }) => {
       const providerId = pkg.providerId || pkg.packageManager || 'winget';
-      const badgeInfo = getProviderBadgeInfo(providerId, state.providers);
-      const providerLabel = pkg.providerName || badgeInfo?.label || providerId;
+      const badgeInfo = getLocalizedProviderBadge(providerId, state.providers);
+      const providerLabel =
+        providerId === 'archive' ? t('providers.names.archive') : pkg.providerName || badgeInfo?.label || providerId;
       const badgeClass = badgeInfo?.badgeClass || '';
       const isArchiveSource = providerId === 'archive';
       const archiveMatch = findMatchingArchivePackage(pkg);
@@ -366,16 +378,20 @@ function renderResults() {
       const canLinkToArchive = !isArchiveSource && !archiveMatch && Boolean(pkg.packageId || pkg.id);
 
       const archiveActionHtml = archiveMatch
-        ? `<button type="button" class="btn btn-ghost" data-discover-action="open-archive" data-archive-id="${escapeHTML(archiveMatch.id)}">📂 Im Archiv öffnen</button>`
+        ? `<button type="button" class="btn btn-ghost" data-discover-action="open-archive" data-archive-id="${escapeHTML(archiveMatch.id)}">📂 ${escapeHTML(t('discover.openInArchive'))}</button>`
         : canLinkToArchive
-          ? `<button type="button" class="btn btn-archive" data-discover-action="link-archive" data-result-idx="${idx}">${canDownloadToArchive ? '🗄️ Ins Archiv laden' : '📥 Ins Archiv aufnehmen'}</button>`
+          ? `<button type="button" class="btn btn-archive" data-discover-action="link-archive" data-result-idx="${idx}">${
+              canDownloadToArchive
+                ? `🗄️ ${escapeHTML(t('discover.downloadToArchive'))}`
+                : `📥 ${escapeHTML(t('discover.addToArchive'))}`
+            }</button>`
           : '';
 
       const installBtnHtml = policy.adwareConflict
-        ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" disabled title="${escapeHTML(policy.error)}">🚫 Blockiert (Adware-Schutz)</button>`
+        ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" disabled title="${escapeHTML(getLocalizedPolicyError(policy, 'discover.policyBlocked'))}">🚫 ${escapeHTML(t('discover.blockedAdware'))}</button>`
         : policy.silentOnly
-          ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" title="Zugriffsrichtlinie erzwingt stille Installation">⚡ Silent installieren</button>`
-          : `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}">⬇️ Installieren</button>`;
+          ? `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}" title="${escapeHTML(t('discover.installSilentTitle'))}">⚡ ${escapeHTML(t('discover.installSilent'))}</button>`
+          : `<button type="button" class="btn btn-primary" data-discover-action="install" data-result-idx="${idx}">⬇️ ${escapeHTML(t('common.install'))}</button>`;
 
       return `
         <article class="discover-card">
@@ -384,17 +400,17 @@ function renderResults() {
               <strong>${escapeHTML(pkg.name || pkg.packageId)}</strong>
               <span class="provider-badge ${escapeHTML(badgeClass)}">${escapeHTML(providerLabel)}</span>
               ${pkg.version ? `<span class="card-chip">v${escapeHTML(pkg.version)}</span>` : ''}
-              ${archiveMatch && !isArchiveSource ? '<span class="discover-status-badge">Im Archiv</span>' : ''}
-              ${isInstalled ? '<span class="discover-status-badge">Installiert</span>' : ''}
+              ${archiveMatch && !isArchiveSource ? `<span class="discover-status-badge">${escapeHTML(t('discover.badgeInArchive'))}</span>` : ''}
+              ${isInstalled ? `<span class="discover-status-badge">${escapeHTML(t('discover.badgeInstalled'))}</span>` : ''}
             </div>
             <div class="discover-card-meta">
               <code>${escapeHTML(pkg.packageId || pkg.id || '')}</code>
-              ${pkg.source && pkg.source !== providerId ? `<span>Quelle: ${escapeHTML(pkg.source)}</span>` : ''}
+              ${pkg.source && pkg.source !== providerId ? `<span>${escapeHTML(t('discover.sourceMeta', { source: pkg.source }))}</span>` : ''}
             </div>
             ${pkg.shortDescription ? `<p class="discover-card-desc">${escapeHTML(pkg.shortDescription)}</p>` : ''}
           </div>
           <div class="discover-card-actions">
-            <button type="button" class="btn btn-ghost" data-discover-action="details" data-result-idx="${idx}">ℹ️ Details</button>
+            <button type="button" class="btn btn-ghost" data-discover-action="details" data-result-idx="${idx}">ℹ️ ${escapeHTML(t('discover.detailsButton'))}</button>
             ${installBtnHtml}
             ${archiveActionHtml}
           </div>
@@ -433,13 +449,13 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
     state.discoverQuery = query;
 
     if (state.discoverSelectedProviders.length === 0) {
-      showToast('Bitte mindestens eine Quelle auswählen.', { type: 'warn' });
+      showToast(t('discover.selectAtLeastOneSource'), { type: 'warn' });
       return;
     }
 
     const onlyLocalOrNvm = state.discoverSelectedProviders.every((id) => id === 'archive' || id === 'nvm');
     if (!onlyLocalOrNvm && query.length < 2) {
-      showToast('Bitte mindestens 2 Zeichen für die Suche eingeben.', { type: 'info' });
+      showToast(t('discover.minCharsQuery'), { type: 'info' });
       return;
     }
 
@@ -465,7 +481,9 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
       if (reqId !== searchRequestSeq) return;
       state.discoverLoading = false;
       state.discoverResults = [];
-      state.discoverByProvider = { error: { success: false, providerName: 'Suche', error: err.message } };
+      state.discoverByProvider = {
+        error: { success: false, providerName: t('discover.searchProviderFallback'), error: err.message },
+      };
       renderDiscoverView();
     }
   };
@@ -566,7 +584,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
     if (action === 'install') {
       const policyEval = evaluateItemPolicy(toDiscoverPolicyPkg(pkg), 'install');
       if (!policyEval.allowed) {
-        showToast(policyEval.error || 'Installation durch Zugriffsrichtlinie blockiert.', {
+        showToast(getLocalizedPolicyError(policyEval, 'discover.policyBlocked'), {
           type: 'error',
           duration: 6000,
         });
@@ -588,42 +606,46 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
         homepage: pkg.homepage || '',
       };
 
+      const itemName = pkg.name || packageId;
       btn.disabled = true;
       const origText = btn.textContent;
-      btn.textContent = '⏳ Installiere...';
-      showToast(`Starte Installation für ${pkg.name || packageId}...`, { type: 'info' });
+      btn.textContent = `⏳ ${t('discover.installingBtn')}`;
+      showToast(t('discover.installStarting', { name: itemName }), { type: 'info' });
 
       const res = await window.electronAPI.installPackage(providerId, packageId, {
         silent: policyEval.silentOnly,
-        itemName: pkg.name || packageId,
+        itemName,
       });
 
       btn.disabled = false;
       btn.textContent = origText;
 
       if (res?.alreadyRunning) {
-        showToast('Für dieses Paket läuft bereits eine Installation.', { type: 'warn' });
+        showToast(t('discover.installAlreadyRunning'), { type: 'warn' });
       } else if (res?.canceled) {
-        showToast('Installation wurde abgebrochen.', { type: 'info' });
+        showToast(t('discover.installCanceled'), { type: 'info' });
       } else if (res?.success) {
         await onReload?.({ rescanInstalled: true });
         if (canLinkAfterInstall && saveMode === 'auto-id') {
-          showToast(`${pkg.name || packageId} installiert - speichere automatisch im Archiv...`, { type: 'info' });
+          showToast(t('discover.installedAutoArchiving', { name: itemName }), { type: 'info' });
           await onLinkToArchive?.(linkPayload, { mode: 'auto-id', downloadSetup: supportsSetupDl });
         } else if (canLinkAfterInstall && saveMode === 'ask') {
-          showToast(`${pkg.name || packageId} erfolgreich installiert!`, {
+          showToast(t('discover.installedSuccess', { name: itemName }), {
             type: 'success',
             duration: 6000,
             action: {
-              label: '📥 Ins Archiv',
+              label: `📥 ${t('discover.installToArchiveAction')}`,
               onClick: () => onLinkToArchive?.(linkPayload, { mode: 'ask', downloadSetup: supportsSetupDl }),
             },
           });
         } else {
-          showToast(`${pkg.name || packageId} erfolgreich installiert!`, { type: 'success' });
+          showToast(t('discover.installedSuccess', { name: itemName }), { type: 'success' });
         }
       } else {
-        showToast(`Installationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+        showToast(t('discover.installError', { error: res?.error || t('common.unknownError') }), {
+          type: 'error',
+          duration: 6000,
+        });
       }
     }
   });

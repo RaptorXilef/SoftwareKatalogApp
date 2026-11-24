@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { t } from '../shared/i18n.js';
 import { detectAdwareSignals, detectInstallerFromBuffer } from '../shared/installer-logic.js';
 
 const DEFAULT_HEAD_BYTES = 2 * 1024 * 1024;
@@ -60,13 +61,14 @@ export async function detectInstallerFile(filePath, { name = '', packageId = '',
       sample = await readSafeBinarySample(cleanPath);
     }
 
-    const detection = detectInstallerFromBuffer(fileName, sample);
+    const detection = detectInstallerFromBuffer(fileName, sample, { t });
     const adwareWarning = detectAdwareSignals({
       name,
       fileName,
       packageId,
       publisher,
       buffer: sample,
+      t,
     });
 
     return {

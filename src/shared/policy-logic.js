@@ -454,11 +454,22 @@ function findBestMatchingEntry(pkg, entries) {
   return best;
 }
 
+function tr(translateFn, key, params, fallback) {
+  if (typeof translateFn === 'function') {
+    const translated = translateFn(key, params);
+    if (typeof translated === 'string' && translated && translated !== key) {
+      return translated;
+    }
+  }
+  return fallback;
+}
+
 /**
  * @param {Record<string, any> | null | undefined} pkg
  * @param {'update' | 'install' | 'view'} effectiveAction
  * @param {PolicyRuleSet} ruleSet
  * @param {string} ruleSetKey
+ * @param {(key: string, params?: Record<string, unknown>) => string} [t]
  * @returns {{
  *   allowed: boolean,
  *   visible: boolean,
@@ -473,7 +484,7 @@ function findBestMatchingEntry(pkg, entries) {
  *   error: string,
  * }}
  */
-function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
+function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey, t = undefined) {
   const matchedEntry = findBestMatchingEntry(pkg, ruleSet.entries);
 
   if (ruleSet.listType === 'whitelist' && !matchedEntry) {
@@ -488,7 +499,12 @@ function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
       ruleSetKey,
       listType: 'whitelist',
       reason: 'not-in-whitelist',
-      error: 'Durch Zugriffsrichtlinie blockiert: Dieses Programm steht nicht auf der Whitelist.',
+      error: tr(
+        t,
+        'policy.errorNotInWhitelist',
+        {},
+        'Durch Zugriffsrichtlinie blockiert: Dieses Programm steht nicht auf der Whitelist.'
+      ),
     };
   }
 
@@ -504,7 +520,12 @@ function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
       ruleSetKey,
       listType: 'blacklist',
       reason: 'in-blacklist',
-      error: 'Durch Zugriffsrichtlinie blockiert: Dieses Programm steht auf der Blacklist.',
+      error: tr(
+        t,
+        'policy.errorInBlacklist',
+        {},
+        'Durch Zugriffsrichtlinie blockiert: Dieses Programm steht auf der Blacklist.'
+      ),
     };
   }
 
@@ -522,8 +543,12 @@ function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
   const adwareConflict = Boolean(silentOnly && isInteractiveRequired);
 
   if (adwareConflict) {
-    const error =
-      'Ausführung blockiert: Richtlinie erzwingt "Nur Silent", aber dieses Programm ist durch den Adware-Schutz (Immer Interaktiv) geschützt. Eine stille Installation wird aus Sicherheitsgründen verhindert.';
+    const error = tr(
+      t,
+      'policy.errorAdwareConflict',
+      {},
+      'Ausführung blockiert: Richtlinie erzwingt "Nur Silent", aber dieses Programm ist durch den Adware-Schutz (Immer Interaktiv) geschützt. Eine stille Installation wird aus Sicherheitsgründen verhindert.'
+    );
     return {
       allowed: effectiveAction === 'view',
       visible: true,
@@ -560,6 +585,7 @@ function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
  * @param {'update' | 'install' | 'view'} [action]
  * @param {unknown} [policy]
  * @param {boolean} [isAdmin]
+ * @param {{ t?: (key: string, params?: Record<string, unknown>) => string }} [options]
  * @returns {{
  *   allowed: boolean,
  *   visible: boolean,
@@ -574,7 +600,7 @@ function evaluateRuleSet(pkg, effectiveAction, ruleSet, ruleSetKey) {
  *   error: string,
  * }}
  */
-export function evaluatePackagePolicy(pkg, action = 'view', policy = null, isAdmin = false) {
+export function evaluatePackagePolicy(pkg, action = 'view', policy = null, isAdmin = false, { t = undefined } = {}) {
   const normalizedPolicy = normalizeAccessPolicy(policy);
 
   if (!normalizedPolicy.enabled) {
@@ -612,19 +638,19 @@ export function evaluatePackagePolicy(pkg, action = 'view', policy = null, isAdm
   const effectiveAction = action === 'update' || action === 'install' ? action : 'view';
 
   if (normalizedPolicy.scopeMode === 'shared') {
-    return evaluateRuleSet(pkg, effectiveAction, normalizedPolicy.shared, 'shared');
+    return evaluateRuleSet(pkg, effectiveAction, normalizedPolicy.shared, 'shared', t);
   }
 
   if (effectiveAction === 'update') {
-    return evaluateRuleSet(pkg, 'update', normalizedPolicy.updates, 'updates');
+    return evaluateRuleSet(pkg, 'update', normalizedPolicy.updates, 'updates', t);
   }
 
   if (effectiveAction === 'install') {
-    return evaluateRuleSet(pkg, 'install', normalizedPolicy.install, 'install');
+    return evaluateRuleSet(pkg, 'install', normalizedPolicy.install, 'install', t);
   }
 
-  const upd = evaluateRuleSet(pkg, 'update', normalizedPolicy.updates, 'updates');
-  const inst = evaluateRuleSet(pkg, 'install', normalizedPolicy.install, 'install');
+  const upd = evaluateRuleSet(pkg, 'update', normalizedPolicy.updates, 'updates', t);
+  const inst = evaluateRuleSet(pkg, 'install', normalizedPolicy.install, 'install', t);
 
   if (!upd.visible && !inst.visible) {
     return {

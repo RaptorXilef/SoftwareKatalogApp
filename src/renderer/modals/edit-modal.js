@@ -8,17 +8,18 @@ import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js'
 import { showToast } from '../components/toast.js';
 import { getBaseName, getCatalogItemById, getItemById, state } from '../state.js';
 import { closestButton, closestEl, qs, qsa, qsButton, qsInput, qsSelect, qsTextarea } from '../utils/dom.js';
+import { getLocalizedProviderName, t } from '../utils/i18n.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { openDetailModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 function getInstallModeDescription(mode) {
   if (mode === 'silent') {
-    return 'Opt-in: Wird bei Einzelinstallationen & Massen-Updates still mit den gesetzten Parametern ausgeführt.';
+    return t('edit.modeSilentDesc');
   }
   if (mode === 'interactive-required') {
-    return '🛡️ Adware-Schutz: Silent-Parameter werden IMMER ignoriert (auch bei Massen-Updates & Bündeln), damit du Zusatzangebote abwählen kannst.';
+    return `🛡️ ${t('edit.modeProtectedDesc')}`;
   }
-  return 'Standard: Das Setup-Fenster öffnet sich normal. Du klickst dich selbst durch den Assistenten.';
+  return t('edit.modeInteractiveDesc');
 }
 
 function detectInitialSourceType(item) {
@@ -46,7 +47,7 @@ function getSelectableProviders(item) {
     const raw = state.providers.find((p) => p.id === existingPm);
     usable.push({
       id: existingPm,
-      name: `${raw?.name || existingPm} (deaktiviert / nicht verfuegbar)`,
+      name: `${raw ? getLocalizedProviderName(raw) : existingPm}${t('edit.providerUnavailableSuffix')}`,
       capabilities: raw?.capabilities || { show: true, search: true },
     });
   }
@@ -65,11 +66,11 @@ function getProviderHintText(providerId) {
     .trim()
     .toLowerCase();
   if (cleanId === 'winget') {
-    return 'Winget liefert die neueste Version, den direkten Installer-Link, eine SHA-256 Pruefsumme und Metadaten - ganz ohne HTML-Scraper.';
+    return t('edit.wingetHint');
   }
   const prov = state.providers.find((p) => p.id === cleanId);
-  const label = prov?.name || cleanId || 'Paketmanager';
-  return `Prueft neue Versionen und Paket-Details direkt ueber ${label} (ohne HTML-Scraper).`;
+  const label = prov ? getLocalizedProviderName(prov) : cleanId || t('detail.sourceProvider');
+  return t('edit.providerHintGeneric', { name: label });
 }
 
 export function renderEditModal(id, initialTab = 'general') {
@@ -114,6 +115,7 @@ export function renderEditModal(id, initialTab = 'general') {
     fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
     packageId: initialPackageId,
     publisher: itemPublisher,
+    t,
   });
   const linksStr = (item.links || []).map((l) => `${l.label} | ${l.url}`).join('\n');
   const cleanDesc = sanitizeRichHtml(item.description || '');
@@ -121,99 +123,99 @@ export function renderEditModal(id, initialTab = 'general') {
   modal.innerHTML = `
     <div class="modal-header">
       <div>
-        <h2>Bearbeiten: <span class="text-accent">${escapeHTML(item.name)}</span></h2>
+        <h2>${escapeHTML(t('edit.titlePrefix'))} <span class="text-accent">${escapeHTML(item.name)}</span></h2>
       </div>
-      <button type="button" class="icon-btn" data-edit-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+      <button type="button" class="icon-btn" data-edit-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
     </div>
 
     <nav class="modal-tabs" role="tablist">
-      <button type="button" class="tab-btn ${initialTab === 'general' ? 'active' : ''}" data-tab="general">📝 Allgemein</button>
-      <button type="button" class="tab-btn ${initialTab === 'online' ? 'active' : ''}" data-tab="online">🌐 Online-Updates</button>
-      <button type="button" class="tab-btn ${initialTab === 'local' ? 'active' : ''}" data-tab="local">💻 PC-Erkennung</button>
-      <button type="button" class="tab-btn ${initialTab === 'media' ? 'active' : ''}" data-tab="media">🖼️ Medien</button>
+      <button type="button" class="tab-btn ${initialTab === 'general' ? 'active' : ''}" data-tab="general">📝 ${escapeHTML(t('edit.tabGeneral'))}</button>
+      <button type="button" class="tab-btn ${initialTab === 'online' ? 'active' : ''}" data-tab="online">🌐 ${escapeHTML(t('edit.tabOnline'))}</button>
+      <button type="button" class="tab-btn ${initialTab === 'local' ? 'active' : ''}" data-tab="local">💻 ${escapeHTML(t('edit.tabLocal'))}</button>
+      <button type="button" class="tab-btn ${initialTab === 'media' ? 'active' : ''}" data-tab="media">🖼️ ${escapeHTML(t('edit.tabMedia'))}</button>
     </nav>
 
     <div class="modal-body edit-body">
       <!-- TAB 1: ALLGEMEIN -->
       <section class="tab-panel" data-panel="general" ${initialTab === 'general' ? '' : 'hidden'}>
       <div class="autofill-bar">
-        <span class="muted">Beschreibung, Tags & Links automatisch aus der Online-Quelle (Paketmanager / GitHub / Web) laden:</span>
-        <button type="button" class="btn btn-ghost" data-edit-action="autofill-fetch">✨ Infos automatisch laden</button>
+        <span class="muted">${escapeHTML(t('edit.autofillHint'))}</span>
+        <button type="button" class="btn btn-ghost" data-edit-action="autofill-fetch">✨ ${escapeHTML(t('edit.autofillBtn'))}</button>
       </div>
       <div id="autofillPreviewBox" class="autofill-preview" hidden></div>
         <div class="form-grid-2">
           <label class="form-field">
-            <span>Name</span>
+            <span>${escapeHTML(t('edit.fieldName'))}</span>
             <input type="text" id="editName" value="${escapeHTML(item.name)}">
           </label>
           <label class="form-field">
-            <span>Software-Typ</span>
+            <span>${escapeHTML(t('edit.fieldSoftwareType'))}</span>
             <select id="editSoftwareType">
-              <option value="default" ${!item.softwareType || item.softwareType === 'default' ? 'selected' : ''}>Standard (wird installiert)</option>
-              <option value="portable" ${item.softwareType === 'portable' ? 'selected' : ''}>Portabel (kein PC-Pfad nötig)</option>
-              <option value="driver" ${item.softwareType === 'driver' ? 'selected' : ''}>Treiber / Systemkomponente</option>
+              <option value="default" ${!item.softwareType || item.softwareType === 'default' ? 'selected' : ''}>${escapeHTML(t('edit.typeDefault'))}</option>
+              <option value="portable" ${item.softwareType === 'portable' ? 'selected' : ''}>${escapeHTML(t('edit.typePortable'))}</option>
+              <option value="driver" ${item.softwareType === 'driver' ? 'selected' : ''}>${escapeHTML(t('edit.typeDriver'))}</option>
             </select>
           </label>
           <label class="form-field">
-            <span>Hauptkategorie</span>
-            <input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}" placeholder="z. B. Multimedia">
+            <span>${escapeHTML(t('edit.fieldMainCategory'))}</span>
+            <input type="text" id="editCat" value="${escapeHTML(item.mainCategory || '')}" placeholder="${escapeHTML(t('edit.fieldMainCategoryPlaceholder'))}">
           </label>
           <label class="form-field">
-            <span>Versteckte Kategorie (optional)</span>
-            <input type="text" id="editHidden" value="${escapeHTML(item.hiddenCategory || '')}" placeholder="Leer = immer sichtbar">
+            <span>${escapeHTML(t('edit.fieldHiddenCategory'))}</span>
+            <input type="text" id="editHidden" value="${escapeHTML(item.hiddenCategory || '')}" placeholder="${escapeHTML(t('edit.fieldHiddenCategoryPlaceholder'))}">
           </label>
           <label class="form-field">
-            <span>Tags (kommagetrennt)</span>
-            <input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}" placeholder="z. B. Video, Player, Open Source">
+            <span>${escapeHTML(t('edit.fieldTags'))}</span>
+            <input type="text" id="editTags" value="${escapeHTML((item.subCategories || []).join(', '))}" placeholder="${escapeHTML(t('edit.fieldTagsPlaceholder'))}">
           </label>
           <label class="form-field">
-            <span>Unterstützte Formate (kommagetrennt)</span>
-            <input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}" placeholder="z. B. .mp4, .mkv">
+            <span>${escapeHTML(t('edit.fieldFormats'))}</span>
+            <input type="text" id="editFormats" value="${escapeHTML((item.formats || []).join(', '))}" placeholder="${escapeHTML(t('edit.fieldFormatsPlaceholder'))}">
           </label>
         </div>
 
         <label class="form-field">
-          <span>Betriebssysteme (kommagetrennt)</span>
-          <input type="text" id="editOS" value="${escapeHTML((item.os || []).join(', '))}" placeholder="Windows 10, Windows 11">
+          <span>${escapeHTML(t('edit.fieldOs'))}</span>
+          <input type="text" id="editOS" value="${escapeHTML((item.os || []).join(', '))}" placeholder="${escapeHTML(t('edit.fieldOsPlaceholder'))}">
         </label>
 
         <label class="check-row edit-keep-versions-row">
           <input type="checkbox" id="editKeepAllVersions" ${item.keepAllVersions ? 'checked' : ''}>
-          <span>🔒 Alle Versionen im Archiv behalten (vom Aufräumer ausschließen)</span>
+          <span>🔒 ${escapeHTML(t('edit.keepAllVersions'))}</span>
         </label>
 
         <div class="form-field">
-          <span>Beschreibung</span>
+          <span>${escapeHTML(t('edit.fieldDescription'))}</span>
           <div class="editor-toolbar" id="descToolbar">
-            <button type="button" data-cmd="bold" title="Fett"><b>B</b></button>
-            <button type="button" data-cmd="italic" title="Kursiv"><i>I</i></button>
-            <button type="button" data-cmd="underline" title="Unterstrichen"><u>U</u></button>
-            <button type="button" data-cmd="insertUnorderedList" title="Aufzählung">• Liste</button>
-            <button type="button" data-cmd="toggleLinkBar" title="Link einfügen">🔗 Link</button>
+            <button type="button" data-cmd="bold" title="${escapeHTML(t('edit.toolbarBoldTitle'))}"><b>B</b></button>
+            <button type="button" data-cmd="italic" title="${escapeHTML(t('edit.toolbarItalicTitle'))}"><i>I</i></button>
+            <button type="button" data-cmd="underline" title="${escapeHTML(t('edit.toolbarUnderlineTitle'))}"><u>U</u></button>
+            <button type="button" data-cmd="insertUnorderedList" title="${escapeHTML(t('edit.toolbarListTitle'))}">• ${escapeHTML(t('edit.toolbarListLabel'))}</button>
+            <button type="button" data-cmd="toggleLinkBar" title="${escapeHTML(t('edit.toolbarLinkTitle'))}">🔗 ${escapeHTML(t('edit.toolbarLinkLabel'))}</button>
           </div>
           <div id="inlineLinkBar" class="inline-link-bar" hidden>
             <input type="url" id="inlineLinkUrl" placeholder="https://...">
-            <button type="button" class="btn btn-primary" data-edit-action="apply-link">Einfügen</button>
+            <button type="button" class="btn btn-primary" data-edit-action="apply-link">${escapeHTML(t('edit.inlineLinkInsert'))}</button>
             <button type="button" class="btn btn-ghost" data-edit-action="cancel-link">✕</button>
           </div>
           <div id="editDesc" class="rich-editor" contenteditable="true">${cleanDesc}</div>
         </div>
 
         <label class="form-field">
-          <span>Info-Links (eine Zeile pro Link: <code>Name | https://...</code>)</span>
-          <textarea id="editLinks" rows="3" placeholder="Homepage | https://example.org">${escapeHTML(linksStr)}</textarea>
+          <span>${escapeHTML(t('edit.fieldLinks'))}</span>
+          <textarea id="editLinks" rows="3" placeholder="${escapeHTML(t('edit.fieldLinksPlaceholder'))}">${escapeHTML(linksStr)}</textarea>
         </label>
       </section>
 
       <!-- TAB 2: ONLINE-UPDATES -->
       <section class="tab-panel" data-panel="online" ${initialTab === 'online' ? '' : 'hidden'}>
         <div class="form-field">
-          <span>Quelle für automatische Update-Prüfung</span>
+          <span>${escapeHTML(t('edit.onlineSourceField'))}</span>
           <div class="source-switcher" id="sourceSwitcher">
-            <button type="button" class="source-opt ${currentSourceType === 'none' ? 'active' : ''}" data-source="none">Aus</button>
-            <button type="button" class="source-opt ${currentSourceType === 'provider' ? 'active' : ''}" data-source="provider">📦 Paketmanager (Empfohlen)</button>
-            <button type="button" class="source-opt ${currentSourceType === 'github' ? 'active' : ''}" data-source="github">🐙 GitHub Releases</button>
-            <button type="button" class="source-opt ${currentSourceType === 'web' ? 'active' : ''}" data-source="web">🌐 Webseite (Assistent)</button>
+            <button type="button" class="source-opt ${currentSourceType === 'none' ? 'active' : ''}" data-source="none">${escapeHTML(t('edit.sourceNone'))}</button>
+            <button type="button" class="source-opt ${currentSourceType === 'provider' ? 'active' : ''}" data-source="provider">📦 ${escapeHTML(t('edit.sourceProvider'))}</button>
+            <button type="button" class="source-opt ${currentSourceType === 'github' ? 'active' : ''}" data-source="github">🐙 ${escapeHTML(t('edit.sourceGithub'))}</button>
+            <button type="button" class="source-opt ${currentSourceType === 'web' ? 'active' : ''}" data-source="web">🌐 ${escapeHTML(t('edit.sourceWeb'))}</button>
           </div>
         </div>
 
@@ -221,7 +223,7 @@ export function renderEditModal(id, initialTab = 'general') {
         <div class="source-panel" data-source-panel="provider" ${currentSourceType === 'provider' ? '' : 'hidden'}>
           <p class="panel-hint" id="providerPanelHint">${escapeHTML(getProviderHintText(selectedPackageManager))}</p>
           <label class="form-field">
-            <span>Paketmanager</span>
+            <span>${escapeHTML(t('edit.providerLabel'))}</span>
             <select id="editPackageManager" class="provider-select-row">
               ${selectableProviders
                 .map(
@@ -232,27 +234,27 @@ export function renderEditModal(id, initialTab = 'general') {
             </select>
           </label>
           <div class="input-action-row">
-            <input type="text" id="providerQueryInput" value="${escapeHTML(item.name)}" placeholder="Programm im gewaehlten Paketmanager suchen...">
-            <button type="button" class="btn btn-primary" data-edit-action="search-provider">🔎 Suchen</button>
+            <input type="text" id="providerQueryInput" value="${escapeHTML(item.name)}" placeholder="${escapeHTML(t('edit.providerSearchPlaceholder'))}">
+            <button type="button" class="btn btn-primary" data-edit-action="search-provider">🔎 ${escapeHTML(t('common.search'))}</button>
           </div>
           <div id="providerResults" class="winget-results" hidden></div>
 
           <label class="form-field">
-            <span>Ausgewaehlte Paket-ID</span>
-            <input type="text" id="editPackageId" value="${escapeHTML(initialPackageId)}" placeholder="z. B. VideoLAN.VLC oder Paketname">
+            <span>${escapeHTML(t('edit.providerPackageIdLabel'))}</span>
+            <input type="text" id="editPackageId" value="${escapeHTML(initialPackageId)}" placeholder="${escapeHTML(t('edit.providerPackageIdPlaceholder'))}">
           </label>
         </div>
 
         <!-- GITHUB PANEL -->
         <div class="source-panel" data-source-panel="github" ${currentSourceType === 'github' ? '' : 'hidden'}>
-          <p class="panel-hint">Füge einfach den Link zum GitHub-Repository ein. Version und Release-Download werden automatisch erkannt.</p>
+          <p class="panel-hint">${escapeHTML(t('edit.githubHint'))}</p>
           <label class="form-field">
-            <span>GitHub Repository-URL</span>
-            <input type="url" id="editGithubUrl" value="${escapeHTML(currentSourceType === 'github' ? item.webVersionUrl || '' : '')}" placeholder="https://github.com/nutzer/projekt">
+            <span>${escapeHTML(t('edit.githubUrlLabel'))}</span>
+            <input type="url" id="editGithubUrl" value="${escapeHTML(currentSourceType === 'github' ? item.webVersionUrl || '' : '')}" placeholder="${escapeHTML(t('edit.githubUrlPlaceholder'))}">
           </label>
           <label class="form-field">
-            <span>Optionaler Datei-Filter für Direkt-Download</span>
-            <input type="text" id="editGithubAssetPattern" value="${escapeHTML(item.githubAssetPattern || '')}" placeholder="z. B. x64.exe oder win64.msi (leer = automatisch erste Windows-Setup)">
+            <span>${escapeHTML(t('edit.githubPatternLabel'))}</span>
+            <input type="text" id="editGithubAssetPattern" value="${escapeHTML(item.githubAssetPattern || '')}" placeholder="${escapeHTML(t('edit.githubPatternPlaceholder'))}">
           </label>
         </div>
 
@@ -261,43 +263,43 @@ export function renderEditModal(id, initialTab = 'general') {
           <div class="wizard-step">
             <div class="wizard-step-head">
               <span class="step-num">1</span>
-              <strong>Versionsnummer erkennen</strong>
+              <strong>${escapeHTML(t('edit.webStep1Title'))}</strong>
             </div>
             <div class="input-action-row">
-              <input type="url" id="editWebUrl" value="${escapeHTML(currentSourceType === 'web' ? item.webVersionUrl || '' : '')}" placeholder="https://hersteller.de/downloads">
-              <button type="button" class="btn btn-online" data-edit-action="visual-scrape">🎯 Version auf Seite markieren</button>
+              <input type="url" id="editWebUrl" value="${escapeHTML(currentSourceType === 'web' ? item.webVersionUrl || '' : '')}" placeholder="${escapeHTML(t('edit.webUrlPlaceholder'))}">
+              <button type="button" class="btn btn-online" data-edit-action="visual-scrape">🎯 ${escapeHTML(t('edit.webStep1Btn'))}</button>
             </div>
           </div>
 
           <div class="wizard-step">
             <div class="wizard-step-head">
               <span class="step-num">2</span>
-              <strong>Download-Link festlegen</strong>
-              <span class="muted">(Tipp: Unterstützt <code>{version}</code> als Platzhalter)</span>
+              <strong>${escapeHTML(t('edit.webStep2Title'))}</strong>
+              <span class="muted">${escapeHTML(t('edit.webStep2HintPrefix'))}<code>{version}</code>${escapeHTML(t('edit.webStep2HintSuffix'))}</span>
             </div>
             <div class="input-action-row">
-              <input type="url" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="Download-Seite oder direkter Link">
-              <button type="button" class="btn btn-primary" data-edit-action="visual-link-pick">🎯 Download-Button anklicken</button>
+              <input type="url" id="editDownloadUrl" value="${escapeHTML(item.downloadUrl || '')}" placeholder="${escapeHTML(t('edit.webDownloadPlaceholder'))}">
+              <button type="button" class="btn btn-primary" data-edit-action="visual-link-pick">🎯 ${escapeHTML(t('edit.webStep2Btn'))}</button>
             </div>
           </div>
 
           <details class="advanced-box">
-            <summary>Erweitert: Automatisch erkannte HTML-Regeln bearbeiten</summary>
+            <summary>${escapeHTML(t('edit.webAdvancedSummary'))}</summary>
             <div class="form-grid-2">
               <label class="form-field">
-                <span>Version - Davor (Präfix)</span>
+                <span>${escapeHTML(t('edit.webPrefixLabel'))}</span>
                 <input type="text" id="editWebPrefix" value="${escapeHTML(item.webVersionPrefix || '')}">
               </label>
               <label class="form-field">
-                <span>Version - Danach (Suffix)</span>
+                <span>${escapeHTML(t('edit.webSuffixLabel'))}</span>
                 <input type="text" id="editWebSuffix" value="${escapeHTML(item.webVersionSuffix || '')}">
               </label>
               <label class="form-field">
-                <span>Download-Link - Davor (Präfix)</span>
+                <span>${escapeHTML(t('edit.dlPrefixLabel'))}</span>
                 <input type="text" id="editDlPrefix" value="${escapeHTML(item.dlPrefix || '')}">
               </label>
               <label class="form-field">
-                <span>Download-Link - Danach (Suffix)</span>
+                <span>${escapeHTML(t('edit.dlSuffixLabel'))}</span>
                 <input type="text" id="editDlSuffix" value="${escapeHTML(item.dlSuffix || '')}">
               </label>
             </div>
@@ -308,35 +310,35 @@ export function renderEditModal(id, initialTab = 'general') {
         <div class="online-test-bar" id="onlineTestBar" ${currentSourceType === 'none' ? 'hidden' : ''}>
           <div class="test-bar-info">
             <label class="inline-ver-field">
-              <span>Erkannte Web-Version:</span>
-              <input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="Noch nicht geprüft" readonly>
+              <span>${escapeHTML(t('edit.detectedWebVersion'))}</span>
+              <input type="text" id="editWebVersion" value="${escapeHTML(item.webVersion || '')}" placeholder="${escapeHTML(t('edit.notCheckedYet'))}" readonly>
             </label>
             <span id="onlineTestFeedback" class="test-feedback"></span>
           </div>
-          <button type="button" class="btn btn-ghost" data-edit-action="test-online">🔄 Jetzt testen</button>
+          <button type="button" class="btn btn-ghost" data-edit-action="test-online">🔄 ${escapeHTML(t('edit.testNowBtn'))}</button>
         </div>
       </section>
 
       <!-- TAB 3: PC-ERKENNUNG -->
       <section class="tab-panel" data-panel="local" ${initialTab === 'local' ? '' : 'hidden'}>
-        <p class="panel-hint">Damit die App erkennt, ob und in welcher Version dieses Programm auf deinem PC installiert ist.</p>
+        <p class="panel-hint">${escapeHTML(t('edit.localHint'))}</p>
 
         <div class="form-field">
-          <span>Alternative Such-Namen in Windows "Apps & Features" (kommagetrennt)</span>
+          <span>${escapeHTML(t('edit.searchNamesLabel'))}</span>
           <div class="input-action-row">
-            <input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="z. B. VLC media player">
+            <input type="text" id="editSearchNames" value="${escapeHTML((item.searchNames || []).join(', '))}" placeholder="${escapeHTML(t('edit.searchNamesPlaceholder'))}">
             <div id="installedAppsSlot">
-              <button type="button" class="btn btn-ghost" data-edit-action="load-installed-apps">📋 PC-Programme laden</button>
+              <button type="button" class="btn btn-ghost" data-edit-action="load-installed-apps">📋 ${escapeHTML(t('edit.loadInstalledAppsBtn'))}</button>
             </div>
           </div>
         </div>
 
         <div class="form-field">
           <div class="field-header-row">
-            <span>Zugeordnete Programm-Pfade (.exe)</span>
+            <span>${escapeHTML(t('edit.assignedPathsLabel'))}</span>
             <div class="field-header-btns">
-              <button type="button" class="btn btn-primary" data-edit-action="auto-detect-path">✨ Automatisch suchen</button>
-              <button type="button" class="btn btn-ghost" data-edit-action="browse-path">📂 Datei wählen...</button>
+              <button type="button" class="btn btn-primary" data-edit-action="auto-detect-path">✨ ${escapeHTML(t('edit.autoDetectPathBtn'))}</button>
+              <button type="button" class="btn btn-ghost" data-edit-action="browse-path">📂 ${escapeHTML(t('edit.browsePathBtn'))}</button>
             </div>
           </div>
           <div id="unifiedPathList" class="path-list"></div>
@@ -344,36 +346,36 @@ export function renderEditModal(id, initialTab = 'general') {
 
         <div class="install-mode-section">
           <div class="field-header-row">
-            <span>⚙️ Installationsmodus & Adware-Schutz</span>
+            <span>⚙️ ${escapeHTML(t('edit.installModeHeading'))}</span>
           </div>
 
           <div id="adwareWarningBox" class="adware-warning-banner" ${currentAdwareWarning.flagged ? '' : 'hidden'}>
             <div class="adware-warning-text">
-              <strong class="adware-warning-title">⚠️ Adware-/Bundle-Hinweis</strong>
+              <strong class="adware-warning-title">⚠️ ${escapeHTML(t('edit.adwareBannerTitle'))}</strong>
               <span id="adwareWarningReason">${escapeHTML(currentAdwareWarning.reason || '')}</span>
             </div>
-            <button type="button" class="btn btn-ghost btn-xs" data-edit-action="apply-adware-protection" id="btnApplyAdwareProtection" ${currentInstallMode === 'interactive-required' ? 'hidden' : ''}>🛡️ Adware-Schutz aktivieren</button>
+            <button type="button" class="btn btn-ghost btn-xs" data-edit-action="apply-adware-protection" id="btnApplyAdwareProtection" ${currentInstallMode === 'interactive-required' ? 'hidden' : ''}>🛡️ ${escapeHTML(t('edit.applyAdwareBtn'))}</button>
           </div>
 
           <div class="install-mode-switcher" id="installModeSwitcher">
-            <button type="button" class="install-mode-opt ${currentInstallMode === 'interactive' ? 'active' : ''}" data-install-mode="interactive">🖱️ Interaktiv</button>
-            <button type="button" class="install-mode-opt ${currentInstallMode === 'silent' ? 'active' : ''}" data-install-mode="silent">⚡ Stille Installation</button>
-            <button type="button" class="install-mode-opt is-protected ${currentInstallMode === 'interactive-required' ? 'active' : ''}" data-install-mode="interactive-required">🛡️ Immer Interaktiv (Adware-Schutz)</button>
+            <button type="button" class="install-mode-opt ${currentInstallMode === 'interactive' ? 'active' : ''}" data-install-mode="interactive">🖱️ ${escapeHTML(t('edit.modeInteractiveBtn'))}</button>
+            <button type="button" class="install-mode-opt ${currentInstallMode === 'silent' ? 'active' : ''}" data-install-mode="silent">⚡ ${escapeHTML(t('edit.modeSilentBtn'))}</button>
+            <button type="button" class="install-mode-opt is-protected ${currentInstallMode === 'interactive-required' ? 'active' : ''}" data-install-mode="interactive-required">🛡️ ${escapeHTML(t('edit.modeProtectedBtn'))}</button>
           </div>
           <p class="panel-hint" id="installModeDesc">${escapeHTML(getInstallModeDescription(currentInstallMode))}</p>
 
           <div id="silentConfigBox" class="silent-config-box ${currentInstallMode === 'interactive-required' ? 'is-ignored' : ''}">
             <div class="silent-setup-meta">
-              <span class="muted">${primarySetupFile ? `Setup-Datei: <code>${escapeHTML(getBaseName(primarySetupFile))}</code>` : 'Noch keine Setup-Datei im Archiv - beim Erkennen/Testen kann eine lokale Datei gewählt werden.'}</span>
-              <span id="silentIgnoredHint" class="silent-ignored-hint" ${currentInstallMode === 'interactive-required' ? '' : 'hidden'}>🛡️ Im Adware-Schutz-Modus werden Silent-Parameter bei der Ausführung ignoriert.</span>
+              <span class="muted">${primarySetupFile ? `${escapeHTML(t('edit.setupFilePrefix'))} <code>${escapeHTML(getBaseName(primarySetupFile))}</code>` : escapeHTML(t('edit.setupFileNone'))}</span>
+              <span id="silentIgnoredHint" class="silent-ignored-hint" ${currentInstallMode === 'interactive-required' ? '' : 'hidden'}>🛡️ ${escapeHTML(t('edit.silentIgnoredHint'))}</span>
             </div>
 
             <div class="form-field">
-              <span>Silent-Parameter (z. B. <code>/VERYSILENT /NORESTART /SP-</code>)</span>
+              <span>${escapeHTML(t('edit.silentArgsPrefix'))} <code>/VERYSILENT /NORESTART /SP-</code>)</span>
               <div class="input-action-row">
-                <input type="text" id="editSilentArgs" value="${escapeHTML(item.silentArgs || '')}" placeholder="z. B. /VERYSILENT /NORESTART /SP- oder /qn /norestart">
-                <button type="button" class="btn btn-ghost" data-edit-action="detect-installer">🔍 Setup-Typ erkennen</button>
-                <button type="button" class="btn btn-ghost" data-edit-action="test-installer">▶️ Testen</button>
+                <input type="text" id="editSilentArgs" value="${escapeHTML(item.silentArgs || '')}" placeholder="${escapeHTML(t('edit.silentArgsPlaceholder'))}">
+                <button type="button" class="btn btn-ghost" data-edit-action="detect-installer">🔍 ${escapeHTML(t('edit.detectInstallerBtn'))}</button>
+                <button type="button" class="btn btn-ghost" data-edit-action="test-installer">▶️ ${escapeHTML(t('edit.testInstallerBtn'))}</button>
               </div>
             </div>
 
@@ -381,10 +383,10 @@ export function renderEditModal(id, initialTab = 'general') {
 
             <div id="innoInfBox" class="inno-inf-box" ${item.innoInfFile || currentInstallMode === 'silent' ? '' : 'hidden'}>
               <div class="form-field">
-                <span>Inno-Setup Antwortdatei (<code>.inf</code> im <code>_metadata/</code>-Ordner)</span>
+                <span>${escapeHTML(t('edit.innoInfLabelPrefix'))}<code>.inf</code>${escapeHTML(t('edit.innoInfLabelMid'))}<code>_metadata/</code>${escapeHTML(t('edit.innoInfLabelSuffix'))}</span>
                 <div class="input-action-row">
                   <input type="text" id="editInnoInfFile" value="${escapeHTML(item.innoInfFile || '')}" placeholder="silent.inf">
-                  <button type="button" class="btn btn-ghost" data-edit-action="record-inno-inf">📝 Antwortdatei (.inf) aufzeichnen</button>
+                  <button type="button" class="btn btn-ghost" data-edit-action="record-inno-inf">📝 ${escapeHTML(t('edit.recordInnoInfBtn'))}</button>
                 </div>
               </div>
               <span id="innoInfStatus" class="muted"></span>
@@ -397,22 +399,22 @@ export function renderEditModal(id, initialTab = 'general') {
       <section class="tab-panel" data-panel="media" ${initialTab === 'media' ? '' : 'hidden'}>
         <div class="media-editor-grid">
           <div class="media-card">
-            <h4>Programm-Icon</h4>
+            <h4>${escapeHTML(t('edit.mediaIconTitle'))}</h4>
             <div class="icon-preview-row">
               <div id="editIconPreview" class="icon-preview-box"></div>
               <div class="icon-preview-actions">
                 <div class="media-dropzone" data-drop-type="icon">
-                  🖼️ Neues Icon hier ablegen
+                  🖼️ ${escapeHTML(t('edit.dropIconHint'))}
                 </div>
-                <button type="button" class="btn btn-ghost" data-edit-action="extract-icon">🪄 Aus .exe extrahieren</button>
+                <button type="button" class="btn btn-ghost" data-edit-action="extract-icon">🪄 ${escapeHTML(t('edit.extractIconBtn'))}</button>
               </div>
             </div>
           </div>
 
           <div class="media-card">
-            <h4>Screenshots & Videos</h4>
+            <h4>${escapeHTML(t('edit.mediaGalleryTitle'))}</h4>
             <div class="media-dropzone" data-drop-type="media">
-              📷 Bilder oder Videos hier ablegen, um sie hinzuzufügen
+              📷 ${escapeHTML(t('edit.dropMediaHint'))}
             </div>
             <div id="editMediaGallery" class="edit-media-gallery"></div>
           </div>
@@ -422,11 +424,11 @@ export function renderEditModal(id, initialTab = 'general') {
 
     <div class="modal-footer">
       <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-edit-action="open-meta-dir">📂 _metadata Ordner</button>
+        <button type="button" class="btn btn-ghost" data-edit-action="open-meta-dir">📂 ${escapeHTML(t('edit.openMetaDirBtn'))}</button>
       </div>
       <div class="footer-group">
-        <button type="button" class="btn btn-ghost" data-edit-action="cancel">Abbrechen</button>
-        <button type="button" class="btn btn-primary" data-edit-action="save">💾 Speichern</button>
+        <button type="button" class="btn btn-ghost" data-edit-action="cancel">${escapeHTML(t('common.cancel'))}</button>
+        <button type="button" class="btn btn-primary" data-edit-action="save">💾 ${escapeHTML(t('common.save'))}</button>
       </div>
     </div>
   `;
@@ -438,17 +440,16 @@ export function renderEditModal(id, initialTab = 'general') {
     const listEl = modal.querySelector('#unifiedPathList');
     if (!listEl) return;
     if (draftPaths.length === 0) {
-      listEl.innerHTML =
-        '<div class="path-empty">Noch kein Pfad hinterlegt. Klicke oben auf <strong>✨ Automatisch suchen</strong> oder wähle eine <code>.exe</code> aus.</div>';
+      listEl.innerHTML = `<div class="path-empty">${escapeHTML(t('edit.pathsEmptyPrefix'))}<strong>✨ ${escapeHTML(t('edit.autoDetectPathBtn'))}</strong>${escapeHTML(t('edit.pathsEmptySuffix'))}</div>`;
       return;
     }
     listEl.innerHTML = draftPaths
       .map(
         (entry, idx) => `
         <div class="path-row">
-          <span class="path-origin-pill is-${entry.origin}">${entry.origin === 'auto' ? 'Auto' : 'Manuell'}</span>
+          <span class="path-origin-pill is-${entry.origin}">${escapeHTML(entry.origin === 'auto' ? t('edit.pathOriginAuto') : t('edit.pathOriginManual'))}</span>
           <code class="path-text" title="${escapeHTML(entry.path)}">${escapeHTML(entry.path)}</code>
-          <button type="button" class="icon-btn path-remove-btn" data-remove-path="${idx}" title="Entfernen">✕</button>
+          <button type="button" class="icon-btn path-remove-btn" data-remove-path="${idx}" title="${escapeHTML(t('common.remove'))}">✕</button>
         </div>
       `
       )
@@ -464,12 +465,12 @@ export function renderEditModal(id, initialTab = 'general') {
     if (iconBox) {
       iconBox.innerHTML = freshItem.icon
         ? `<img src="${escapeHTML(toMediaUrl(freshItem.icon))}&t=${bust}" alt="Icon">`
-        : '<span class="muted">Kein Icon</span>';
+        : `<span class="muted">${escapeHTML(t('edit.noIcon'))}</span>`;
     }
 
     if (galleryEl) {
       if (!freshItem.screenshots?.length) {
-        galleryEl.innerHTML = '<p class="muted">Noch keine Screenshots oder Videos vorhanden.</p>';
+        galleryEl.innerHTML = `<p class="muted">${escapeHTML(t('edit.noMedia'))}</p>`;
       } else {
         galleryEl.innerHTML = freshItem.screenshots
           .map((s) => {
@@ -478,7 +479,7 @@ export function renderEditModal(id, initialTab = 'general') {
             return `
               <div class="edit-media-item">
                 ${isVid ? `<video src="${url}#t=1" muted preload="metadata"></video>` : `<img src="${url}" alt="">`}
-                <button type="button" class="media-delete-btn" data-delete-media="${escapeHTML(s)}" title="${escapeHTML(getBaseName(s))} löschen">🗑️</button>
+                <button type="button" class="media-delete-btn" data-delete-media="${escapeHTML(s)}" title="${escapeHTML(t('edit.deleteMediaTitle', { name: getBaseName(s) }))}">🗑️</button>
               </div>
             `;
           })
@@ -493,13 +494,13 @@ export function renderEditModal(id, initialTab = 'general') {
     if (!statusEl || !infInput) return;
     const val = sanitizeInnoInfFileName(infInput.value.trim());
     if (!val) {
-      statusEl.textContent = 'Optional: Zeichnet deine Setup-Häkchen einmalig über /SAVEINF auf.';
+      statusEl.textContent = t('edit.infStatusEmpty');
       return;
     }
     if (infExists && val.toLowerCase() === recordedInfName.toLowerCase()) {
-      statusEl.textContent = `✓ Antwortdatei "${val}" im _metadata/-Ordner vorhanden (wird als /LOADINF mitgegeben).`;
+      statusEl.textContent = `✓ ${t('edit.infStatusPresent', { name: val })}`;
     } else {
-      statusEl.textContent = `⚠️ Datei "${val}" noch nicht im _metadata/-Ordner aufgezeichnet.`;
+      statusEl.textContent = `⚠️ ${t('edit.infStatusMissing', { name: val })}`;
     }
   };
 
@@ -529,7 +530,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
   const resolveTargetSetupFile = async () => {
     if (primarySetupFile) return primarySetupFile;
-    return window.electronAPI.selectFile([{ name: 'Installer (.exe, .msi)', extensions: ['exe', 'msi'] }], true);
+    return window.electronAPI.selectFile([{ name: t('edit.installerPickerFilter'), extensions: ['exe', 'msi'] }], true);
   };
 
   const refreshAdwareBanner = () => {
@@ -538,6 +539,7 @@ export function renderEditModal(id, initialTab = 'general') {
       fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
       packageId: qsInput(modal, '#editPackageId')?.value.trim() || item.packageId || '',
       publisher: itemPublisher,
+      t,
     });
     const warnBox = qs(modal, '#adwareWarningBox');
     const warnReason = modal.querySelector('#adwareWarningReason');
@@ -619,11 +621,14 @@ export function renderEditModal(id, initialTab = 'general') {
       if (res.success) {
         await triggerCatalogReload();
         renderMediaSection();
-        showToast(dropType === 'icon' ? 'Icon aktualisiert.' : `${paths.length} Datei(en) hinzugefügt.`, {
-          type: 'success',
-        });
+        showToast(
+          dropType === 'icon' ? t('edit.toastIconUpdated') : t('edit.toastMediaAdded', { count: paths.length }),
+          {
+            type: 'success',
+          }
+        );
       } else {
-        showToast(res.error || 'Fehler beim Hinzufügen.', { type: 'error' });
+        showToast(res.error || t('edit.toastAddError'), { type: 'error' });
       }
     });
   });
@@ -694,7 +699,7 @@ export function renderEditModal(id, initialTab = 'general') {
       }
       qs(modal, '#providerResults').hidden = true;
       refreshAdwareBanner();
-      showToast(`Paket-ID "${pickedId}" uebernommen.`, { type: 'success' });
+      showToast(t('edit.toastPkgIdApplied', { id: pickedId }), { type: 'success' });
       return;
     }
 
@@ -713,9 +718,9 @@ export function renderEditModal(id, initialTab = 'general') {
       if (res.success) {
         await triggerCatalogReload();
         renderMediaSection();
-        showToast('Datei entfernt.', { type: 'info' });
+        showToast(t('edit.toastFileRemoved'), { type: 'info' });
       } else {
-        showToast(res.error || 'Konnte Datei nicht löschen.', { type: 'error' });
+        showToast(res.error || t('edit.toastDeleteMediaFailed'), { type: 'error' });
       }
       return;
     }
@@ -778,7 +783,7 @@ export function renderEditModal(id, initialTab = 'general') {
       const box = qs(modal, '#providerResults');
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Suche...';
+      actionBtn.textContent = `⏳ ${t('edit.btnSearching')}`;
 
       const res = await window.electronAPI.searchProviders(query, {
         providerIds: [selectedPackageManager],
@@ -789,14 +794,14 @@ export function renderEditModal(id, initialTab = 'general') {
 
       const providerRes = res?.byProvider?.[selectedPackageManager];
       if (!res?.success || (providerRes && !providerRes.success)) {
-        showToast(providerRes?.error || res?.error || 'Paketmanager-Suche fehlgeschlagen.', { type: 'error' });
+        showToast(providerRes?.error || res?.error || t('edit.toastProviderSearchFailed'), { type: 'error' });
         return;
       }
 
       const items = Array.isArray(providerRes?.results) ? providerRes.results : res.results || [];
       box.hidden = false;
       if (!items.length) {
-        box.innerHTML = `<div class="winget-empty">${escapeHTML(providerRes?.hint || 'Keine Treffer gefunden.')}</div>`;
+        box.innerHTML = `<div class="winget-empty">${escapeHTML(providerRes?.hint || t('edit.providerNoResults'))}</div>`;
       } else {
         box.innerHTML = items
           .map((r) => {
@@ -818,11 +823,11 @@ export function renderEditModal(id, initialTab = 'general') {
     // Visueller Versions-Highlighter
     if (act === 'visual-scrape') {
       const url = qsInput(modal, '#editWebUrl').value.trim();
-      if (!url) return showToast('Bitte zuerst eine Webseite eingeben.', { type: 'warn' });
+      if (!url) return showToast(t('edit.toastEnterUrlFirst'), { type: 'warn' });
 
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Fenster offen...';
+      actionBtn.textContent = `⏳ ${t('edit.btnWindowOpen')}`;
       const res = await window.electronAPI.openVisualScraper(url);
       actionBtn.disabled = false;
       actionBtn.textContent = orig;
@@ -831,9 +836,9 @@ export function renderEditModal(id, initialTab = 'general') {
         qsInput(modal, '#editWebPrefix').value = res.prefix || '';
         qsInput(modal, '#editWebSuffix').value = res.suffix || '';
         qsInput(modal, '#editWebVersion').value = res.version || '';
-        showToast(`Version v${res.version} erfolgreich markiert!`, { type: 'success' });
+        showToast(t('edit.toastVersionHighlighted', { version: res.version }), { type: 'success' });
       } else if (!res.canceled) {
-        showToast(res.error || 'Markierung fehlgeschlagen.', { type: 'error' });
+        showToast(res.error || t('edit.toastHighlightFailed'), { type: 'error' });
       }
       return;
     }
@@ -844,13 +849,13 @@ export function renderEditModal(id, initialTab = 'general') {
       const webInput = qsInput(modal, '#editWebUrl');
       const startUrl = dlInput.value.trim() || webInput.value.trim();
       if (!startUrl) {
-        return showToast('Bitte zuerst eine Webseite als Start-URL eingeben.', { type: 'warn' });
+        return showToast(t('edit.toastEnterStartUrl'), { type: 'warn' });
       }
 
       const knownVer = qsInput(modal, '#editWebVersion').value.trim();
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Fenster offen...';
+      actionBtn.textContent = `⏳ ${t('edit.btnWindowOpen')}`;
       const res = await window.electronAPI.openVisualLinkPicker(startUrl, knownVer);
       actionBtn.disabled = false;
       actionBtn.textContent = orig;
@@ -861,14 +866,14 @@ export function renderEditModal(id, initialTab = 'general') {
         qsInput(modal, '#editDlSuffix').value = res.suffix || '';
 
         if (res.mode === 'template') {
-          showToast('Download-URL erkannt und automatisch als {version}-Vorlage gespeichert!', { type: 'success' });
+          showToast(t('edit.toastDownloadTemplateSaved', { version: '{version}' }), { type: 'success' });
         } else if (res.mode === 'direct-intercept') {
-          showToast('JS-Download sauber abgefangen - direkte URL übernommen!', { type: 'success' });
+          showToast(t('edit.toastDownloadIntercepted'), { type: 'success' });
         } else {
-          showToast('Download-Button erfolgreich erkannt!', { type: 'success' });
+          showToast(t('edit.toastDownloadButtonDetected'), { type: 'success' });
         }
       } else if (!res.canceled) {
-        showToast(res.error || 'Link-Erkennung fehlgeschlagen.', { type: 'error' });
+        showToast(res.error || t('edit.toastLinkPickFailed'), { type: 'error' });
       }
       return;
     }
@@ -896,19 +901,19 @@ export function renderEditModal(id, initialTab = 'general') {
 
       actionBtn.disabled = true;
       fb.className = 'test-feedback';
-      fb.textContent = 'Prüfe...';
+      fb.textContent = t('edit.testRunning');
 
       const res = await window.electronAPI.checkSingleWeb(payload);
       actionBtn.disabled = false;
 
       if (res.success) {
         qsInput(modal, '#editWebVersion').value = res.version;
-        const dlInfo = res.downloadUrl ? ' · Direkt-Download bereit' : '';
+        const dlInfo = res.downloadUrl ? t('edit.testOkDirectDl') : '';
         fb.className = 'test-feedback is-ok';
-        fb.textContent = `✓ Gefunden: v${res.version}${dlInfo}`;
+        fb.textContent = `✓ ${t('edit.testOk', { version: res.version, dlInfo })}`;
       } else {
         fb.className = 'test-feedback is-err';
-        fb.textContent = `✕ ${res.error || 'Fehlgeschlagen'}`;
+        fb.textContent = `✕ ${res.error || t('edit.testFailed')}`;
       }
       return;
     }
@@ -916,20 +921,20 @@ export function renderEditModal(id, initialTab = 'general') {
     // PC-Programme für Suchnamen laden
     if (act === 'load-installed-apps') {
       actionBtn.disabled = true;
-      actionBtn.textContent = '⏳ Lade...';
+      actionBtn.textContent = `⏳ ${t('edit.btnLoading')}`;
       const apps = await window.electronAPI.getInstalledApps();
       const slot = modal.querySelector('#installedAppsSlot');
       if (apps?.length > 0 && slot) {
         slot.innerHTML = `
           <select id="installedAppsSelect" class="apps-select">
-            <option value="">+ App-Name übernehmen...</option>
+            <option value="">${escapeHTML(t('edit.selectAppPlaceholder'))}</option>
             ${apps.map((a) => `<option value="${escapeHTML(a)}">${escapeHTML(a)}</option>`).join('')}
           </select>
         `;
       } else {
         actionBtn.disabled = false;
-        actionBtn.textContent = '📋 PC-Programme laden';
-        showToast('Keine installierten Programme gefunden.', { type: 'warn' });
+        actionBtn.textContent = `📋 ${t('edit.loadInstalledAppsBtn')}`;
+        showToast(t('edit.toastNoAppsFound'), { type: 'warn' });
       }
       return;
     }
@@ -944,7 +949,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Suche...';
+      actionBtn.textContent = `⏳ ${t('edit.btnSearching')}`;
       const res = await window.electronAPI.autoDetectPath([mainName, ...extras]);
       actionBtn.disabled = false;
       actionBtn.textContent = orig;
@@ -954,9 +959,9 @@ export function renderEditModal(id, initialTab = 'general') {
           draftPaths.unshift({ path: res.path, origin: 'auto' });
           renderPathList();
         }
-        showToast('Installationspfad gefunden!', { type: 'success' });
+        showToast(t('edit.toastPathFound'), { type: 'success' });
       } else {
-        showToast('Kein Registry-Eintrag gefunden - ggf. Such-Namen ergänzen.', { type: 'warn' });
+        showToast(t('edit.toastNoPathFound'), { type: 'warn' });
       }
       return;
     }
@@ -964,7 +969,7 @@ export function renderEditModal(id, initialTab = 'general') {
     // Manuellen Pfad wählen
     if (act === 'browse-path') {
       const selected = await window.electronAPI.selectFile(
-        [{ name: 'Ausführbare Dateien', extensions: ['exe', 'bat', 'cmd', 'ps1'] }],
+        [{ name: t('edit.executablePickerFilter'), extensions: ['exe', 'bat', 'cmd', 'ps1'] }],
         true
       );
       if (selected && !draftPaths.some((p) => p.path.toLowerCase() === selected.toLowerCase())) {
@@ -976,7 +981,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
     if (act === 'apply-adware-protection') {
       switchInstallMode('interactive-required');
-      showToast('Adware-Schutz ("Immer Interaktiv") aktiviert.', { type: 'success' });
+      showToast(t('edit.toastAdwareEnabled'), { type: 'success' });
       return;
     }
 
@@ -987,7 +992,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Analysiere...';
+      actionBtn.textContent = `⏳ ${t('edit.btnAnalyzing')}`;
 
       const res = await window.electronAPI.detectInstaller({
         filePath: targetFile,
@@ -1000,7 +1005,7 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.textContent = orig;
 
       if (!res?.success) {
-        showToast(res?.error || 'Setup-Typ konnte nicht erkannt werden.', { type: 'error' });
+        showToast(res?.error || t('edit.toastDetectFailed'), { type: 'error' });
         return;
       }
 
@@ -1014,7 +1019,7 @@ export function renderEditModal(id, initialTab = 'general') {
       if (fb) {
         fb.hidden = false;
         fb.innerHTML = `
-          <strong>Erkannter Setup-Typ: ${escapeHTML(res.label)}</strong>
+          <strong>${escapeHTML(t('edit.detectedSetupTypeTitle', { label: res.label }))}</strong>
           ${res.matchedSignature ? `<code>${escapeHTML(res.matchedSignature)}</code>` : ''}
           <p class="muted">${escapeHTML(res.hint || '')}</p>
         `;
@@ -1035,9 +1040,9 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       if (res.suggestedArgs) {
-        showToast(`Typ "${res.label}" erkannt - Parameter übernommen.`, { type: 'success' });
+        showToast(t('edit.toastDetectedWithArgs', { label: res.label }), { type: 'success' });
       } else {
-        showToast(`Typ "${res.label}" erkannt - bitte Parameter manuell prüfen.`, { type: 'info' });
+        showToast(t('edit.toastDetectedNoArgs', { label: res.label }), { type: 'info' });
       }
       return;
     }
@@ -1046,7 +1051,7 @@ export function renderEditModal(id, initialTab = 'general') {
     if (act === 'test-installer') {
       const argsVal = qsInput(modal, '#editSilentArgs')?.value.trim() || '';
       if (currentInstallMode === 'silent' && !argsVal) {
-        return showToast('Bitte zuerst Silent-Parameter eingeben oder per "Setup-Typ erkennen" ermitteln.', {
+        return showToast(t('edit.toastNeedSilentArgs'), {
           type: 'warn',
         });
       }
@@ -1057,7 +1062,7 @@ export function renderEditModal(id, initialTab = 'general') {
       const infVal = sanitizeInnoInfFileName(qsInput(modal, '#editInnoInfFile')?.value.trim() || '');
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Läuft...';
+      actionBtn.textContent = `⏳ ${t('edit.btnRunning')}`;
 
       const res = await window.electronAPI.executeInstaller({
         itemId: item.id,
@@ -1074,19 +1079,19 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.textContent = orig;
 
       if (res?.alreadyRunning) {
-        showToast('Für dieses Programm läuft bereits eine Installation.', { type: 'warn' });
+        showToast(t('detail.toastAlreadyRunning'), { type: 'warn' });
       } else if (res?.canceled) {
-        showToast('Testlauf wurde abgebrochen.', { type: 'info' });
+        showToast(t('edit.toastTestCanceled'), { type: 'info' });
       } else if (res?.success) {
         await triggerCatalogReload({ rescanInstalled: true });
         const msg = res.adwareProtected
-          ? 'Testlauf im Adware-Schutz (Immer Interaktiv) abgeschlossen - Silent-Parameter wurden ignoriert.'
+          ? t('edit.toastTestProtected')
           : res.effectiveSilent
-            ? 'Stiller Testlauf erfolgreich abgeschlossen.'
-            : 'Interaktiver Testlauf abgeschlossen.';
+            ? t('edit.toastTestSilent')
+            : t('edit.toastTestInteractive');
         showToast(msg, { type: 'success' });
       } else if (res?.error) {
-        showToast(`Testlauf fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+        showToast(t('edit.toastTestFailed', { error: res.error }), { type: 'error', duration: 6000 });
       }
       return;
     }
@@ -1097,7 +1102,7 @@ export function renderEditModal(id, initialTab = 'general') {
       if (!targetFile) return;
 
       if (!targetFile.toLowerCase().endsWith('.exe')) {
-        return showToast('Antwortdateien (.inf) werden nur für Inno-Setup-.exe-Dateien unterstützt.', { type: 'warn' });
+        return showToast(t('edit.toastInfOnlyExe'), { type: 'warn' });
       }
 
       const infInput = qsInput(modal, '#editInnoInfFile');
@@ -1105,7 +1110,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Aufzeichnung...';
+      actionBtn.textContent = `⏳ ${t('edit.btnRecording')}`;
 
       const res = await window.electronAPI.recordInnoInf({
         itemId: item.id,
@@ -1119,18 +1124,18 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.textContent = orig;
 
       if (res?.alreadyRunning) {
-        showToast('Für dieses Programm läuft bereits eine Installation.', { type: 'warn' });
+        showToast(t('detail.toastAlreadyRunning'), { type: 'warn' });
       } else if (res?.success) {
         if (infInput) infInput.value = res.infFile;
         infExists = true;
         recordedInfName = res.infFile;
         updateInnoInfStatus();
         await triggerCatalogReload();
-        showToast(`Antwortdatei "${res.infFile}" im _metadata/-Ordner gespeichert!`, { type: 'success' });
+        showToast(t('edit.toastInfSaved', { name: res.infFile }), { type: 'success' });
       } else if (res?.canceled) {
-        showToast('Aufzeichnung abgebrochen.', { type: 'info' });
+        showToast(t('edit.toastInfCanceled'), { type: 'info' });
       } else {
-        showToast(res?.error || 'Antwortdatei konnte nicht aufgezeichnet werden.', { type: 'error', duration: 6000 });
+        showToast(res?.error || t('edit.toastInfFailed'), { type: 'error', duration: 6000 });
       }
       return;
     }
@@ -1139,7 +1144,7 @@ export function renderEditModal(id, initialTab = 'general') {
     if (act === 'extract-icon') {
       const exeEntry = draftPaths.find((p) => p.path.toLowerCase().endsWith('.exe'));
       if (!exeEntry) {
-        return showToast('Bitte zuerst unter "PC-Erkennung" einen .exe Pfad hinterlegen.', { type: 'warn' });
+        return showToast(t('edit.toastNeedExeForIcon'), { type: 'warn' });
       }
       actionBtn.disabled = true;
       const res = await window.electronAPI.extractExeIcon(exeEntry.path, item.path);
@@ -1147,9 +1152,9 @@ export function renderEditModal(id, initialTab = 'general') {
       if (res.success) {
         await triggerCatalogReload();
         renderMediaSection();
-        showToast('Icon erfolgreich extrahiert!', { type: 'success' });
+        showToast(t('edit.toastIconExtracted'), { type: 'success' });
       } else {
-        showToast(res.error || 'Icon konnte nicht extrahiert werden.', { type: 'error' });
+        showToast(res.error || t('edit.toastIconExtractFailed'), { type: 'error' });
       }
       return;
     }
@@ -1171,13 +1176,13 @@ export function renderEditModal(id, initialTab = 'general') {
 
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Lade Infos...';
+      actionBtn.textContent = `⏳ ${t('edit.btnLoadingInfo')}`;
       const res = await window.electronAPI.fetchSoftwareMetadata(payload);
       actionBtn.disabled = false;
       actionBtn.textContent = orig;
 
       if (!res.success) {
-        return showToast(res.error || 'Konnte keine Details laden.', { type: 'warn', duration: 5000 });
+        return showToast(res.error || t('edit.toastDetailsLoadFailed'), { type: 'warn', duration: 5000 });
       }
 
       const m = res.metadata;
@@ -1192,7 +1197,7 @@ export function renderEditModal(id, initialTab = 'general') {
       <label class="autofill-row">
         <input type="checkbox" data-af-field="description" ${hasDesc ? '' : 'checked'}>
         <div>
-          <strong>Beschreibung</strong> ${hasDesc ? '<span class="muted">(vorhanden - überschreiben?)</span>' : '<span class="text-ok">(leer)</span>'}
+          <strong>${escapeHTML(t('edit.afDescTitle'))}</strong> ${hasDesc ? `<span class="muted">${escapeHTML(t('edit.afExistingOverwrite'))}</span>` : `<span class="text-ok">${escapeHTML(t('edit.afEmpty'))}</span>`}
           <p class="autofill-snippet">${escapeHTML(m.description)}</p>
         </div>
       </label>
@@ -1203,7 +1208,7 @@ export function renderEditModal(id, initialTab = 'general') {
       <label class="autofill-row">
         <input type="checkbox" data-af-field="tags" ${hasTags ? '' : 'checked'}>
         <div>
-          <strong>Tags ergänzen</strong>
+          <strong>${escapeHTML(t('edit.afAddTags'))}</strong>
           <p class="autofill-snippet">${escapeHTML(m.tags.join(', '))}</p>
         </div>
       </label>
@@ -1217,7 +1222,7 @@ export function renderEditModal(id, initialTab = 'general') {
       <label class="autofill-row">
         <input type="checkbox" data-af-field="links" ${hasLinks ? '' : 'checked'}>
         <div>
-          <strong>Links ergänzen</strong>
+          <strong>${escapeHTML(t('edit.afAddLinks'))}</strong>
           <p class="autofill-snippet">${escapeHTML(linkSummary)}</p>
         </div>
       </label>
@@ -1225,17 +1230,17 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       if (rows.length === 0) {
-        return showToast(`Quelle "${res.sourceLabel}" liefert keine zusätzlichen Details.`, { type: 'info' });
+        return showToast(t('edit.toastNoExtraDetails', { source: res.sourceLabel }), { type: 'info' });
       }
 
       box.dataset.payload = JSON.stringify(m);
       box.hidden = false;
       box.innerHTML = `
     <div class="autofill-head">
-      <strong>Gefundene Details (${escapeHTML(res.sourceLabel)})</strong>
+      <strong>${escapeHTML(t('edit.afPreviewTitle', { source: res.sourceLabel }))}</strong>
       <div class="footer-group">
-        <button type="button" class="btn btn-primary btn-xs" data-edit-action="autofill-apply">Ausgewählte übernehmen</button>
-        <button type="button" class="btn btn-ghost btn-xs" data-edit-action="autofill-close">Schließen</button>
+        <button type="button" class="btn btn-primary btn-xs" data-edit-action="autofill-apply">${escapeHTML(t('edit.afApplySelected'))}</button>
+        <button type="button" class="btn btn-ghost btn-xs" data-edit-action="autofill-close">${escapeHTML(t('common.close'))}</button>
       </div>
     </div>
     <div class="autofill-list">${rows.join('')}</div>
@@ -1290,7 +1295,7 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       box.hidden = true;
-      showToast(applied > 0 ? `${applied} Bereich(e) übernommen.` : 'Nichts ausgewählt.', {
+      showToast(applied > 0 ? t('edit.toastAutofillApplied', { count: applied }) : t('edit.toastAutofillNone'), {
         type: applied > 0 ? 'success' : 'info',
       });
       return;
@@ -1300,7 +1305,7 @@ export function renderEditModal(id, initialTab = 'general') {
     if (act === 'save') {
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
-      actionBtn.textContent = '⏳ Speichere...';
+      actionBtn.textContent = `⏳ ${t('common.saving')}`;
 
       const linksObj = {};
       for (const line of qsTextarea(modal, '#editLinks').value.split('\n')) {
@@ -1378,12 +1383,12 @@ export function renderEditModal(id, initialTab = 'general') {
       if (res.success) {
         await window.electronAPI.scanLocalVersions({ itemIds: [item.id], silent: true });
         await triggerCatalogReload();
-        showToast('Änderungen gespeichert.', { type: 'success' });
+        showToast(t('edit.toastSaved'), { type: 'success' });
         openDetailModal(item.id);
       } else {
         actionBtn.disabled = false;
         actionBtn.textContent = orig;
-        showToast(`Fehler beim Speichern: ${res.error}`, { type: 'error', duration: 6000 });
+        showToast(t('edit.toastSaveError', { error: res.error }), { type: 'error', duration: 6000 });
       }
     }
   };

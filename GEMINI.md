@@ -17,6 +17,7 @@
 - HTML aus Rich-Text oder Markdown immer mit `DOMPurify` (`src/renderer/utils/sanitize.js`) bereinigen.
 - Keine blockierenden `alert()`, `confirm()` oder `prompt()` verwenden - nutze `showToast()` oder In-App-Modals.
 - Begrifflichkeit im gesamten UI: Konsequent **"Archiv"** statt "NAS" verwenden.
+- **Konsequente Mehrsprachigkeit (i18n):** Alle neuen sichtbaren UI-Texte muessen zwingend ueber `t(...)` (bzw. `data-i18n*`) laufen und immer gleichzeitig in `src/locales/en.json` und `src/locales/de.json` gepflegt werden (keine hartcodierten UI-Texte).
 - Alle langlaufenden Vorgänge über `src/main/jobs.js` (parallele, abbrechbare Jobs) abwickeln.
 - Silent-Install ist IMMER opt-in. Standard bleibt interaktiv (Adware-Schutz).
 - Der Archiv-Aufräumer läuft niemals automatisch und fasst weder `_last`-Ordner noch Programme mit `keepAllVersions: true` an.

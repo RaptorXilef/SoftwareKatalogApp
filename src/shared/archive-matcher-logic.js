@@ -181,7 +181,12 @@ function findInstalledWingetMatch(item, installedApps, usedPackageIds) {
     const pid = String(app.packageId || '').trim();
     if (!pid || usedPackageIds.has(pid.toLowerCase())) continue;
     if (app.archiveItemId && app.archiveItemId === item.id) {
-      return { app, reason: 'Installiertes PC-Programm (Katalog-Verknüpfung)' };
+      return {
+        app,
+        reason: 'Installiertes PC-Programm (Katalog-Verknüpfung)',
+        reasonKey: 'archiveMatcher.reasonCatalogLink',
+        reasonParams: {},
+      };
     }
   }
 
@@ -192,7 +197,12 @@ function findInstalledWingetMatch(item, installedApps, usedPackageIds) {
       if (!pid || usedPackageIds.has(pid.toLowerCase())) continue;
       const pcPaths = collectPaths([app.displayIcon, app.installLocation, extractExeFromCommand(app.uninstallString)]);
       if (pathsMatch(itemPaths, pcPaths)) {
-        return { app, reason: 'Installiertes PC-Programm (Pfad)' };
+        return {
+          app,
+          reason: 'Installiertes PC-Programm (Pfad)',
+          reasonKey: 'archiveMatcher.reasonPath',
+          reasonParams: {},
+        };
       }
     }
   }
@@ -206,7 +216,12 @@ function findInstalledWingetMatch(item, installedApps, usedPackageIds) {
       const pcFull = normalizeText(app.name);
       const pcStripped = normalizeText(stripVersionAndNoise(app.name));
       if ((pcFull && itemNames.has(pcFull)) || (pcStripped && itemNames.has(pcStripped))) {
-        return { app, reason: 'Installiertes PC-Programm (Name)' };
+        return {
+          app,
+          reason: 'Installiertes PC-Programm (Name)',
+          reasonKey: 'archiveMatcher.reasonName',
+          reasonParams: {},
+        };
       }
 
       const idParts = pid
@@ -218,10 +233,20 @@ function findInstalledWingetMatch(item, installedApps, usedPackageIds) {
       const combinedId = normalizeText(pid.replace(/\./g, ' '));
 
       if (idTail.length >= 3 && itemCompacts.has(idTail)) {
-        return { app, reason: 'Winget-Export ID' };
+        return {
+          app,
+          reason: 'Winget-Export ID',
+          reasonKey: 'archiveMatcher.reasonWingetExport',
+          reasonParams: {},
+        };
       }
       if (idPub && idTail && combinedId && itemNames.has(combinedId)) {
-        return { app, reason: 'Winget-Export ID' };
+        return {
+          app,
+          reason: 'Winget-Export ID',
+          reasonKey: 'archiveMatcher.reasonWingetExport',
+          reasonParams: {},
+        };
       }
     }
   }
@@ -257,6 +282,8 @@ export function matchArchiveWithInstalledWinget(unmatchedItems = [], installedWi
         confidence: 'high',
         preselected: true,
         matchReason: hit.reason,
+        matchReasonKey: hit.reasonKey,
+        matchReasonParams: hit.reasonParams || {},
         selectedPackageId: candidate.packageId,
         candidates: [candidate],
       });
@@ -270,8 +297,11 @@ export function matchArchiveWithInstalledWinget(unmatchedItems = [], installedWi
 
 /**
  * Bewertet und dedupliziert `winget search`-Kandidaten für einen Archiv-Ordner.
+ * @param {Record<string, any>} item
+ * @param {Array<Record<string, any>>} [searchResults]
+ * @param {{ limit?: number, locale?: string }} [options]
  */
-export function rankSearchCandidates(item, searchResults = [], { limit = 8 } = {}) {
+export function rankSearchCandidates(item, searchResults = [], { limit = 8, locale = 'de' } = {}) {
   const { normalized: itemNames, compact: itemCompacts } = getItemNameVariants(item);
   const itemTokens = new Set();
   for (const name of itemNames) {
@@ -340,17 +370,29 @@ export function rankSearchCandidates(item, searchResults = [], { limit = 8 } = {
     });
   }
 
+  const effectiveLocale = locale || 'de';
   return [...deduped.values()]
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }))
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, effectiveLocale, { sensitivity: 'base' }))
     .slice(0, limit);
 }
 
 /**
  * Erzeugt einen Stufe-2-Checklisten-Eintrag (niemals ungefragt vorab angehakt).
+ * @param {Record<string, any>} item
+ * @param {Array<Record<string, any>>} [searchResults]
+ * @param {{ query?: string, locale?: string }} [options]
  */
-export function buildStage2Entry(item, searchResults = [], { query = '' } = {}) {
-  const candidates = rankSearchCandidates(item, searchResults);
+export function buildStage2Entry(item, searchResults = [], { query = '', locale = 'de' } = {}) {
+  const candidates = rankSearchCandidates(item, searchResults, { locale });
   const topScore = candidates[0]?.score || 0;
+  const matchReasonKey =
+    candidates.length > 0
+      ? query
+        ? 'archiveMatcher.reasonSearchQuery'
+        : 'archiveMatcher.reasonSearch'
+      : query
+        ? 'archiveMatcher.reasonNoHitQuery'
+        : 'archiveMatcher.reasonNoHit';
 
   return {
     itemId: item.id,
@@ -364,6 +406,8 @@ export function buildStage2Entry(item, searchResults = [], { query = '' } = {}) 
       candidates.length > 0
         ? `Winget-Suche${query ? ` ("${query}")` : ''}`
         : `Kein Winget-Treffer${query ? ` für "${query}"` : ''}`,
+    matchReasonKey,
+    matchReasonParams: query ? { query } : {},
     selectedPackageId: candidates[0]?.packageId || '',
     candidates,
   };

@@ -1,8 +1,8 @@
 import { filterIgnoredEntries } from '../../shared/ignore-logic.js';
-import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { showToast } from '../components/toast.js';
 import { refreshIgnoredUpdates, state } from '../state.js';
 import { closestButton, qs, qsInput } from '../utils/dom.js';
+import { getI18nLocale, getLocalizedProviderBadge, t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -11,16 +11,16 @@ let activeIgnoreModalToken = 0;
 
 function formatRuleBadge(entry) {
   if (entry.mode === 'all') {
-    return '<span class="ignore-rule-pill is-all">🚫 Alle Updates</span>';
+    return `<span class="ignore-rule-pill is-all">🚫 ${escapeHTML(t('ignoreList.ruleAll'))}</span>`;
   }
-  const ver = entry.ignoredVersion ? `v${entry.ignoredVersion}` : 'Version';
-  return `<span class="ignore-rule-pill is-version">⏭️ Nur ${escapeHTML(ver)}</span>`;
+  const ver = entry.ignoredVersion ? `v${entry.ignoredVersion}` : t('ignoreList.ruleVersionFallback');
+  return `<span class="ignore-rule-pill is-version">⏭️ ${escapeHTML(t('ignoreList.ruleVersion', { version: ver }))}</span>`;
 }
 
 function formatCreatedDate(ts) {
   if (!Number.isFinite(Number(ts)) || Number(ts) <= 0) return '';
   try {
-    return new Date(Number(ts)).toLocaleDateString('de-DE');
+    return new Date(Number(ts)).toLocaleDateString(getI18nLocale() || 'en');
   } catch {
     return '';
   }
@@ -31,18 +31,17 @@ function showImportModeDialog(existingCount) {
     defaultAction: 'cancel',
     html: `
       <div class="modal-header">
-        <h2>📥 Ignorierliste importieren</h2>
-        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+        <h2>📥 ${escapeHTML(t('ignoreList.importTitle'))}</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="${escapeHTML(t('common.cancel'))}" aria-label="${escapeHTML(t('common.cancel'))}">✕</button>
       </div>
       <div class="modal-body collision-warning-body">
         <p>
-          Es sind bereits <strong>${existingCount} Eintrag/Eintraege</strong> in der Ignorierliste vorhanden.
-          Wie sollen die importierten Regeln uebernommen werden?
+          ${escapeHTML(t('ignoreList.importExistingNotice', { count: existingCount }))}
         </p>
         <div class="collision-actions-grid">
-          <button type="button" class="btn btn-primary" data-dialog-action="merge">🔗 Zusammenführen (Merge)</button>
-          <button type="button" class="btn btn-danger" data-dialog-action="replace">♻️ Bestehende Liste ersetzen</button>
-          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="merge">🔗 ${escapeHTML(t('ignoreList.importMerge'))}</button>
+          <button type="button" class="btn btn-danger" data-dialog-action="replace">♻️ ${escapeHTML(t('ignoreList.importReplace'))}</button>
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">${escapeHTML(t('common.cancel'))}</button>
         </div>
       </div>
     `,
@@ -54,10 +53,9 @@ function buildEntriesListHtml(entries, filteredEntries, { isBusy = false } = {})
   if (entries.length === 0) {
     return `
       <div class="ignore-empty-box">
-        <strong>Keine Updates ignoriert</strong>
+        <strong>${escapeHTML(t('ignoreList.emptyTitle'))}</strong>
         <p class="muted">
-          Per Rechtsklick auf eine Karte im Tab <strong>Updates</strong> kannst du einzelne Versionen oder alle
-          künftigen Updates eines Programms ignorieren.
+          ${escapeHTML(t('ignoreList.emptyDescPrefix'))}<strong>${escapeHTML(t('tabs.updates'))}</strong>${escapeHTML(t('ignoreList.emptyDescSuffix'))}
         </p>
       </div>
     `;
@@ -66,15 +64,15 @@ function buildEntriesListHtml(entries, filteredEntries, { isBusy = false } = {})
   if (filteredEntries.length === 0) {
     return `
       <div class="ignore-empty-box">
-        <strong>Keine passenden Einträge</strong>
-        <p class="muted">Passe den Suchfilter an, um ignorierte Updates anzuzeigen.</p>
+        <strong>${escapeHTML(t('ignoreList.noMatchTitle'))}</strong>
+        <p class="muted">${escapeHTML(t('ignoreList.noMatchDesc'))}</p>
       </div>
     `;
   }
 
   return filteredEntries
     .map((entry) => {
-      const sourceInfo = getProviderBadgeInfo(entry.packageManager || 'archive', state.providers);
+      const sourceInfo = getLocalizedProviderBadge(entry.packageManager || 'archive', state.providers);
       const sourceBadge = sourceInfo
         ? `<span class="provider-badge ${escapeHTML(sourceInfo.badgeClass)}">${escapeHTML(sourceInfo.label)}</span>`
         : '';
@@ -91,7 +89,7 @@ function buildEntriesListHtml(entries, filteredEntries, { isBusy = false } = {})
             </div>
             <div class="ignore-entry-meta">
               ${pkgIdHtml}
-              ${dateStr ? `<span class="muted">Hinzugefügt: ${escapeHTML(dateStr)}</span>` : ''}
+              ${dateStr ? `<span class="muted">${escapeHTML(t('ignoreList.addedDate', { date: dateStr }))}</span>` : ''}
             </div>
           </div>
           <button
@@ -102,7 +100,7 @@ function buildEntriesListHtml(entries, filteredEntries, { isBusy = false } = {})
             data-ignore-name="${escapeHTML(entry.name || entry.packageKey)}"
             ${isBusy ? 'disabled' : ''}
           >
-            ↩️ Wieder zulassen
+            ↩️ ${escapeHTML(t('ignoreList.allowAgainBtn'))}
           </button>
         </article>
       `;
@@ -149,8 +147,8 @@ export async function renderIgnoreListModal() {
     if (footerCount) {
       footerCount.textContent =
         filtered.length === entries.length
-          ? `${entries.length} Eintrag/Einträge`
-          : `${filtered.length} von ${entries.length} Einträgen angezeigt`;
+          ? t('ignoreList.countTotal', { count: entries.length })
+          : t('ignoreList.countFiltered', { filtered: filtered.length, total: entries.length });
     }
     if (clearSearchBtn) {
       clearSearchBtn.hidden = searchQuery.length === 0;
@@ -162,19 +160,19 @@ export async function renderIgnoreListModal() {
     const entries = Array.isArray(state.ignoredUpdates) ? state.ignoredUpdates : [];
     const filtered = filterIgnoredEntries(entries, searchQuery);
     const clearBtnClass = confirmClearArmed ? 'btn btn-danger' : 'btn btn-ghost';
-    const clearBtnLabel = confirmClearArmed ? '⚠️ Wirklich alle entfernen?' : '🗑️ Alle entfernen';
+    const clearBtnLabel = confirmClearArmed ? `⚠️ ${t('ignoreList.clearArmed')}` : `🗑️ ${t('ignoreList.clearAll')}`;
     const footerText =
       filtered.length === entries.length
-        ? `${entries.length} Eintrag/Einträge`
-        : `${filtered.length} von ${entries.length} Einträgen angezeigt`;
+        ? t('ignoreList.countTotal', { count: entries.length })
+        : t('ignoreList.countFiltered', { filtered: filtered.length, total: entries.length });
 
     modal.innerHTML = `
       <div class="modal-header">
         <div>
-          <h2>🙈 Ignorierte Updates</h2>
-          <span class="muted">Unterdrückte Versionen und Pakete in <code>data/ignored-updates.json</code></span>
+          <h2>🙈 ${escapeHTML(t('ignoreList.title'))}</h2>
+          <span class="muted">${escapeHTML(t('ignoreList.subtitle'))}</span>
         </div>
-        <button type="button" class="icon-btn" data-ignore-action="close" title="Schließen" aria-label="Schließen">✕</button>
+        <button type="button" class="icon-btn" data-ignore-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
       </div>
 
       <div class="modal-body ignore-modal-body">
@@ -183,7 +181,7 @@ export async function renderIgnoreListModal() {
             <input
               type="text"
               id="ignoreSearchInput"
-              placeholder="Ignorierte Pakete filtern..."
+              placeholder="${escapeHTML(t('ignoreList.searchPlaceholder'))}"
               value="${escapeHTML(searchQuery)}"
               autocomplete="off"
               ${isBusy ? 'disabled' : ''}
@@ -193,19 +191,19 @@ export async function renderIgnoreListModal() {
               id="btnClearIgnoreSearch"
               class="clear-btn"
               data-ignore-action="clear-search"
-              title="Suche leeren"
+              title="${escapeHTML(t('toolbar.clearSearch'))}"
               ${searchQuery.length === 0 ? 'hidden' : ''}
             >✕</button>
           </div>
           <div class="ignore-toolbar-actions">
             <button type="button" class="btn btn-ghost" data-ignore-action="export" ${entries.length === 0 || isBusy ? 'disabled' : ''}>
-              📤 Exportieren
+              📤 ${escapeHTML(t('common.export'))}
             </button>
             <button type="button" class="btn btn-ghost" data-ignore-action="import" ${isBusy ? 'disabled' : ''}>
-              📥 Importieren
+              📥 ${escapeHTML(t('common.import'))}
             </button>
             <button type="button" id="btnIgnoreClearAll" class="${clearBtnClass}" data-ignore-action="clear-all" ${entries.length === 0 || isBusy ? 'disabled' : ''}>
-              ${clearBtnLabel}
+              ${escapeHTML(clearBtnLabel)}
             </button>
           </div>
         </div>
@@ -218,7 +216,7 @@ export async function renderIgnoreListModal() {
       <div class="modal-footer">
         <span id="ignoreListFooterCount" class="muted">${escapeHTML(footerText)}</span>
         <div class="footer-group">
-          <button type="button" class="btn btn-ghost" data-ignore-action="close" ${isBusy ? 'disabled' : ''}>Schließen</button>
+          <button type="button" class="btn btn-ghost" data-ignore-action="close" ${isBusy ? 'disabled' : ''}>${escapeHTML(t('common.close'))}</button>
         </div>
       </div>
     `;
@@ -264,7 +262,7 @@ export async function renderIgnoreListModal() {
     if (action === 'remove') {
       disarmClear();
       const entryId = btn.dataset.ignoreId || '';
-      const entryName = btn.dataset.ignoreName || 'Paket';
+      const entryName = btn.dataset.ignoreName || t('ignoreList.packageFallback');
       isBusy = true;
       render();
       try {
@@ -272,9 +270,9 @@ export async function renderIgnoreListModal() {
         if (res?.success) {
           state.ignoredUpdates = Array.isArray(res.entries) ? res.entries : [];
           await triggerCatalogReload();
-          showToast(`Updates für "${entryName}" wieder zugelassen.`, { type: 'success' });
+          showToast(t('ignoreList.removedToast', { name: entryName }), { type: 'success' });
         } else {
-          showToast(res?.error || 'Eintrag konnte nicht entfernt werden.', { type: 'error' });
+          showToast(res?.error || t('ignoreList.removeErrorToast'), { type: 'error' });
         }
       } finally {
         isBusy = false;
@@ -304,9 +302,9 @@ export async function renderIgnoreListModal() {
         if (res?.success) {
           state.ignoredUpdates = [];
           await triggerCatalogReload();
-          showToast('Alle ignorierten Updates wurden wieder zugelassen.', { type: 'success' });
+          showToast(t('ignoreList.clearedToast'), { type: 'success' });
         } else {
-          showToast(res?.error || 'Ignorierliste konnte nicht geleert werden.', { type: 'error' });
+          showToast(res?.error || t('ignoreList.clearErrorToast'), { type: 'error' });
         }
       } finally {
         isBusy = false;
@@ -322,9 +320,9 @@ export async function renderIgnoreListModal() {
       try {
         const res = await window.electronAPI.exportIgnoredUpdates();
         if (res?.success) {
-          showToast(`${res.count || 0} Ignorier-Regel(n) exportiert.`, { type: 'success' });
+          showToast(t('ignoreList.exportedToast', { count: res.count || 0 }), { type: 'success' });
         } else if (res?.error && !res.canceled) {
-          showToast(`Export fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+          showToast(t('ignoreList.exportErrorToast', { error: res.error }), { type: 'error', duration: 6000 });
         }
       } finally {
         isBusy = false;
@@ -352,11 +350,15 @@ export async function renderIgnoreListModal() {
           await triggerCatalogReload();
           const summary =
             importMode === 'replace'
-              ? `${res.added || 0} Regel(n) importiert (Liste ersetzt).`
-              : `${res.added || 0} neu, ${res.updated || 0} aktualisiert, ${res.skipped || 0} unverändert.`;
-          showToast(`Import abgeschlossen: ${summary}`, { type: 'success', duration: 5000 });
+              ? t('ignoreList.importSummaryReplace', { added: res.added || 0 })
+              : t('ignoreList.importSummaryMerge', {
+                  added: res.added || 0,
+                  updated: res.updated || 0,
+                  skipped: res.skipped || 0,
+                });
+          showToast(t('ignoreList.importedToast', { summary }), { type: 'success', duration: 5000 });
         } else if (res?.error && !res.canceled) {
-          showToast(`Import fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+          showToast(t('ignoreList.importErrorToast', { error: res.error }), { type: 'error', duration: 6000 });
         }
       } finally {
         isBusy = false;

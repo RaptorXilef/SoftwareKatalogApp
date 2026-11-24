@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
 import { hasTrayStartupArg } from '../shared/background-update-logic.js';
+import { t } from '../shared/i18n.js';
 import { buildExportPolicyPayload, validateImportPolicyPayload } from '../shared/policy-logic.js';
 import { checkAppUpdate, downloadAndInstallAppUpdate } from './app-updater.js';
 import { executeArchiveCleanup, previewArchiveCleanup, setKeepAllVersions } from './archive-cleaner.js';
@@ -165,6 +166,7 @@ function isSettingsLockedByAuth(authStatus) {
 
 function createWindow({ showOnReady = true } = {}) {
   const windowOptions = {
+    title: t('app.title'),
     width: 1280,
     height: 860,
     minWidth: 900,
@@ -280,7 +282,7 @@ function handleIpc(channel, handler) {
         success: false,
         authRequired: true,
         code: access.code || 'AUTH_REQUIRED',
-        error: access.error || 'Admin-Anmeldung erforderlich.',
+        error: access.error || t('dialogs.authRequiredError'),
       };
     }
     return handler(event, ...args);
@@ -353,7 +355,7 @@ function registerIpcHandlers() {
 
   handleIpc('add-software', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Ordner der neuen Software auswählen',
+      title: t('dialogs.addSoftwareTitle'),
       properties: ['openDirectory'],
     });
     if (canceled || filePaths.length === 0) return { success: false, canceled: true };
@@ -424,7 +426,7 @@ function registerIpcHandlers() {
 
   handleIpc('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Speicherort auf diesem PC auswählen',
+      title: t('dialogs.copyFilesTitle'),
       properties: ['openDirectory'],
     });
     if (canceled || filePaths.length === 0) return { success: false, canceled: true };
@@ -513,7 +515,7 @@ function registerIpcHandlers() {
   handleIpc('select-dir', async (_e, opts = {}) => {
     const defaultPath = opts?.defaultPath || (opts?.defaultToArchive ? getConfig().absTargetPath : undefined);
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: opts?.title || 'Ordner auswählen',
+      title: opts?.title || t('dialogs.selectDirTitle'),
       defaultPath,
       properties: ['openDirectory', 'createDirectory'],
     });
@@ -521,7 +523,7 @@ function registerIpcHandlers() {
   });
   handleIpc('select-file', async (_e, filters, returnAbsolute = false) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Datei auswählen',
+      title: t('dialogs.selectFileTitle'),
       properties: ['openFile'],
       filters,
     });
@@ -567,9 +569,9 @@ function registerIpcHandlers() {
     try {
       const current = getAccessPolicy();
       const { canceled, filePath } = await dialog.showSaveDialog({
-        title: 'Zugriffsrichtlinien als JSON exportieren',
+        title: t('dialogs.policyExportTitle'),
         defaultPath: 'SoftwareKatalog_Zugriffsrichtlinien.json',
-        filters: [{ name: 'Software-Katalog Richtlinien (JSON)', extensions: ['json'] }],
+        filters: [{ name: t('dialogs.policyFilterName'), extensions: ['json'] }],
       });
       if (canceled || !filePath) {
         return { success: false, canceled: true };
@@ -584,9 +586,9 @@ function registerIpcHandlers() {
   handleIpc('policy-import', async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog({
-        title: 'Zugriffsrichtlinien aus JSON importieren',
+        title: t('dialogs.policyImportTitle'),
         properties: ['openFile'],
-        filters: [{ name: 'Software-Katalog Richtlinien (JSON)', extensions: ['json'] }],
+        filters: [{ name: t('dialogs.policyFilterName'), extensions: ['json'] }],
       });
       if (canceled || filePaths.length === 0) {
         return { success: false, canceled: true };
@@ -596,11 +598,11 @@ function registerIpcHandlers() {
       try {
         parsed = JSON.parse(rawText);
       } catch {
-        return { success: false, error: 'Ungueltige JSON-Datei.' };
+        return { success: false, error: t('dialogs.invalidJsonFile') };
       }
       const validation = validateImportPolicyPayload(parsed);
       if (!validation.valid) {
-        return { success: false, error: 'error' in validation ? validation.error : 'Ungueltige Richtlinie.' };
+        return { success: false, error: 'error' in validation ? validation.error : t('dialogs.invalidPolicy') };
       }
       return updateAccessPolicy(validation.accessPolicy);
     } catch (e) {
@@ -649,6 +651,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       updateTrayState({});
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {
+          win.setTitle(t('app.title'));
           win.webContents.send('language-changed', i18nState);
         }
       }

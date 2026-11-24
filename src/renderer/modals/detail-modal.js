@@ -1,43 +1,47 @@
 import { isIdLikeDisplayName } from '../../shared/installed-merger.js';
 import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
 import { formatMultiRootFileLabel } from '../../shared/multi-archive-logic.js';
-import { buildRemotePackageItem, canDownloadOnline, getProviderBadgeInfo } from '../../shared/unified-packages.js';
+import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
 import { evaluateItemPolicy, getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
+import { getI18nLocale, getLocalizedPolicyError, getLocalizedProviderBadge, t } from '../utils/i18n.js';
 import { renderMarkdownSafe } from '../utils/markdown.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } from './archive-target-modal.js';
 import { closeModal, openEditModal, resetModalContent, triggerCatalogReload } from './index.js';
 import { ensureAdminAuthenticated } from './login-modal.js';
 
-const SOURCE_LABELS = {
-  winget: 'Winget',
-  provider: 'Paketmanager',
-  github: 'GitHub',
-  web: 'Webseite',
-};
+function getSourceLabel(sourceType) {
+  if (sourceType === 'winget') return t('detail.sourceWinget');
+  if (sourceType === 'provider') return t('detail.sourceProvider');
+  if (sourceType === 'github') return t('detail.sourceGithub');
+  if (sourceType === 'web') return t('detail.sourceWeb');
+  return '';
+}
 
-const STATUS_BADGES = {
-  webupdate: { label: 'Web-Update verfügbar', cls: 'is-webupdate' },
-  update: { label: 'Archiv-Update verfügbar', cls: 'is-update' },
-  installed: { label: 'Aktuell installiert', cls: 'is-installed' },
-  newer: { label: 'PC neuer als Archiv', cls: 'is-newer' },
-};
+function getStatusBadge(status) {
+  if (status === 'webupdate') return { label: t('detail.statusWebUpdate'), cls: 'is-webupdate' };
+  if (status === 'update') return { label: t('detail.statusArchiveUpdate'), cls: 'is-update' };
+  if (status === 'installed') return { label: t('detail.statusInstalled'), cls: 'is-installed' };
+  if (status === 'newer') return { label: t('detail.statusNewer'), cls: 'is-newer' };
+  return null;
+}
 
-const ORIGIN_CHIPS = {
-  both: { label: 'PC & Archiv', cls: '' },
-  archive: { label: 'Nur im Archiv', cls: 'chip-origin-archive' },
-  pc: { label: 'Nur auf diesem PC', cls: 'chip-origin-pc' },
-};
+function getOriginChip(origin) {
+  if (origin === 'both') return { label: t('detail.originBoth'), cls: '' };
+  if (origin === 'archive') return { label: t('detail.originArchive'), cls: 'chip-origin-archive' };
+  if (origin === 'pc') return { label: t('detail.originPc'), cls: 'chip-origin-pc' };
+  return null;
+}
 
 let activeRenderToken = 0;
 
 function formatCacheTimestamp(ts) {
   if (!ts) return '';
   try {
-    return new Intl.DateTimeFormat('de-DE', {
+    return new Intl.DateTimeFormat(getI18nLocale() || 'en', {
       dateStyle: 'short',
       timeStyle: 'short',
     }).format(new Date(ts));
@@ -61,7 +65,7 @@ function getProviderMeta(effectivePm) {
     .trim()
     .toLowerCase();
   const prov = cleanPm ? state.providers.find((p) => p.id === cleanPm) || null : null;
-  const badge = getProviderBadgeInfo(cleanPm, state.providers);
+  const badge = getLocalizedProviderBadge(cleanPm, state.providers);
   return {
     provider: prov,
     label: badge?.label || (cleanPm === 'winget' ? 'Winget' : cleanPm),
@@ -86,7 +90,7 @@ function buildArchiveHeroAction(item, st) {
   if (st.hasWebUpdate && onlineReady) {
     return {
       action: 'web-download',
-      label: `⬇️ Update v${st.webVersion} ins Archiv laden`,
+      label: `⬇️ ${t('detail.heroWebDownload', { version: st.webVersion })}`,
       cls: 'btn-online',
     };
   }
@@ -96,7 +100,7 @@ function buildArchiveHeroAction(item, st) {
       action: 'install-file',
       file: firstFile,
       version: st.archiveVersion,
-      label: `⬆️ Jetzt aktualisieren (v${st.archiveVersion})`,
+      label: `⬆️ ${t('detail.heroInstallFileUpdate', { version: st.archiveVersion })}`,
       cls: 'btn-archive',
     };
   }
@@ -106,7 +110,9 @@ function buildArchiveHeroAction(item, st) {
       action: 'install-file',
       file: firstFile,
       version: st.archiveVersion,
-      label: st.archiveVersion ? `▶️ Installieren (v${st.archiveVersion})` : '▶️ Setup starten',
+      label: st.archiveVersion
+        ? `▶️ ${t('detail.heroInstallFileVersion', { version: st.archiveVersion })}`
+        : `▶️ ${t('detail.heroInstallFileGeneric')}`,
       cls: 'btn-primary',
     };
   }
@@ -114,7 +120,7 @@ function buildArchiveHeroAction(item, st) {
   if (item.isInstalled && item.validInstallPath) {
     return {
       action: 'launch-local',
-      label: '🚀 Programm starten',
+      label: `🚀 ${t('detail.heroLaunchLocal')}`,
       cls: 'btn-local',
     };
   }
@@ -127,28 +133,28 @@ function buildNvmUseButtonHtml(item, { large = false } = {}) {
   const pkgVer = getEffectivePackageId(item);
   if (!pkgVer) return '';
   if (item.isActive) {
-    return '<button type="button" class="btn btn-ghost" disabled>✅ Aktive Node-Version</button>';
+    return `<button type="button" class="btn btn-ghost" disabled>✅ ${escapeHTML(t('detail.heroNvmActive'))}</button>`;
   }
   const sizeCls = large ? 'btn-lg ' : '';
-  return `<button type="button" class="btn ${sizeCls}btn-local" data-detail-action="nvm-use">✅ Als aktive Node-Version setzen (nvm use ${escapeHTML(pkgVer)})</button>`;
+  return `<button type="button" class="btn ${sizeCls}btn-local" data-detail-action="nvm-use">✅ ${escapeHTML(t('detail.heroNvmUse', { version: pkgVer }))}</button>`;
 }
 
 function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, policyEval = null }) {
   const buttons = [];
-  const provLabel = provMeta.label || 'Paketmanager';
+  const provLabel = provMeta.label || t('detail.sourceProvider');
   const canProviderInstall = provMeta.canInstall && Boolean(getEffectivePackageId(item));
   const blockedByPolicy = Boolean(policyEval && !policyEval.allowed);
   const blockedAttr = blockedByPolicy
-    ? `disabled title="${escapeHTML(policyEval.error || 'Durch Zugriffsrichtlinie blockiert')}"`
+    ? `disabled title="${escapeHTML(getLocalizedPolicyError(policyEval, 'policy.blockedDefault'))}"`
     : '';
 
   if (item.origin === 'remote') {
     const installLabel =
       item.isInstalled && st.hasWebUpdate
-        ? `⬆️ Über ${provLabel} aktualisieren (v${st.webVersion})`
+        ? `⬆️ ${t('detail.heroRemoteUpdate', { provider: provLabel, version: st.webVersion })}`
         : item.isInstalled
-          ? `🔄 Erneut über ${provLabel} installieren`
-          : '⬇️ Jetzt installieren';
+          ? `🔄 ${t('detail.heroRemoteReinstall', { provider: provLabel })}`
+          : `⬇️ ${t('detail.heroRemoteInstall')}`;
     buttons.push(
       `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install" ${blockedAttr}>${escapeHTML(installLabel)}</button>`
     );
@@ -160,11 +166,11 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, po
 
     if (matchedArchive) {
       buttons.push(
-        '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
+        `<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 ${escapeHTML(t('detail.heroOpenArchive'))}</button>`
       );
     } else if (getEffectivePackageManager(item) !== 'archive' && getEffectivePackageId(item)) {
       buttons.push(
-        '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+        `<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 ${escapeHTML(t('detail.heroSaveToArchive'))}</button>`
       );
     }
   } else if (item.origin === 'pc') {
@@ -174,15 +180,15 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, po
     }
     if (canProviderInstall && st.hasWebUpdate) {
       buttons.push(
-        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install" ${blockedAttr}>⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install" ${blockedAttr}>⬆️ ${escapeHTML(t('detail.heroPcUpdate', { provider: provLabel, version: st.webVersion }))}</button>`
       );
     } else if (!nvmBtn && item.validInstallPath) {
       buttons.push(
-        '<button type="button" class="btn btn-lg btn-local" data-detail-action="launch-local">🚀 Programm starten</button>'
+        `<button type="button" class="btn btn-lg btn-local" data-detail-action="launch-local">🚀 ${escapeHTML(t('detail.heroLaunchLocal'))}</button>`
       );
     }
     buttons.push(
-      '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+      `<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 ${escapeHTML(t('detail.heroSaveToArchive'))}</button>`
     );
   } else {
     const hero = buildArchiveHeroAction(item, st);
@@ -197,10 +203,10 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, po
     } else if (canProviderInstall) {
       const provBtnLabel =
         item.isInstalled && st.hasWebUpdate && st.webVersion
-          ? `⬆️ Ueber ${provLabel} aktualisieren (v${st.webVersion})`
+          ? `⬆️ ${t('detail.heroProviderUpdateVer', { provider: provLabel, version: st.webVersion })}`
           : item.isInstalled
-            ? `⬆️ Ueber ${provLabel} aktualisieren`
-            : `⬇️ Ueber ${provLabel} installieren`;
+            ? `⬆️ ${t('detail.heroProviderUpdate', { provider: provLabel })}`
+            : `⬇️ ${t('detail.heroProviderInstall', { provider: provLabel })}`;
       buttons.push(
         `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install" ${blockedAttr}>${escapeHTML(provBtnLabel)}</button>`
       );
@@ -211,19 +217,19 @@ function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, po
     }
     if (item.isInstalled && item.validInstallPath && hero?.action !== 'launch-local') {
       buttons.push(
-        '<button type="button" class="btn btn-ghost" data-detail-action="launch-local">🚀 Programm starten</button>'
+        `<button type="button" class="btn btn-ghost" data-detail-action="launch-local">🚀 ${escapeHTML(t('detail.heroLaunchLocal'))}</button>`
       );
     }
     if (onlineReady && hero?.action !== 'web-download') {
       buttons.push(
-        '<button type="button" class="btn btn-ghost" data-detail-action="web-download">🌐 Aus Web laden</button>'
+        `<button type="button" class="btn btn-ghost" data-detail-action="web-download">🌐 ${escapeHTML(t('detail.heroWebDownloadShort'))}</button>`
       );
     }
   }
 
   if (canUninstall) {
     buttons.push(
-      '<button type="button" class="btn btn-danger" data-detail-action="uninstall">🗑️ Deinstallieren</button>'
+      `<button type="button" class="btn btn-danger" data-detail-action="uninstall">🗑️ ${escapeHTML(t('common.uninstall'))}</button>`
     );
   }
 
@@ -249,8 +255,8 @@ function buildInstallModeToggleHtml({
   if (policyEval?.adwareConflict) {
     return `
       <div class="policy-conflict-banner" role="alert">
-        <strong>🚫 Ausführung durch Zugriffsrichtlinie blockiert</strong>
-        <span>${escapeHTML(policyEval.error)}</span>
+        <strong>🚫 ${escapeHTML(t('detail.policyConflictHeading'))}</strong>
+        <span>${escapeHTML(getLocalizedPolicyError(policyEval, 'policy.errorAdwareConflict'))}</span>
       </div>
     `;
   }
@@ -258,8 +264,8 @@ function buildInstallModeToggleHtml({
   if (policyEval && !policyEval.allowed) {
     return `
       <div class="policy-conflict-banner" role="alert">
-        <strong>🔒 Durch Zugriffsrichtlinie gesperrt</strong>
-        <span>${escapeHTML(policyEval.error)}</span>
+        <strong>🔒 ${escapeHTML(t('detail.policyLockedHeading'))}</strong>
+        <span>${escapeHTML(getLocalizedPolicyError(policyEval, 'policy.blockedDefault'))}</span>
       </div>
     `;
   }
@@ -269,38 +275,38 @@ function buildInstallModeToggleHtml({
   if (policyEval?.silentOnly) {
     return `
       <div class="detail-install-mode-bar" id="detailInstallModeBar">
-        <span class="detail-install-mode-label">Installationsmodus:</span>
-        <div class="detail-mode-toggle" role="group" aria-label="Installationsmodus">
+        <span class="detail-install-mode-label">${escapeHTML(t('detail.installModeLabel'))}</span>
+        <div class="detail-mode-toggle" role="group" aria-label="${escapeHTML(t('detail.installModeAria'))}">
           <button
             type="button"
             class="detail-mode-btn active"
             data-detail-install-mode="silent"
             aria-pressed="true"
-            title="Zugriffsrichtlinie erzwingt stille Ausführung"
+            title="${escapeHTML(t('detail.installModeSilentPolicyTitle'))}"
           >
-            ⚡ Silent
+            ⚡ ${escapeHTML(t('detail.installModeSilent'))}
           </button>
         </div>
-        <span class="policy-silent-lock-pill" title="Interaktive Ausführung durch Zugriffsrichtlinie deaktiviert">🔒 Richtlinie: Nur Silent</span>
+        <span class="policy-silent-lock-pill" title="${escapeHTML(t('detail.policySilentOnlyPillTitle'))}">🔒 ${escapeHTML(t('detail.policySilentOnlyPill'))}</span>
       </div>
     `;
   }
 
   const isSilent = !isSilentLocked && selectedMode === 'silent';
-  const silentTitle = isSilentLocked ? lockTooltip : 'Setup möglichst ohne Rückfragen im Hintergrund ausführen';
+  const silentTitle = isSilentLocked ? lockTooltip : t('detail.installModeSilentTitle');
 
   return `
     <div class="detail-install-mode-bar" id="detailInstallModeBar">
-      <span class="detail-install-mode-label">Installationsmodus:</span>
-      <div class="detail-mode-toggle" role="group" aria-label="Installationsmodus">
+      <span class="detail-install-mode-label">${escapeHTML(t('detail.installModeLabel'))}</span>
+      <div class="detail-mode-toggle" role="group" aria-label="${escapeHTML(t('detail.installModeAria'))}">
         <button
           type="button"
           class="detail-mode-btn ${!isSilent ? 'active' : ''}"
           data-detail-install-mode="interactive"
           aria-pressed="${!isSilent ? 'true' : 'false'}"
-          title="Setup mit Assistent / Fenstern ausführen"
+          title="${escapeHTML(t('detail.installModeInteractiveTitle'))}"
         >
-          🖱️ Interaktiv
+          🖱️ ${escapeHTML(t('detail.installModeInteractive'))}
         </button>
         <button
           type="button"
@@ -310,12 +316,12 @@ function buildInstallModeToggleHtml({
           ${isSilentLocked ? 'disabled' : ''}
           title="${escapeHTML(silentTitle)}"
         >
-          ⚡ Silent
+          ⚡ ${escapeHTML(t('detail.installModeSilent'))}
         </button>
       </div>
       ${
         isSilentLocked
-          ? `<span class="detail-mode-lock-hint" title="${escapeHTML(lockTooltip)}">🛡️ Adware-Schutz aktiv (nur Interaktiv)</span>`
+          ? `<span class="detail-mode-lock-hint" title="${escapeHTML(lockTooltip)}">🛡️ ${escapeHTML(t('detail.adwareLockHint'))}</span>`
           : ''
       }
     </div>
@@ -338,16 +344,14 @@ function buildArchiveSaveChoiceHtml(item, st, { effectivePm, effectivePkgId, can
   const saveMode = state.settings.archiveSaveMode || 'ask';
   const checked = saveMode === 'ask' || saveMode === 'auto-id';
   let labelText = canArchiveDownload
-    ? '🗄️ Setup-Datei bei Installation/Update zusätzlich im Archiv ablegen'
-    : '🗄️ Paket (Metadaten & Icon) zusaetzlich im Archiv aufnehmen';
+    ? `🗄️ ${t('detail.saveChoiceSetupDefault')}`
+    : `🗄️ ${t('detail.saveChoiceMetaDefault')}`;
   if (saveMode === 'auto-id') {
     labelText = canArchiveDownload
-      ? `🗄️ Setup-Datei automatisch im Archiv speichern (Ordner: ${effectivePkgId})`
-      : `🗄️ Paket automatisch im Archiv aufnehmen (Ordner: ${effectivePkgId})`;
+      ? `🗄️ ${t('detail.saveChoiceSetupAuto', { id: effectivePkgId })}`
+      : `🗄️ ${t('detail.saveChoiceMetaAuto', { id: effectivePkgId })}`;
   } else if (saveMode === 'none') {
-    labelText = canArchiveDownload
-      ? '🗄️ Setup-Datei zusätzlich im Archiv ablegen (Standard in Einstellungen: Aus)'
-      : '🗄️ Paket zusaetzlich im Archiv aufnehmen (Standard in Einstellungen: Aus)';
+    labelText = canArchiveDownload ? `🗄️ ${t('detail.saveChoiceSetupOff')}` : `🗄️ ${t('detail.saveChoiceMetaOff')}`;
   }
 
   return `
@@ -360,39 +364,45 @@ function buildArchiveSaveChoiceHtml(item, st, { effectivePm, effectivePkgId, can
 
 function buildVersionGridHtml(item, st, { matchedArchive }) {
   const effectivePm = getEffectivePackageManager(item);
-  const provBadge = effectivePm ? getProviderBadgeInfo(effectivePm, state.providers) : null;
-  const sourceLabel = SOURCE_LABELS[item.webSourceType] || item.providerName || provBadge?.label || '';
+  const provBadge = effectivePm ? getLocalizedProviderBadge(effectivePm, state.providers) : null;
+  const sourceLabel = getSourceLabel(item.webSourceType) || item.providerName || provBadge?.label || '';
 
   const archiveVersion =
     st.archiveVersion || (matchedArchive?.lastFiles?.length > 0 ? getBaseName(matchedArchive.lastFiles[0]) : '') || '';
 
-  let archiveBoxVal = 'Nicht im Archiv';
+  let archiveBoxVal = escapeHTML(t('detail.verNotInArchive'));
   if (item.inArchive || matchedArchive) {
     archiveBoxVal = st.archiveVersion
       ? `v${escapeHTML(st.archiveVersion)}`
       : archiveVersion
         ? escapeHTML(archiveVersion)
-        : 'Keine Setup-Datei';
+        : escapeHTML(t('detail.verNoSetupFile'));
   }
 
   const onlineVal = st.webVersion
     ? `v${escapeHTML(st.webVersion)}`
     : provBadge && item.origin === 'pc'
-      ? 'Aktuell'
-      : 'Nicht eingerichtet';
+      ? escapeHTML(t('detail.verUpToDate'))
+      : escapeHTML(t('detail.verNotConfigured'));
 
   return `
     <div class="detail-version-grid">
       <div class="detail-ver-box ${st.isPcNewer ? 'is-newer' : st.localVersion && !st.hasArchiveUpdate ? 'is-ok' : ''}">
-        <span class="ver-box-lbl">Installiert (PC)</span>
-        <strong class="ver-box-val">${st.localVersion ? `v${escapeHTML(st.localVersion)}` : item.isInstalled ? 'Installiert' : 'Nicht installiert'}</strong>
+        <span class="ver-box-lbl">${escapeHTML(t('detail.verInstalledPcLabel'))}</span>
+        <strong class="ver-box-val">${
+          st.localVersion
+            ? `v${escapeHTML(st.localVersion)}`
+            : item.isInstalled
+              ? escapeHTML(t('detail.verInstalledFallback'))
+              : escapeHTML(t('detail.verNotInstalled'))
+        }</strong>
       </div>
       <div class="detail-ver-box ${st.hasArchiveUpdate ? 'is-archive-update' : ''}">
-        <span class="ver-box-lbl">Archiv${item.hasPinnedLast ? ' · _last gepinnt' : ''}</span>
+        <span class="ver-box-lbl">${escapeHTML(t('providers.names.archive'))}${item.hasPinnedLast ? escapeHTML(t('detail.verArchivePinnedSuffix')) : ''}</span>
         <strong class="ver-box-val">${archiveBoxVal}</strong>
       </div>
       <div class="detail-ver-box ${st.hasWebUpdate ? 'is-web-update' : ''}">
-        <span class="ver-box-lbl">Online${sourceLabel ? ` · ${escapeHTML(sourceLabel)}` : ''}</span>
+        <span class="ver-box-lbl">${escapeHTML(t('detail.verOnlineLabel'))}${sourceLabel ? ` · ${escapeHTML(sourceLabel)}` : ''}</span>
         <strong class="ver-box-val" id="detailOnlineVerVal">${onlineVal}</strong>
       </div>
     </div>
@@ -414,23 +424,37 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
     return `
       <section class="custom-info-card">
         <div class="custom-info-head">
-          <h4>📝 Eigene Archiv-Notizen &amp; Zusatzinfos</h4>
+          <h4>📝 ${escapeHTML(t('detail.customInfoTitle'))}</h4>
           <span class="muted"><code>_metadata/meta.json</code></span>
         </div>
         <div class="detail-description">
-          <span class="muted">Keine eigenen Zusatzinfos oder Medien hinterlegt (<code>meta.json</code> ist optional).</span>
+          <span class="muted">${escapeHTML(t('detail.customInfoEmpty'))}</span>
         </div>
       </section>
     `;
   }
 
   const infoChips = [];
-  if (item.mainCategory) infoChips.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
-  if (item.subCategories?.length) {
-    infoChips.push(`<span><strong>Eigene Tags:</strong> ${escapeHTML(item.subCategories.join(', '))}</span>`);
+  if (item.mainCategory) {
+    infoChips.push(
+      `<span><strong>${escapeHTML(t('detail.metaCategory'))}</strong> ${escapeHTML(item.mainCategory)}</span>`
+    );
   }
-  if (hasFormats) infoChips.push(`<span><strong>Dateiformate:</strong> ${escapeHTML(item.formats.join(', '))}</span>`);
-  if (hasOs) infoChips.push(`<span><strong>Systeme:</strong> ${escapeHTML(item.os.join(', '))}</span>`);
+  if (item.subCategories?.length) {
+    infoChips.push(
+      `<span><strong>${escapeHTML(t('detail.metaTags'))}</strong> ${escapeHTML(item.subCategories.join(', '))}</span>`
+    );
+  }
+  if (hasFormats) {
+    infoChips.push(
+      `<span><strong>${escapeHTML(t('detail.metaFormats'))}</strong> ${escapeHTML(item.formats.join(', '))}</span>`
+    );
+  }
+  if (hasOs) {
+    infoChips.push(
+      `<span><strong>${escapeHTML(t('detail.metaSystems'))}</strong> ${escapeHTML(item.os.join(', '))}</span>`
+    );
+  }
 
   const linksHtml = hasLinks
     ? `
@@ -454,15 +478,15 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
             const isVid = /\.(mp4|webm|ogg|mov|avi)$/i.test(s);
             if (isVid) {
               return `
-                <button type="button" class="media-thumb is-video" data-lightbox-idx="${idx}" title="Video abspielen">
+                <button type="button" class="media-thumb is-video" data-lightbox-idx="${idx}" title="${escapeHTML(t('detail.playVideoTitle'))}">
                   <video src="${url}#t=1" muted preload="metadata"></video>
                   <span class="play-badge">▶</span>
                 </button>
               `;
             }
             return `
-              <button type="button" class="media-thumb" data-lightbox-idx="${idx}" title="Vergrößern">
-                <img src="${url}" loading="lazy" alt="Screenshot">
+              <button type="button" class="media-thumb" data-lightbox-idx="${idx}" title="${escapeHTML(t('detail.zoomImageTitle'))}">
+                <img src="${url}" loading="lazy" alt="${escapeHTML(t('detail.screenshotAlt'))}">
               </button>
             `;
           })
@@ -474,8 +498,8 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
   return `
     <section class="custom-info-card">
       <div class="custom-info-head">
-        <h4>📝 Eigene Archiv-Notizen &amp; Zusatzinfos</h4>
-        <span class="muted">Aus <code>_metadata/meta.json</code></span>
+        <h4>📝 ${escapeHTML(t('detail.customInfoTitle'))}</h4>
+        <span class="muted">${escapeHTML(t('detail.customInfoFromMeta'))}</span>
       </div>
       ${cleanDesc ? `<div class="detail-description">${cleanDesc}</div>` : ''}
       ${infoChips.length > 0 ? `<div class="custom-info-chips">${infoChips.join('')}</div>` : ''}
@@ -487,18 +511,11 @@ function buildCustomMetaSectionHtml(item, hasPackageProfile) {
 
 function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive, policyEval = null }) {
   const blockedByPolicy = Boolean(policyEval && !policyEval.allowed);
-  const originLabel =
-    item.origin === 'both'
-      ? 'PC & Archiv'
-      : item.origin === 'archive'
-        ? 'Nur im Archiv'
-        : item.origin === 'pc'
-          ? 'Nur auf diesem PC'
-          : 'Online-Quelle (Neu installieren)';
+  const originLabel = getOriginChip(item.origin)?.label || t('detail.originOnline');
 
   let archiveSectionHtml = '';
   if (item.inArchive) {
-    let filesBarHtml = '<p class="muted">Keine Setup-Datei im Archiv-Ordner gefunden.</p>';
+    let filesBarHtml = `<p class="muted">${escapeHTML(t('detail.techNoSetupFile'))}</p>`;
     if (item.lastFiles?.length > 0) {
       const firstFile = item.lastFiles[0];
       const fileSourceIndices = new Set(
@@ -517,11 +534,11 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
 
       filesBarHtml = `
         <div class="detail-archive-bar">
-          <span class="detail-archive-label">Setup-Datei:</span>
+          <span class="detail-archive-label">${escapeHTML(t('detail.techSetupFileLabel'))}</span>
           ${selectorHtml}
           <div class="detail-archive-btns">
-            <button type="button" class="btn btn-ghost" data-detail-action="run-selected" ${blockedByPolicy ? `disabled title="${escapeHTML(policyEval?.error || 'Durch Zugriffsrichtlinie blockiert')}"` : ''}>▶️ Ausführen</button>
-            <button type="button" class="btn btn-ghost" data-detail-action="copy-selected">💾 Auf PC kopieren</button>
+            <button type="button" class="btn btn-ghost" data-detail-action="run-selected" ${blockedByPolicy ? `disabled title="${escapeHTML(getLocalizedPolicyError(policyEval, 'policy.blockedDefault'))}"` : ''}>▶️ ${escapeHTML(t('detail.techRunSelected'))}</button>
+            <button type="button" class="btn btn-ghost" data-detail-action="copy-selected">💾 ${escapeHTML(t('detail.techCopySelected'))}</button>
           </div>
         </div>
       `;
@@ -530,8 +547,8 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
     const pinNoticeHtml = item.hasPinnedLast
       ? `
         <div class="archive-pin-banner">
-          <strong>📌 <code>_last</code>-Ordner aktiv:</strong>
-          <span>Dieses Programm nutzt einen gepinnten <code>_last</code>-Unterordner. Der Archiv-Aufräumer fasst ihn niemals an.</span>
+          <strong>📌 ${escapeHTML(t('detail.techLastPinTitle'))}</strong>
+          <span>${escapeHTML(t('detail.techLastPinDesc'))}</span>
         </div>
       `
       : '';
@@ -539,15 +556,15 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
     const keepNoticeHtml = item.keepAllVersions
       ? `
         <div class="archive-keep-banner">
-          <strong>🔒 Alle Versionen behalten:</strong>
-          <span>Dieses Programm ist dauerhaft vom Archiv-Aufräumer ausgeschlossen.</span>
+          <strong>🔒 ${escapeHTML(t('detail.techKeepAllTitle'))}</strong>
+          <span>${escapeHTML(t('detail.techKeepAllDesc'))}</span>
         </div>
       `
       : '';
 
     archiveSectionHtml = `
       <div class="detail-section">
-        <h4>Setup-Dateien im Archiv</h4>
+        <h4>${escapeHTML(t('detail.techSectionSetupFiles'))}</h4>
         ${filesBarHtml}
         ${pinNoticeHtml}
         ${keepNoticeHtml}
@@ -557,116 +574,130 @@ function buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArc
     archiveSectionHtml = `
       <div class="archive-status-card">
         <div>
-          <strong>${matchedArchive ? 'Bereits im Archiv vorhanden' : 'Noch nicht im Archiv gespeichert'}</strong>
+          <strong>${escapeHTML(matchedArchive ? t('detail.techArchiveExists') : t('detail.techArchiveMissing'))}</strong>
           <p class="muted">
             ${
               matchedArchive
-                ? `Verknüpfter Archiv-Ordner: <code>${escapeHTML(matchedArchive.path)}</code>`
-                : 'Dieses Paket liegt aktuell nicht im lokalen Software-Archiv.'
+                ? `${escapeHTML(t('detail.techArchiveLinkedPath'))} <code>${escapeHTML(matchedArchive.path)}</code>`
+                : escapeHTML(t('detail.techArchiveMissingDesc'))
             }
           </p>
         </div>
         ${
           matchedArchive
-            ? '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
-            : '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
+            ? `<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 ${escapeHTML(t('detail.heroOpenArchive'))}</button>`
+            : `<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 ${escapeHTML(t('detail.heroSaveToArchive'))}</button>`
         }
       </div>
     `;
   }
 
-  const techRows = [`<div class="tech-row"><span>Herkunft</span><strong>${escapeHTML(originLabel)}</strong></div>`];
+  const techRows = [
+    `<div class="tech-row"><span>${escapeHTML(t('detail.techOrigin'))}</span><strong>${escapeHTML(originLabel)}</strong></div>`,
+  ];
   if (item.path) {
     const primaryRootLabel = item.archiveRootLabel
       ? ` (#${(item.archiveRootIndex ?? 0) + 1} ${item.archiveRootLabel})`
       : '';
-    const offlineTag = item.archiveOffline ? ' [Offline-Cache]' : '';
+    const offlineTag = item.archiveOffline ? t('detail.techOfflineCacheTag') : '';
     techRows.push(
-      `<div class="tech-row"><span>Primärer Archiv-Ordner${escapeHTML(primaryRootLabel)}${escapeHTML(offlineTag)}</span><code>${escapeHTML(item.path)}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPrimaryArchiveFolder'))}${escapeHTML(primaryRootLabel)}${escapeHTML(offlineTag)}</span><code>${escapeHTML(item.path)}</code></div>`
     );
   }
   if (Array.isArray(item.alternatePaths) && item.alternatePaths.length > 0) {
+    const archiveFallback = t('providers.names.archive');
+    const offlineSuffix = t('detail.techOfflineTag');
     const altHtml = item.alternatePaths
       .map(
         (alt) =>
-          `[#${(alt.rootIndex ?? 0) + 1} ${alt.rootLabel || 'Archiv'}${alt.offline ? ' (offline)' : ''}] ${alt.path}`
+          `[#${(alt.rootIndex ?? 0) + 1} ${alt.rootLabel || archiveFallback}${alt.offline ? offlineSuffix : ''}] ${alt.path}`
       )
       .map(escapeHTML)
       .join('<br>');
-    techRows.push(`<div class="tech-row"><span>Weitere Archiv-Orte</span><code>${altHtml}</code></div>`);
+    techRows.push(
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techOtherArchiveLocations'))}</span><code>${altHtml}</code></div>`
+    );
   }
   if (effectivePm) {
-    techRows.push(`<div class="tech-row"><span>Paketmanager</span><code>${escapeHTML(effectivePm)}</code></div>`);
+    techRows.push(
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPackageManager'))}</span><code>${escapeHTML(effectivePm)}</code></div>`
+    );
   }
   if (effectivePkgId) {
-    techRows.push(`<div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(effectivePkgId)}</code></div>`);
+    techRows.push(
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPackageId'))}</span><code>${escapeHTML(effectivePkgId)}</code></div>`
+    );
   }
   if (item.publisher) {
-    techRows.push(`<div class="tech-row"><span>Herausgeber</span><code>${escapeHTML(item.publisher)}</code></div>`);
+    techRows.push(
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPublisher'))}</span><code>${escapeHTML(item.publisher)}</code></div>`
+    );
   }
   if (item.webVersionUrl) {
     techRows.push(
-      `<div class="tech-row"><span>Versions-Quelle</span><button type="button" class="inline-link" data-open-url="${escapeHTML(item.webVersionUrl)}">${escapeHTML(item.webVersionUrl)}</button></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techVersionSource'))}</span><button type="button" class="inline-link" data-open-url="${escapeHTML(item.webVersionUrl)}">${escapeHTML(item.webVersionUrl)}</button></div>`
     );
   }
   if (item.downloadUrl) {
     techRows.push(
-      `<div class="tech-row"><span>Download-Quelle</span><button type="button" class="inline-link" data-open-url="${escapeHTML(item.downloadUrl)}">${escapeHTML(item.downloadUrl)}</button></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techDownloadSource'))}</span><button type="button" class="inline-link" data-open-url="${escapeHTML(item.downloadUrl)}">${escapeHTML(item.downloadUrl)}</button></div>`
     );
   }
   if (item.autoPaths?.length) {
     techRows.push(
-      `<div class="tech-row"><span>PC-Pfad (Auto)</span><code>${item.autoPaths.map(escapeHTML).join('<br>')}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPcPathAuto'))}</span><code>${item.autoPaths.map(escapeHTML).join('<br>')}</code></div>`
     );
   }
   if (item.installPaths?.length) {
     techRows.push(
-      `<div class="tech-row"><span>PC-Pfad (Manuell)</span><code>${item.installPaths.map(escapeHTML).join('<br>')}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techPcPathManual'))}</span><code>${item.installPaths.map(escapeHTML).join('<br>')}</code></div>`
     );
   }
   if (item.installLocation) {
     techRows.push(
-      `<div class="tech-row"><span>Installationsordner</span><code>${escapeHTML(item.installLocation)}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techInstallDir'))}</span><code>${escapeHTML(item.installLocation)}</code></div>`
     );
   }
   if (item.registryKey) {
-    techRows.push(`<div class="tech-row"><span>Registry-Key</span><code>${escapeHTML(item.registryKey)}</code></div>`);
+    techRows.push(
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techRegistryKey'))}</span><code>${escapeHTML(item.registryKey)}</code></div>`
+    );
   }
   if (item.searchNames?.length) {
     techRows.push(
-      `<div class="tech-row"><span>Such-Namen</span><code>${escapeHTML(item.searchNames.join(', '))}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techSearchNames'))}</span><code>${escapeHTML(item.searchNames.join(', '))}</code></div>`
     );
   }
   if (item.inArchive) {
     const modeLabel =
       item.installMode === 'interactive-required'
-        ? '🛡️ Immer Interaktiv (Adware-Schutz)'
+        ? `🛡️ ${t('detail.techInstallModeProtected')}`
         : item.installMode === 'silent'
-          ? '⚡ Stille Installation (Opt-in)'
-          : '🖱️ Interaktiv (Standard)';
+          ? `⚡ ${t('detail.techInstallModeSilent')}`
+          : `🖱️ ${t('detail.techInstallModeInteractive')}`;
     techRows.push(
-      `<div class="tech-row"><span>Installationsmodus</span><strong>${escapeHTML(modeLabel)}</strong></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techInstallModeLabel'))}</span><strong>${escapeHTML(modeLabel)}</strong></div>`
     );
     if (item.silentArgs) {
       techRows.push(
-        `<div class="tech-row"><span>Silent-Parameter</span><code>${escapeHTML(item.silentArgs)}</code></div>`
+        `<div class="tech-row"><span>${escapeHTML(t('detail.techSilentArgs'))}</span><code>${escapeHTML(item.silentArgs)}</code></div>`
       );
     }
     if (item.innoInfFile) {
-      const infHint = item.innoInfExists ? 'vorhanden' : 'fehlt im _metadata/-Ordner';
+      const infHint = item.innoInfExists ? t('detail.techInnoInfPresent') : t('detail.techInnoInfMissing');
       techRows.push(
-        `<div class="tech-row"><span>Inno Antwortdatei</span><code>${escapeHTML(item.innoInfFile)}</code> <span class="muted">(${infHint})</span></div>`
+        `<div class="tech-row"><span>${escapeHTML(t('detail.techInnoInf'))}</span><code>${escapeHTML(item.innoInfFile)}</code> <span class="muted">(${escapeHTML(infHint)})</span></div>`
       );
     }
     techRows.push(
-      `<div class="tech-row"><span>Aufräum-Schutz</span><code>${item.keepAllVersions ? 'Aktiv (Alle Versionen behalten)' : 'Standard'}</code></div>`
+      `<div class="tech-row"><span>${escapeHTML(t('detail.techCleanupProtection'))}</span><code>${escapeHTML(item.keepAllVersions ? t('detail.techCleanupProtectionActive') : t('detail.techCleanupProtectionDefault'))}</code></div>`
     );
   }
 
   return `
     ${archiveSectionHtml}
     <div class="detail-section">
-      <h4>Technische Pfade & Kennungen</h4>
+      <h4>${escapeHTML(t('detail.techSectionTitle'))}</h4>
       <div class="detail-tech-list">
         ${techRows.join('')}
         <div id="detailTechInstallerRows"></div>
@@ -680,14 +711,14 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
   const fullDesc = String(pkg.description || '').trim();
   const tags = Array.isArray(pkg.tags) ? pkg.tags : [];
   const pmId = String(pkg.packageManager || fallbackPm || 'winget').toLowerCase();
-  const pmLabel = getProviderBadgeInfo(pmId, state.providers)?.label || pmId;
+  const pmLabel = getLocalizedProviderBadge(pmId, state.providers)?.label || pmId;
   const pidLabel = pkg.packageId || fallbackPkgId;
   const formattedTime = formatCacheTimestamp(updatedAt);
 
   const staleNoticeHtml = isStale
     ? `
       <div class="pkg-stale-notice">
-        ⚠️ Offline-Modus: Live-Abruf fehlgeschlagen - zeige zwischengespeicherten Steckbrief${formattedTime ? ` (Stand: ${escapeHTML(formattedTime)})` : ''}.
+        ⚠️ ${escapeHTML(t('detail.profileOfflineNotice'))}${formattedTime ? escapeHTML(t('detail.profileOfflineAsOf', { time: formattedTime })) : ''}.
       </div>
     `
     : '';
@@ -699,14 +730,14 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
   } else if (fullDesc || shortDesc) {
     descBlocks.push(`<p class="pkg-profile-desc">${escapeHTML(fullDesc || shortDesc)}</p>`);
   } else {
-    descBlocks.push('<p class="muted">Keine Beschreibung im Paket-Manifest hinterlegt.</p>');
+    descBlocks.push(`<p class="muted">${escapeHTML(t('detail.profileNoDesc'))}</p>`);
   }
 
   const tagsHtml =
     tags.length > 0
       ? `
         <div class="pkg-tags-list">
-          ${tags.map((t) => `<span class="pkg-tag-chip">${escapeHTML(t)}</span>`).join('')}
+          ${tags.map((tg) => `<span class="pkg-tag-chip">${escapeHTML(tg)}</span>`).join('')}
         </div>
       `
       : '';
@@ -717,41 +748,41 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
       ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.publisherUrl)}">${escapeHTML(pkg.publisher)} ↗</button>`
       : escapeHTML(pkg.publisher);
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Herausgeber</span><div class="pkg-profile-val">${pubContent}</div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.techPublisher'))}</span><div class="pkg-profile-val">${pubContent}</div></div>`
     );
   }
   if (pkg.author) {
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Autor</span><div class="pkg-profile-val">${escapeHTML(pkg.author)}</div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.profileAuthor'))}</span><div class="pkg-profile-val">${escapeHTML(pkg.author)}</div></div>`
     );
   }
   if (pkg.license || pkg.licenseUrl) {
-    const licText = pkg.license ? escapeHTML(pkg.license) : 'Lizenz';
+    const licText = pkg.license ? escapeHTML(pkg.license) : escapeHTML(t('detail.profileLicense'));
     const licLink = pkg.licenseUrl
-      ? ` <button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.licenseUrl)}">(Lizenztext ↗)</button>`
+      ? ` <button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.licenseUrl)}">${escapeHTML(t('detail.profileLicenseText'))} ↗</button>`
       : '';
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Lizenz</span><div class="pkg-profile-val">${licText}${licLink}</div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.profileLicense'))}</span><div class="pkg-profile-val">${licText}${licLink}</div></div>`
     );
   }
   if (pkg.homepage) {
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Startseite</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.homepage)}">${escapeHTML(pkg.homepage)} ↗</button></div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.profileHomepage'))}</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.homepage)}">${escapeHTML(pkg.homepage)} ↗</button></div></div>`
     );
   }
   if (pkg.repositoryUrl && pkg.repositoryUrl !== pkg.homepage) {
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Repository</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.repositoryUrl)}">${escapeHTML(pkg.repositoryUrl)} ↗</button></div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.profileRepository'))}</span><div class="pkg-profile-val"><button type="button" class="inline-link" data-open-url="${escapeHTML(pkg.repositoryUrl)}">${escapeHTML(pkg.repositoryUrl)} ↗</button></div></div>`
     );
   }
   if (pmLabel) {
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Paketmanager</span><div class="pkg-profile-val">${escapeHTML(pmLabel)}</div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.techPackageManager'))}</span><div class="pkg-profile-val">${escapeHTML(pmLabel)}</div></div>`
     );
   }
   if (pidLabel) {
     gridItems.push(
-      `<div class="pkg-profile-item"><span class="pkg-profile-label">Paket-ID</span><div class="pkg-profile-val"><code>${escapeHTML(pidLabel)}</code></div></div>`
+      `<div class="pkg-profile-item"><span class="pkg-profile-label">${escapeHTML(t('detail.techPackageId'))}</span><div class="pkg-profile-val"><code>${escapeHTML(pidLabel)}</code></div></div>`
     );
   }
 
@@ -764,10 +795,10 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
 
   return {
     cacheLabel: isStale
-      ? `Offline-Cache (${formattedTime || 'veraltet'})`
+      ? t('detail.profileCacheStale', { time: formattedTime || t('detail.profileCacheOutdated') })
       : fromCache
-        ? `Cache: ${formattedTime || 'aktuell'}`
-        : `Live aktualisiert (${formattedTime || 'gerade eben'})`,
+        ? t('detail.profileCacheHit', { time: formattedTime || t('detail.profileCacheCurrent') })
+        : t('detail.profileCacheLive', { time: formattedTime || t('detail.profileCacheJustNow') }),
   };
 }
 
@@ -782,7 +813,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   state.isEditModalOpen = false;
 
   const st = getItemStatus(item);
-  const statusBadge = STATUS_BADGES[st.status];
+  const statusBadge = getStatusBadge(st.status);
   const effectivePm = getEffectivePackageManager(item);
   const effectivePkgId = getEffectivePackageId(item);
   const provMeta = getProviderMeta(effectivePm);
@@ -801,7 +832,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         ? 'update'
         : 'install';
   const policyEval = evaluateItemPolicy(item, primaryAction);
-  const initialModeState = resolveDetailInstallMode(metaSource.installMode || item.installMode);
+  const initialModeState = resolveDetailInstallMode(metaSource.installMode || item.installMode, null, { t });
   let selectedInstallMode = policyEval.silentOnly && !policyEval.adwareConflict ? 'silent' : initialModeState.selected;
   const isSilentLocked = initialModeState.silentLocked;
   const canUninstall = isCanUninstall(item, provMeta, effectivePkgId);
@@ -819,52 +850,66 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     effectivePm && provMeta.badge
       ? `<span class="provider-badge ${escapeHTML(provMeta.badge.badgeClass)}">${escapeHTML(provMeta.label)}</span>`
       : '';
-  const originChip = ORIGIN_CHIPS[item.origin]
-    ? `<span class="card-chip ${ORIGIN_CHIPS[item.origin].cls}">${escapeHTML(ORIGIN_CHIPS[item.origin].label)}</span>`
-    : providerChip || `<span class="provider-badge">${escapeHTML(item.providerName || effectivePm || 'Online')}</span>`;
-  const extraProviderChip = ORIGIN_CHIPS[item.origin] ? providerChip : '';
+  const originCfg = getOriginChip(item.origin);
+  const originChip = originCfg
+    ? `<span class="card-chip ${originCfg.cls}">${escapeHTML(originCfg.label)}</span>`
+    : providerChip ||
+      `<span class="provider-badge">${escapeHTML(item.providerName || effectivePm || t('detail.verOnlineLabel'))}</span>`;
+  const extraProviderChip = originCfg ? providerChip : '';
 
-  const newChip = isItemNew(item) ? '<span class="card-chip chip-new">NEU</span>' : '';
+  const newChip = isItemNew(item) ? `<span class="card-chip chip-new">${escapeHTML(t('cards.chipNew'))}</span>` : '';
   const nvmActiveChip =
     effectivePm === 'nvm' && item.isActive
-      ? '<span class="card-chip chip-install-silent" title="Aktuell aktive Node.js-Version">⚡ Aktiv</span>'
+      ? `<span class="card-chip chip-install-silent" title="${escapeHTML(t('cards.chipActiveTitle'))}">⚡ ${escapeHTML(t('cards.chipActive'))}</span>`
       : '';
   const typeChip =
     item.softwareType === 'portable'
-      ? '<span class="card-chip">Portabel</span>'
+      ? `<span class="card-chip">${escapeHTML(t('cards.chipPortable'))}</span>`
       : item.softwareType === 'driver'
-        ? '<span class="card-chip">Treiber</span>'
+        ? `<span class="card-chip">${escapeHTML(t('cards.chipDriver'))}</span>`
         : '';
-  const keepChip = item.keepAllVersions ? '<span class="card-chip">🔒 Alle Versionen</span>' : '';
-  const installBadge = item.inArchive ? getInstallModeBadge(item) : null;
+  const keepChip = item.keepAllVersions
+    ? `<span class="card-chip">🔒 ${escapeHTML(t('detail.chipKeepAllVersions'))}</span>`
+    : '';
+  const installBadge = item.inArchive ? getInstallModeBadge(item, { t }) : null;
   const installModeChip = installBadge
     ? `<span class="card-chip ${installBadge.type === 'protected' ? 'chip-install-protected' : 'chip-install-silent'}" title="${escapeHTML(installBadge.title)}">${escapeHTML(installBadge.label)}</span>`
     : '';
   const inArchiveRemoteChip =
-    item.origin === 'remote' && matchedArchive ? '<span class="discover-status-badge">Im Archiv</span>' : '';
+    item.origin === 'remote' && matchedArchive
+      ? `<span class="discover-status-badge">${escapeHTML(t('discover.badgeInArchive'))}</span>`
+      : '';
   const offlineArchiveChip = item.archiveOffline
-    ? '<span class="card-chip chip-install-protected" title="Die zugehörige Archiv-Quelle ist aktuell nicht erreichbar (zwischengespeicherte Daten)">🔴 Archiv offline</span>'
+    ? `<span class="card-chip chip-install-protected" title="${escapeHTML(t('detail.chipOfflineArchiveTitle'))}">🔴 ${escapeHTML(t('detail.chipOfflineArchive'))}</span>`
     : '';
   const multiRootChip =
     Array.isArray(item.alternatePaths) && item.alternatePaths.length > 0
-      ? `<span class="card-chip" title="Zusammengeführt aus ${1 + item.alternatePaths.length} Archiv-Orten">🗄️ ${1 + item.alternatePaths.length} Orte</span>`
+      ? `<span class="card-chip" title="${escapeHTML(t('detail.chipMultiRootTitle', { count: 1 + item.alternatePaths.length }))}">🗄️ ${escapeHTML(t('detail.chipMultiRoot', { count: 1 + item.alternatePaths.length }))}</span>`
       : '';
 
   const headerMeta = [];
-  if (item.mainCategory) headerMeta.push(`<span><strong>Kategorie:</strong> ${escapeHTML(item.mainCategory)}</span>`);
-  if (item.publisher) headerMeta.push(`<span><strong>Herausgeber:</strong> ${escapeHTML(item.publisher)}</span>`);
+  if (item.mainCategory)
+    headerMeta.push(
+      `<span><strong>${escapeHTML(t('detail.metaCategory'))}</strong> ${escapeHTML(item.mainCategory)}</span>`
+    );
+  if (item.publisher)
+    headerMeta.push(
+      `<span><strong>${escapeHTML(t('detail.techPublisher'))}:</strong> ${escapeHTML(item.publisher)}</span>`
+    );
   if (effectivePkgId)
-    headerMeta.push(`<span><strong>Paket-ID:</strong> <code>${escapeHTML(effectivePkgId)}</code></span>`);
+    headerMeta.push(
+      `<span><strong>${escapeHTML(t('detail.techPackageId'))}:</strong> <code>${escapeHTML(effectivePkgId)}</code></span>`
+    );
 
   const postDownloadBanner = freshDownload
     ? `
       <div class="detail-inline-banner is-success">
         <div class="banner-text">
-          <strong>✅ Download im Archiv gespeichert!</strong>
-          <span>Datei: <code>${escapeHTML(getBaseName(freshDownload.filePath))}</code></span>
+          <strong>✅ ${escapeHTML(t('detail.postDownloadTitle'))}</strong>
+          <span>${escapeHTML(t('detail.postDownloadFile'))} <code>${escapeHTML(getBaseName(freshDownload.filePath))}</code></span>
         </div>
         <button type="button" class="btn btn-local" data-detail-action="install-fresh" data-file="${escapeHTML(freshDownload.filePath)}" data-version="${escapeHTML(freshDownload.version || '')}">
-          ▶️ Jetzt installieren
+          ▶️ ${escapeHTML(t('detail.postDownloadInstall'))}
         </button>
       </div>
     `
@@ -875,23 +920,24 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       ? `
       <label class="detail-pin-choice">
         <input type="checkbox" id="detailSaveIntoLast">
-        <span><code>_last</code>-Ordner ist aktiv (gepinnte Version). Neuen Web-Download ebenfalls in <code>_last</code> speichern?</span>
+        <span>${escapeHTML(t('detail.pinnedLastPrompt'))}</span>
       </label>
     `
       : '';
 
+  const providerTitleLabel = provMeta.label || 'Provider';
   const packageProfileHtml = hasPackageProfile
     ? `
       <section class="pkg-profile-card">
         <div class="pkg-profile-head">
           <div class="pkg-profile-title">
-            <h4>📦 Paketmanager-Steckbrief (${escapeHTML(provMeta.label || 'Provider')})</h4>
-            <span id="pkgProfileCacheBadge" class="pkg-cache-meta">Lade...</span>
+            <h4>📦 ${escapeHTML(t('detail.profileHeading', { provider: providerTitleLabel }))}</h4>
+            <span id="pkgProfileCacheBadge" class="pkg-cache-meta">${escapeHTML(t('common.loading'))}</span>
           </div>
-          <button type="button" class="btn btn-ghost btn-xs" id="btnRefreshPkgProfile" data-detail-action="refresh-pkg-profile" title="Steckbrief neu abrufen">🔄 Aktualisieren</button>
+          <button type="button" class="btn btn-ghost btn-xs" id="btnRefreshPkgProfile" data-detail-action="refresh-pkg-profile" title="${escapeHTML(t('detail.profileRefreshTitle'))}">🔄 ${escapeHTML(t('common.refresh'))}</button>
         </div>
         <div id="pkgProfileBody">
-          <span class="muted">⏳ Lade Paket-Informationen aus Cache / ${escapeHTML(provMeta.label || 'Provider')}...</span>
+          <span class="muted">⏳ ${escapeHTML(t('detail.profileLoading', { provider: providerTitleLabel }))}</span>
         </div>
       </section>
     `
@@ -900,11 +946,11 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const footerLeftBtns = [];
   if (item.inArchive && item.path) {
     footerLeftBtns.push(
-      '<button type="button" class="btn btn-ghost" data-detail-action="open-folder">📂 Archiv-Ordner</button>'
+      `<button type="button" class="btn btn-ghost" data-detail-action="open-folder">📂 ${escapeHTML(t('detail.footerArchiveFolder'))}</button>`
     );
   } else if (item.installLocation) {
     footerLeftBtns.push(
-      '<button type="button" class="btn btn-ghost" data-detail-action="open-install-dir">📂 Installationsordner</button>'
+      `<button type="button" class="btn btn-ghost" data-detail-action="open-install-dir">📂 ${escapeHTML(t('detail.footerInstallDir'))}</button>`
     );
   }
 
@@ -930,15 +976,15 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           ${headerMeta.length > 0 ? `<div class="detail-meta-inline">${headerMeta.join('')}</div>` : ''}
         </div>
       </div>
-      <button type="button" class="icon-btn" data-detail-action="close" title="Schließen" aria-label="Schließen">✕</button>
+      <button type="button" class="icon-btn" data-detail-action="close" title="${escapeHTML(t('common.close'))}" aria-label="${escapeHTML(t('common.close'))}">✕</button>
     </div>
 
     <nav class="modal-tabs detail-tabs" role="tablist">
-      <button type="button" class="tab-btn ${initialTab === 'overview' ? 'active' : ''}" data-detail-tab="overview">✨ Übersicht</button>
+      <button type="button" class="tab-btn ${initialTab === 'overview' ? 'active' : ''}" data-detail-tab="overview">✨ ${escapeHTML(t('detail.tabOverview'))}</button>
       <button type="button" class="tab-btn ${initialTab === 'changelog' ? 'active' : ''}" data-detail-tab="changelog">
-        📋 Changelog ${st.hasWebUpdate && supportsChangelog ? `<span class="detail-tab-badge">Neu</span>` : ''}
+        📋 ${escapeHTML(t('detail.tabChangelog'))} ${st.hasWebUpdate && supportsChangelog ? `<span class="detail-tab-badge">${escapeHTML(t('detail.tabChangelogNew'))}</span>` : ''}
       </button>
-      <button type="button" class="tab-btn ${initialTab === 'archive-tech' ? 'active' : ''}" data-detail-tab="archive-tech">📂 Archiv & Technik</button>
+      <button type="button" class="tab-btn ${initialTab === 'archive-tech' ? 'active' : ''}" data-detail-tab="archive-tech">📂 ${escapeHTML(t('detail.tabArchiveTech'))}</button>
     </nav>
 
     <div class="modal-body detail-body">
@@ -966,8 +1012,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         <div id="detailChangelogBody" class="changelog-body">
           ${
             supportsChangelog
-              ? '<span class="muted">Wird beim Öffnen geladen...</span>'
-              : '<span class="muted">Für diese Quelle sind keine automatischen Changelogs verfügbar.</span>'
+              ? `<span class="muted">${escapeHTML(t('detail.changelogLoadingOnOpen'))}</span>`
+              : `<span class="muted">${escapeHTML(t('detail.changelogUnsupported'))}</span>`
           }
         </div>
       </section>
@@ -980,8 +1026,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     <div class="modal-footer">
       <div class="footer-group">${footerLeftBtns.join('')}</div>
       <div class="footer-group">
-        ${item.inArchive ? '<button type="button" class="btn btn-ghost" data-detail-action="edit">✏️ Bearbeiten</button>' : ''}
-        <button type="button" class="btn btn-primary" data-detail-action="close">Schließen</button>
+        ${item.inArchive ? `<button type="button" class="btn btn-ghost" data-detail-action="edit">✏️ ${escapeHTML(t('common.edit'))}</button>` : ''}
+        <button type="button" class="btn btn-primary" data-detail-action="close">${escapeHTML(t('common.close'))}</button>
       </div>
     </div>
   `;
@@ -1001,9 +1047,9 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     if (!bodyEl) return;
 
     if (refreshBtn instanceof HTMLButtonElement) refreshBtn.disabled = true;
-    if (badgeEl) badgeEl.textContent = forceRefresh ? 'Aktualisiere...' : 'Lade...';
+    if (badgeEl) badgeEl.textContent = forceRefresh ? t('detail.profileRefreshing') : t('common.loading');
     if (forceRefresh) {
-      bodyEl.innerHTML = `<span class="muted">⏳ Frage aktuelle Paketdaten von ${escapeHTML(provMeta.label || 'Provider')} ab...</span>`;
+      bodyEl.innerHTML = `<span class="muted">⏳ ${escapeHTML(t('detail.profileFetchingLive', { provider: provMeta.label || 'Provider' }))}</span>`;
     }
 
     const res = await window.electronAPI.showPackage(effectivePm, effectivePkgId, { forceRefresh });
@@ -1043,17 +1089,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
         const extraRows = [];
         if (res.package.installerType) {
           extraRows.push(
-            `<div class="tech-row"><span>Installer-Typ</span><code>${escapeHTML(res.package.installerType)}</code></div>`
+            `<div class="tech-row"><span>${escapeHTML(t('detail.techInstallerType'))}</span><code>${escapeHTML(res.package.installerType)}</code></div>`
           );
         }
         if (res.package.releaseDate) {
           extraRows.push(
-            `<div class="tech-row"><span>Freigabedatum</span><code>${escapeHTML(res.package.releaseDate)}</code></div>`
+            `<div class="tech-row"><span>${escapeHTML(t('detail.techReleaseDate'))}</span><code>${escapeHTML(res.package.releaseDate)}</code></div>`
           );
         }
         if (res.package.sha256) {
           extraRows.push(
-            `<div class="tech-row"><span>SHA-256</span><code>${escapeHTML(res.package.sha256)}</code></div>`
+            `<div class="tech-row"><span>${escapeHTML(t('detail.techSha256'))}</span><code>${escapeHTML(res.package.sha256)}</code></div>`
           );
         }
         techInstallerSlot.innerHTML = extraRows.join('');
@@ -1108,8 +1154,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           });
       }
     } else {
-      if (badgeEl) badgeEl.textContent = 'Nicht verfügbar';
-      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Paket-Steckbrief konnte nicht geladen werden.')}</span>`;
+      if (badgeEl) badgeEl.textContent = t('detail.profileUnavailable');
+      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || t('detail.profileLoadFailed'))}</span>`;
     }
   };
 
@@ -1119,7 +1165,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
     const bodyEl = modal.querySelector('#detailChangelogBody');
     if (!bodyEl) return;
-    bodyEl.innerHTML = '<span class="muted">⏳ Lade Versionshinweise...</span>';
+    bodyEl.innerHTML = `<span class="muted">⏳ ${escapeHTML(t('detail.changelogLoading'))}</span>`;
 
     const res = await window.electronAPI.fetchChangelog({
       id: item.id,
@@ -1132,15 +1178,15 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     if (!isStillActive()) return;
 
     if (!res?.success) {
-      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || 'Kein Changelog verfügbar.')}</span>`;
+      bodyEl.innerHTML = `<span class="muted">${escapeHTML(res?.error || t('detail.changelogError'))}</span>`;
       return;
     }
 
     if (!res.entries?.length) {
       bodyEl.innerHTML = `
         <div class="changelog-empty">
-          <span class="muted">Keine direkten Versionshinweise hinterlegt.</span>
-          ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Im Browser öffnen ↗</button>` : ''}
+          <span class="muted">${escapeHTML(t('detail.changelogEmpty'))}</span>
+          ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">${escapeHTML(t('detail.changelogOpenBrowser'))} ↗</button>` : ''}
         </div>
       `;
       return;
@@ -1156,9 +1202,9 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
             <div class="changelog-entry-head">
               <strong>${escapeHTML(entry.title)}</strong>
               <div class="changelog-entry-meta">
-                ${isNewerThanPc ? '<span class="changelog-tag-new">Neu seit deiner PC-Version</span>' : ''}
+                ${isNewerThanPc ? `<span class="changelog-tag-new">${escapeHTML(t('detail.changelogNewSincePc'))}</span>` : ''}
                 ${entry.date ? `<span class="muted">${escapeHTML(entry.date)}</span>` : ''}
-                ${entry.url ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(entry.url)}">Original ↗</button>` : ''}
+                ${entry.url ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(entry.url)}">${escapeHTML(t('detail.changelogOriginal'))} ↗</button>` : ''}
               </div>
             </div>
             <div class="changelog-markdown">${renderMarkdownSafe(entry.body)}</div>
@@ -1169,8 +1215,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
     bodyEl.innerHTML = `
       <div class="changelog-source-row">
-        <span class="muted">Quelle: ${escapeHTML(res.source)}</span>
-        ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">Alle Releases ansehen ↗</button>` : ''}
+        <span class="muted">${escapeHTML(t('detail.changelogSource', { source: res.source }))}</span>
+        ${res.externalUrl ? `<button type="button" class="inline-link" data-open-url="${escapeHTML(res.externalUrl)}">${escapeHTML(t('detail.changelogAllReleases'))} ↗</button>` : ''}
       </div>
       ${entriesHtml}
     `;
@@ -1232,14 +1278,15 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const runInstallerFlow = async (filePath, targetVersion) => {
     if (!filePath) return;
     if (!policyEval.allowed) {
-      showToast(policyEval.error || 'Ausführung durch Zugriffsrichtlinie blockiert.', {
+      showToast(getLocalizedPolicyError(policyEval, 'policy.blockedDefault'), {
         type: 'error',
         duration: 6000,
       });
       return;
     }
     const useSilent = policyEval.silentOnly ? true : !isSilentLocked && selectedInstallMode === 'silent';
-    showToast(`Starte Setup für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`, { type: 'info' });
+    const modeLabel = useSilent ? t('detail.installModeSilent') : t('detail.installModeInteractive');
+    showToast(t('detail.toastSetupStarting', { name: item.name, mode: modeLabel }), { type: 'info' });
     const res = await window.electronAPI.executeInstaller({
       itemId: item.id,
       itemName: item.name,
@@ -1251,7 +1298,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     });
 
     if (res.alreadyRunning) {
-      showToast('Für dieses Programm läuft bereits eine Installation.', { type: 'warn' });
+      showToast(t('detail.toastAlreadyRunning'), { type: 'warn' });
       return;
     }
 
@@ -1261,13 +1308,13 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     }
 
     if (res.success && res.verified) {
-      showToast(`${item.name} erfolgreich auf v${res.newVersion} aktualisiert!`, { type: 'success' });
+      showToast(t('detail.toastUpdatedVerified', { name: item.name, version: res.newVersion }), { type: 'success' });
     } else if (res.canceled) {
-      showToast('Installation wurde abgebrochen.', { type: 'info' });
+      showToast(t('detail.toastInstallCanceled'), { type: 'info' });
     } else if (res.success && res.status === 'opened') {
-      showToast('Archiv-Datei wurde geöffnet.', { type: 'info' });
+      showToast(t('detail.toastArchiveFileOpened'), { type: 'info' });
     } else if (!res.success && res.error) {
-      showToast(`Installationsfehler: ${res.error}`, { type: 'error', duration: 6000 });
+      showToast(t('detail.toastInstallError', { error: res.error }), { type: 'error', duration: 6000 });
     }
   };
 
@@ -1277,17 +1324,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     const res = await window.electronAPI.downloadWebUpdate(item, { saveIntoLastFolder });
 
     if (res.alreadyRunning) {
-      showToast('Download läuft bereits.', { type: 'info' });
+      showToast(t('detail.toastDownloadRunning'), { type: 'info' });
       return;
     }
     if (res.canceled) return;
     if (!res.success) {
-      showToast(`Download fehlgeschlagen: ${res.error}`, { type: 'error', duration: 6000 });
+      showToast(t('detail.toastDownloadFailed', { error: res.error }), { type: 'error', duration: 6000 });
       return;
     }
 
     await triggerCatalogReload();
-    showToast(`${item.name} wurde im Archiv gespeichert.`, { type: 'success' });
+    showToast(t('detail.toastSavedInArchive', { name: item.name }), { type: 'success' });
     if (isStillActive()) {
       renderDetailModal(item.id, { freshDownload: { filePath: res.filePath, version: res.version } });
     }
@@ -1296,7 +1343,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const runProviderInstallFlow = async (btn) => {
     if (!canProviderInstall) return;
     if (!policyEval.allowed) {
-      showToast(policyEval.error || 'Ausführung durch Zugriffsrichtlinie blockiert.', {
+      showToast(getLocalizedPolicyError(policyEval, 'policy.blockedDefault'), {
         type: 'error',
         duration: 6000,
       });
@@ -1315,11 +1362,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     }
 
     const useSilent = policyEval.silentOnly ? true : !isSilentLocked && selectedInstallMode === 'silent';
+    const modeLabel = useSilent ? t('detail.installModeSilent') : t('detail.installModeInteractive');
     btn.disabled = true;
     const origText = btn.textContent;
-    btn.textContent = item.isInstalled ? '⏳ Aktualisiere...' : '⏳ Installiere...';
+    btn.textContent = item.isInstalled ? `⏳ ${t('detail.toastUpdatingBtn')}` : `⏳ ${t('detail.toastInstallingBtn')}`;
     showToast(
-      `Starte ${provMeta.label || effectivePm}-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`,
+      t('detail.toastProviderStarting', {
+        provider: provMeta.label || effectivePm,
+        action: item.isInstalled ? t('detail.toastProviderActionUpdate') : t('detail.toastProviderActionInstall'),
+        name: item.name,
+        mode: modeLabel,
+      }),
       {
         type: 'info',
       }
@@ -1336,19 +1389,27 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     btn.textContent = origText;
 
     if (res?.alreadyRunning) {
-      showToast('Für dieses Paket läuft bereits eine Installation.', { type: 'warn' });
+      showToast(t('detail.toastPkgAlreadyRunning'), { type: 'warn' });
       return;
     }
     if (res?.canceled) {
-      showToast('Vorgang wurde abgebrochen.', { type: 'info' });
+      showToast(t('common.operationCanceled'), { type: 'info' });
       return;
     }
     if (!res?.success) {
-      showToast(`Fehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+      showToast(t('common.errorPrefix', { error: res?.error || t('common.unknownError') }), {
+        type: 'error',
+        duration: 6000,
+      });
       return;
     }
 
-    showToast(`${item.name} erfolgreich ${item.isInstalled ? 'aktualisiert' : 'installiert'}!`, { type: 'success' });
+    showToast(
+      item.isInstalled
+        ? t('detail.toastProviderUpdated', { name: item.name })
+        : t('detail.toastProviderInstalled', { name: item.name }),
+      { type: 'success' }
+    );
 
     if (shouldSaveToArchive && archiveTargetSpec && !archiveTargetSpec.skipped) {
       const linkRes = await executeArchiveLink(buildArchivePayloadFromItem(), archiveTargetSpec, {
@@ -1447,15 +1508,15 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       const res = await window.electronAPI.copyFilesToPc([file]);
       if (btn instanceof HTMLButtonElement) btn.disabled = false;
-      if (res.success) showToast(`Gespeichert unter: ${res.dest}`, { type: 'success' });
-      else if (res.error) showToast(`Kopierfehler: ${res.error}`, { type: 'error' });
+      if (res.success) showToast(t('detail.toastCopiedTo', { dest: res.dest }), { type: 'success' });
+      else if (res.error) showToast(t('detail.toastCopyError', { error: res.error }), { type: 'error' });
     } else if (action === 'provider-install') {
       await runProviderInstallFlow(btn);
     } else if (action === 'nvm-use' && effectivePm === 'nvm' && effectivePkgId) {
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
       const origText = btn.textContent || '';
-      btn.textContent = '⏳ Aktiviere Node-Version...';
-      showToast(`Aktiviere Node.js v${effectivePkgId} über NVM...`, { type: 'info' });
+      btn.textContent = `⏳ ${t('detail.toastNvmActivatingBtn')}`;
+      showToast(t('detail.toastNvmActivating', { version: effectivePkgId }), { type: 'info' });
 
       const res = await window.electronAPI.useNvmVersion(effectivePkgId);
       if (isStillActive() && btn instanceof HTMLButtonElement) {
@@ -1464,11 +1525,11 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       }
 
       if (res?.alreadyRunning) {
-        showToast('Es wird bereits eine Node-Version umgeschaltet.', { type: 'warn' });
+        showToast(t('detail.toastNvmAlreadySwitching'), { type: 'warn' });
       } else if (res?.canceled) {
-        showToast('Umschalten wurde abgebrochen.', { type: 'info' });
+        showToast(t('detail.toastNvmCanceled'), { type: 'info' });
       } else if (res?.success) {
-        showToast(`Node.js v${effectivePkgId} ist jetzt aktiv!`, { type: 'success' });
+        showToast(t('detail.toastNvmActive', { version: effectivePkgId }), { type: 'success' });
         await triggerCatalogReload({ rescanInstalled: true });
         if (isStillActive()) {
           if (item.origin === 'remote') {
@@ -1478,14 +1539,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           }
         }
       } else {
-        showToast(`NVM-Fehler: ${res?.error || 'Node-Version konnte nicht aktiviert werden.'}`, {
+        showToast(t('detail.toastNvmError', { error: res?.error || t('detail.toastNvmDefaultError') }), {
           type: 'error',
           duration: 6000,
         });
       }
     } else if (action === 'save-to-archive') {
       const ok = await ensureAdminAuthenticated({
-        reason: 'Zum Aufnehmen von Paketen ins Archiv ist eine Admin-Anmeldung erforderlich.',
+        reason: t('modals.authReasonAddArchive'),
       });
       if (!ok) return;
       const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
@@ -1500,7 +1561,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       if (btn.dataset.armed !== 'true') {
         btn.dataset.armed = 'true';
         btn.dataset.origText = btn.textContent || '';
-        btn.textContent = '⚠️ Wirklich deinstallieren?';
+        btn.textContent = `⚠️ ${t('common.confirmUninstallArmed')}`;
         setTimeout(() => {
           if (btn.dataset.armed === 'true') {
             btn.dataset.armed = 'false';
@@ -1512,7 +1573,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
 
       btn.dataset.armed = 'false';
       if (btn instanceof HTMLButtonElement) btn.disabled = true;
-      btn.textContent = '⏳ Deinstalliere...';
+      btn.textContent = `⏳ ${t('detail.toastUninstallingBtn')}`;
 
       const res = await window.electronAPI.uninstallSoftware({
         packageManager: effectivePm,
@@ -1525,14 +1586,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       });
 
       if (btn instanceof HTMLButtonElement) btn.disabled = false;
-      btn.textContent = btn.dataset.origText || '🗑️ Deinstallieren';
+      btn.textContent = btn.dataset.origText || `🗑️ ${t('common.uninstall')}`;
 
       if (res?.alreadyRunning) {
-        showToast('Deinstallation läuft bereits.', { type: 'warn' });
+        showToast(t('detail.toastUninstallAlreadyRunning'), { type: 'warn' });
       } else if (res?.canceled) {
-        showToast('Deinstallation abgebrochen.', { type: 'info' });
+        showToast(t('detail.toastUninstallCanceled'), { type: 'info' });
       } else if (res?.success) {
-        showToast(`${item.name} wurde deinstalliert.`, { type: 'success' });
+        showToast(t('detail.toastUninstalled', { name: item.name }), { type: 'success' });
         await triggerCatalogReload({ rescanInstalled: true });
         if (item.inArchive) {
           if (isStillActive()) renderDetailModal(item.id);
@@ -1540,7 +1601,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           closeModal();
         }
       } else {
-        showToast(`Deinstallationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+        showToast(t('detail.toastUninstallError', { error: res?.error || t('common.unknownError') }), {
+          type: 'error',
+          duration: 6000,
+        });
       }
     }
   };
