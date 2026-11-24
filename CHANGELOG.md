@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.28.1...v1.29.0) (2026-11-24)
+
+### 🚀 Features
+
+* **i18n:** add multi-language core, wave 1 UI migration, and fix Windows taskbar icon ([ea8dc22](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/ea8dc2252736601e47ca87c95752cd0a1d8c59ef))
+* **i18n:** complete app-wide localization, live switching, contributor guide, and strict i18n tests ([a345f03](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/a345f030be9d9f9e36972fceebb2694f60fc63d8))
+
 ## [1.28.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.28.0...v1.28.1) (2026-11-24)
 
 ### 🐛 Bug Fixes
