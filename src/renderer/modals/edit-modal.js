@@ -6,6 +6,7 @@ import {
 } from '../../shared/installer-logic.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getCatalogItemById, getItemById, state } from '../state.js';
+import { closestButton, closestEl, qs, qsa, qsButton, qsInput, qsSelect, qsTextarea } from '../utils/dom.js';
 import { escapeHTML, sanitizeRichHtml, toMediaUrl } from '../utils/sanitize.js';
 import { openDetailModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -298,7 +299,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
           <div id="silentConfigBox" class="silent-config-box ${currentInstallMode === 'interactive-required' ? 'is-ignored' : ''}">
             <div class="silent-setup-meta">
-              <span class="muted">${primarySetupFile ? `Setup-Datei: <code>${escapeHTML(getBaseName(primarySetupFile))}</code>` : 'Noch keine Setup-Datei im Archiv – beim Erkennen/Testen kann eine lokale Datei gewählt werden.'}</span>
+              <span class="muted">${primarySetupFile ? `Setup-Datei: <code>${escapeHTML(getBaseName(primarySetupFile))}</code>` : 'Noch keine Setup-Datei im Archiv - beim Erkennen/Testen kann eine lokale Datei gewählt werden.'}</span>
               <span id="silentIgnoredHint" class="silent-ignored-hint" ${currentInstallMode === 'interactive-required' ? '' : 'hidden'}>🛡️ Im Adware-Schutz-Modus werden Silent-Parameter bei der Ausführung ignoriert.</span>
             </div>
 
@@ -423,7 +424,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
   const updateInnoInfStatus = () => {
     const statusEl = modal.querySelector('#innoInfStatus');
-    const infInput = modal.querySelector('#editInnoInfFile');
+    const infInput = qsInput(modal, '#editInnoInfFile');
     if (!statusEl || !infInput) return;
     const val = sanitizeInnoInfFileName(infInput.value.trim());
     if (!val) {
@@ -439,7 +440,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
   const switchInstallMode = (mode) => {
     currentInstallMode = normalizeInstallMode(mode);
-    modal.querySelectorAll('.install-mode-opt').forEach((btn) => {
+    qsa(modal, '.install-mode-opt').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.installMode === currentInstallMode);
     });
     const descEl = modal.querySelector('#installModeDesc');
@@ -448,14 +449,14 @@ export function renderEditModal(id, initialTab = 'general') {
     const configBox = modal.querySelector('#silentConfigBox');
     if (configBox) configBox.classList.toggle('is-ignored', currentInstallMode === 'interactive-required');
 
-    const ignoredHint = modal.querySelector('#silentIgnoredHint');
+    const ignoredHint = qs(modal, '#silentIgnoredHint');
     if (ignoredHint) ignoredHint.hidden = currentInstallMode !== 'interactive-required';
 
-    const applyAdwareBtn = modal.querySelector('#btnApplyAdwareProtection');
+    const applyAdwareBtn = qsButton(modal, '#btnApplyAdwareProtection');
     if (applyAdwareBtn) applyAdwareBtn.hidden = currentInstallMode === 'interactive-required';
 
-    const innoBox = modal.querySelector('#innoInfBox');
-    const infVal = modal.querySelector('#editInnoInfFile')?.value.trim();
+    const innoBox = qs(modal, '#innoInfBox');
+    const infVal = qsInput(modal, '#editInnoInfFile')?.value.trim();
     if (innoBox) {
       innoBox.hidden = !(detectedInstallerType === 'inno' || Boolean(infVal) || currentInstallMode === 'silent');
     }
@@ -468,14 +469,14 @@ export function renderEditModal(id, initialTab = 'general') {
 
   const refreshAdwareBanner = () => {
     const signal = detectAdwareSignals({
-      name: modal.querySelector('#editName')?.value.trim() || item.name,
+      name: qsInput(modal, '#editName')?.value.trim() || item.name,
       fileName: primarySetupFile ? getBaseName(primarySetupFile) : '',
-      packageId: modal.querySelector('#editWingetId')?.value.trim() || item.packageId || '',
+      packageId: qsInput(modal, '#editWingetId')?.value.trim() || item.packageId || '',
       publisher: itemPublisher,
     });
-    const warnBox = modal.querySelector('#adwareWarningBox');
+    const warnBox = qs(modal, '#adwareWarningBox');
     const warnReason = modal.querySelector('#adwareWarningReason');
-    const applyBtn = modal.querySelector('#btnApplyAdwareProtection');
+    const applyBtn = qsButton(modal, '#btnApplyAdwareProtection');
     if (signal.flagged) {
       if (warnReason) warnReason.textContent = signal.reason;
       if (warnBox) warnBox.hidden = false;
@@ -495,10 +496,10 @@ export function renderEditModal(id, initialTab = 'general') {
 
   // Tab-Wechsel
   const switchTab = (tabName) => {
-    modal.querySelectorAll('.tab-btn').forEach((b) => {
+    qsa(modal, '.tab-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === tabName);
     });
-    modal.querySelectorAll('.tab-panel').forEach((p) => {
+    qsa(modal, '.tab-panel').forEach((p) => {
       p.hidden = p.dataset.panel !== tabName;
     });
   };
@@ -506,18 +507,18 @@ export function renderEditModal(id, initialTab = 'general') {
   // Quell-Wechsel in Tab 2
   const switchSource = (src) => {
     currentSourceType = src;
-    modal.querySelectorAll('.source-opt').forEach((b) => {
+    qsa(modal, '.source-opt').forEach((b) => {
       b.classList.toggle('active', b.dataset.source === src);
     });
-    modal.querySelectorAll('.source-panel').forEach((p) => {
+    qsa(modal, '.source-panel').forEach((p) => {
       p.hidden = p.dataset.sourcePanel !== src;
     });
-    const testBar = modal.querySelector('#onlineTestBar');
+    const testBar = qs(modal, '#onlineTestBar');
     if (testBar) testBar.hidden = src === 'none';
   };
 
   // Drag & Drop für Icon & Medien im Tab 4
-  modal.querySelectorAll('.media-dropzone').forEach((zone) => {
+  qsa(modal, '.media-dropzone').forEach((zone) => {
     zone.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -560,10 +561,10 @@ export function renderEditModal(id, initialTab = 'general') {
   let savedSelectionRange = null;
 
   modal.onchange = (e) => {
-    if (e.target.id === 'installedAppsSelect') {
+    if (e.target instanceof HTMLSelectElement && e.target.id === 'installedAppsSelect') {
       const val = e.target.value;
       if (!val) return;
-      const input = modal.querySelector('#editSearchNames');
+      const input = qsInput(modal, '#editSearchNames');
       const list = input.value
         .split(',')
         .map((s) => s.trim())
@@ -578,41 +579,41 @@ export function renderEditModal(id, initialTab = 'general') {
 
   modal.onclick = async (e) => {
     // Tab Klick
-    const tabBtn = e.target.closest('.tab-btn');
+    const tabBtn = closestEl(e.target, '.tab-btn');
     if (tabBtn) {
       switchTab(tabBtn.dataset.tab);
       return;
     }
 
     // Online-Quelle Klick
-    const srcBtn = e.target.closest('.source-opt');
+    const srcBtn = closestEl(e.target, '.source-opt');
     if (srcBtn) {
       switchSource(srcBtn.dataset.source);
       return;
     }
 
     // Installationsmodus Klick
-    const modeBtn = e.target.closest('[data-install-mode]');
+    const modeBtn = closestEl(e.target, '[data-install-mode]');
     if (modeBtn) {
       switchInstallMode(modeBtn.dataset.installMode);
       return;
     }
 
     // Winget-Treffer übernehmen
-    const wgPick = e.target.closest('[data-winget-pick]');
+    const wgPick = closestEl(e.target, '[data-winget-pick]');
     if (wgPick) {
-      modal.querySelector('#editWingetId').value = wgPick.dataset.wingetPick;
+      qsInput(modal, '#editWingetId').value = wgPick.dataset.wingetPick;
       if (wgPick.dataset.wingetVer) {
-        modal.querySelector('#editWebVersion').value = wgPick.dataset.wingetVer;
+        qsInput(modal, '#editWebVersion').value = wgPick.dataset.wingetVer;
       }
-      modal.querySelector('#wingetResults').hidden = true;
+      qs(modal, '#wingetResults').hidden = true;
       refreshAdwareBanner();
       showToast(`Winget-ID "${wgPick.dataset.wingetPick}" übernommen.`, { type: 'success' });
       return;
     }
 
     // Pfad entfernen
-    const rmPath = e.target.closest('[data-remove-path]');
+    const rmPath = closestEl(e.target, '[data-remove-path]');
     if (rmPath) {
       draftPaths.splice(parseInt(rmPath.dataset.removePath, 10), 1);
       renderPathList();
@@ -620,7 +621,7 @@ export function renderEditModal(id, initialTab = 'general') {
     }
 
     // Medium löschen
-    const delMedia = e.target.closest('[data-delete-media]');
+    const delMedia = closestEl(e.target, '[data-delete-media]');
     if (delMedia) {
       const res = await window.electronAPI.deleteMedia(item.path, delMedia.dataset.deleteMedia);
       if (res.success) {
@@ -634,23 +635,23 @@ export function renderEditModal(id, initialTab = 'general') {
     }
 
     // Rich-Text-Toolbar
-    const cmdBtn = e.target.closest('#descToolbar button');
+    const cmdBtn = closestEl(e.target, '#descToolbar button');
     if (cmdBtn) {
       e.preventDefault();
       const cmd = cmdBtn.dataset.cmd;
       if (cmd === 'toggleLinkBar') {
         const sel = window.getSelection();
         if (sel?.rangeCount > 0) savedSelectionRange = sel.getRangeAt(0).cloneRange();
-        const bar = modal.querySelector('#inlineLinkBar');
+        const bar = qs(modal, '#inlineLinkBar');
         bar.hidden = !bar.hidden;
-        if (!bar.hidden) modal.querySelector('#inlineLinkUrl')?.focus();
+        if (!bar.hidden) qsInput(modal, '#inlineLinkUrl')?.focus();
       } else {
         document.execCommand(cmd, false, null);
       }
       return;
     }
 
-    const actionBtn = e.target.closest('[data-edit-action]');
+    const actionBtn = closestButton(e.target, '[data-edit-action]');
     if (!actionBtn) return;
     const act = actionBtn.dataset.editAction;
 
@@ -665,10 +666,10 @@ export function renderEditModal(id, initialTab = 'general') {
     }
 
     if (act === 'apply-link') {
-      const url = modal.querySelector('#inlineLinkUrl').value.trim();
-      modal.querySelector('#inlineLinkBar').hidden = true;
+      const url = qsInput(modal, '#inlineLinkUrl').value.trim();
+      qs(modal, '#inlineLinkBar').hidden = true;
       if (url) {
-        const editor = modal.querySelector('#editDesc');
+        const editor = qs(modal, '#editDesc');
         editor.focus();
         if (savedSelectionRange) {
           const sel = window.getSelection();
@@ -681,14 +682,14 @@ export function renderEditModal(id, initialTab = 'general') {
     }
 
     if (act === 'cancel-link') {
-      modal.querySelector('#inlineLinkBar').hidden = true;
+      qs(modal, '#inlineLinkBar').hidden = true;
       return;
     }
 
     // Winget-Suche
     if (act === 'search-winget') {
-      const query = modal.querySelector('#wingetQueryInput').value.trim();
-      const box = modal.querySelector('#wingetResults');
+      const query = qsInput(modal, '#wingetQueryInput').value.trim();
+      const box = qs(modal, '#wingetResults');
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
       actionBtn.textContent = '⏳ Suche...';
@@ -723,7 +724,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Visueller Versions-Highlighter
     if (act === 'visual-scrape') {
-      const url = modal.querySelector('#editWebUrl').value.trim();
+      const url = qsInput(modal, '#editWebUrl').value.trim();
       if (!url) return showToast('Bitte zuerst eine Webseite eingeben.', { type: 'warn' });
 
       actionBtn.disabled = true;
@@ -734,9 +735,9 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.textContent = orig;
 
       if (res.success) {
-        modal.querySelector('#editWebPrefix').value = res.prefix || '';
-        modal.querySelector('#editWebSuffix').value = res.suffix || '';
-        modal.querySelector('#editWebVersion').value = res.version || '';
+        qsInput(modal, '#editWebPrefix').value = res.prefix || '';
+        qsInput(modal, '#editWebSuffix').value = res.suffix || '';
+        qsInput(modal, '#editWebVersion').value = res.version || '';
         showToast(`Version v${res.version} erfolgreich markiert!`, { type: 'success' });
       } else if (!res.canceled) {
         showToast(res.error || 'Markierung fehlgeschlagen.', { type: 'error' });
@@ -746,14 +747,14 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Gefixter Visueller Link-Picker (mit will-download Abfangnetz!)
     if (act === 'visual-link-pick') {
-      const dlInput = modal.querySelector('#editDownloadUrl');
-      const webInput = modal.querySelector('#editWebUrl');
+      const dlInput = qsInput(modal, '#editDownloadUrl');
+      const webInput = qsInput(modal, '#editWebUrl');
       const startUrl = dlInput.value.trim() || webInput.value.trim();
       if (!startUrl) {
         return showToast('Bitte zuerst eine Webseite als Start-URL eingeben.', { type: 'warn' });
       }
 
-      const knownVer = modal.querySelector('#editWebVersion').value.trim();
+      const knownVer = qsInput(modal, '#editWebVersion').value.trim();
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
       actionBtn.textContent = '⏳ Fenster offen...';
@@ -763,8 +764,8 @@ export function renderEditModal(id, initialTab = 'general') {
 
       if (res.success) {
         dlInput.value = res.url || '';
-        modal.querySelector('#editDlPrefix').value = res.prefix || '';
-        modal.querySelector('#editDlSuffix').value = res.suffix || '';
+        qsInput(modal, '#editDlPrefix').value = res.prefix || '';
+        qsInput(modal, '#editDlSuffix').value = res.suffix || '';
 
         if (res.mode === 'template') {
           showToast('Download-URL erkannt und automatisch als {version}-Vorlage gespeichert!', { type: 'success' });
@@ -782,20 +783,20 @@ export function renderEditModal(id, initialTab = 'general') {
     // Live-Test Online-Quelle (kein alert, direktes Inline-Feedback!)
     if (act === 'test-online') {
       const fb = modal.querySelector('#onlineTestFeedback');
-      const wingetIdVal = modal.querySelector('#editWingetId').value.trim();
+      const wingetIdVal = qsInput(modal, '#editWingetId').value.trim();
       const payload = {
         itemId: item.id,
         sourceType: currentSourceType,
         packageManager: currentSourceType === 'winget' ? 'winget' : '',
         packageId: currentSourceType === 'winget' ? wingetIdVal : '',
         wingetId: wingetIdVal,
-        githubAssetPattern: modal.querySelector('#editGithubAssetPattern').value.trim(),
+        githubAssetPattern: qsInput(modal, '#editGithubAssetPattern').value.trim(),
         url:
           currentSourceType === 'github'
-            ? modal.querySelector('#editGithubUrl').value.trim()
-            : modal.querySelector('#editWebUrl').value.trim(),
-        prefix: modal.querySelector('#editWebPrefix').value,
-        suffix: modal.querySelector('#editWebSuffix').value,
+            ? qsInput(modal, '#editGithubUrl').value.trim()
+            : qsInput(modal, '#editWebUrl').value.trim(),
+        prefix: qsInput(modal, '#editWebPrefix').value,
+        suffix: qsInput(modal, '#editWebSuffix').value,
         persist: false,
       };
 
@@ -807,7 +808,7 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.disabled = false;
 
       if (res.success) {
-        modal.querySelector('#editWebVersion').value = res.version;
+        qsInput(modal, '#editWebVersion').value = res.version;
         const dlInfo = res.downloadUrl ? ' · Direkt-Download bereit' : '';
         fb.className = 'test-feedback is-ok';
         fb.textContent = `✓ Gefunden: v${res.version}${dlInfo}`;
@@ -841,9 +842,8 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Auto-Detect Pfad
     if (act === 'auto-detect-path') {
-      const mainName = modal.querySelector('#editName').value.trim();
-      const extras = modal
-        .querySelector('#editSearchNames')
+      const mainName = qsInput(modal, '#editName').value.trim();
+      const extras = qsInput(modal, '#editSearchNames')
         .value.split(',')
         .map((s) => s.trim())
         .filter(Boolean);
@@ -882,7 +882,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
     if (act === 'apply-adware-protection') {
       switchInstallMode('interactive-required');
-      showToast('Adware-Schutz („Immer Interaktiv“) aktiviert.', { type: 'success' });
+      showToast('Adware-Schutz ("Immer Interaktiv") aktiviert.', { type: 'success' });
       return;
     }
 
@@ -897,8 +897,8 @@ export function renderEditModal(id, initialTab = 'general') {
 
       const res = await window.electronAPI.detectInstaller({
         filePath: targetFile,
-        name: modal.querySelector('#editName').value.trim() || item.name,
-        packageId: modal.querySelector('#editWingetId')?.value.trim() || item.packageId || '',
+        name: qsInput(modal, '#editName').value.trim() || item.name,
+        packageId: qsInput(modal, '#editWingetId')?.value.trim() || item.packageId || '',
         publisher: itemPublisher,
       });
 
@@ -911,12 +911,12 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       detectedInstallerType = res.type || 'unknown';
-      const argsInput = modal.querySelector('#editSilentArgs');
+      const argsInput = qsInput(modal, '#editSilentArgs');
       if (argsInput && res.suggestedArgs) {
         argsInput.value = res.suggestedArgs;
       }
 
-      const fb = modal.querySelector('#installerDetectFeedback');
+      const fb = qs(modal, '#installerDetectFeedback');
       if (fb) {
         fb.hidden = false;
         fb.innerHTML = `
@@ -927,32 +927,32 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       if (res.type === 'inno') {
-        const innoBox = modal.querySelector('#innoInfBox');
+        const innoBox = qs(modal, '#innoInfBox');
         if (innoBox) innoBox.hidden = false;
       }
 
       if (res.adwareWarning?.flagged) {
-        const warnBox = modal.querySelector('#adwareWarningBox');
+        const warnBox = qs(modal, '#adwareWarningBox');
         const warnReason = modal.querySelector('#adwareWarningReason');
-        const applyBtn = modal.querySelector('#btnApplyAdwareProtection');
+        const applyBtn = qsButton(modal, '#btnApplyAdwareProtection');
         if (warnReason) warnReason.textContent = res.adwareWarning.reason;
         if (warnBox) warnBox.hidden = false;
         if (applyBtn) applyBtn.hidden = currentInstallMode === 'interactive-required';
       }
 
       if (res.suggestedArgs) {
-        showToast(`Typ „${res.label}“ erkannt – Parameter übernommen.`, { type: 'success' });
+        showToast(`Typ "${res.label}" erkannt - Parameter übernommen.`, { type: 'success' });
       } else {
-        showToast(`Typ „${res.label}“ erkannt – bitte Parameter manuell prüfen.`, { type: 'info' });
+        showToast(`Typ "${res.label}" erkannt - bitte Parameter manuell prüfen.`, { type: 'info' });
       }
       return;
     }
 
     // Installer mit aktuellem Modus testen
     if (act === 'test-installer') {
-      const argsVal = modal.querySelector('#editSilentArgs')?.value.trim() || '';
+      const argsVal = qsInput(modal, '#editSilentArgs')?.value.trim() || '';
       if (currentInstallMode === 'silent' && !argsVal) {
-        return showToast('Bitte zuerst Silent-Parameter eingeben oder per „Setup-Typ erkennen“ ermitteln.', {
+        return showToast('Bitte zuerst Silent-Parameter eingeben oder per "Setup-Typ erkennen" ermitteln.', {
           type: 'warn',
         });
       }
@@ -960,14 +960,14 @@ export function renderEditModal(id, initialTab = 'general') {
       const targetFile = await resolveTargetSetupFile();
       if (!targetFile) return;
 
-      const infVal = sanitizeInnoInfFileName(modal.querySelector('#editInnoInfFile')?.value.trim() || '');
+      const infVal = sanitizeInnoInfFileName(qsInput(modal, '#editInnoInfFile')?.value.trim() || '');
       actionBtn.disabled = true;
       const orig = actionBtn.textContent;
       actionBtn.textContent = '⏳ Läuft...';
 
       const res = await window.electronAPI.executeInstaller({
         itemId: item.id,
-        itemName: modal.querySelector('#editName').value.trim() || item.name,
+        itemName: qsInput(modal, '#editName').value.trim() || item.name,
         sourcePath: targetFile,
         itemPath: item.path,
         allowSilent: currentInstallMode === 'silent',
@@ -986,7 +986,7 @@ export function renderEditModal(id, initialTab = 'general') {
       } else if (res?.success) {
         await triggerCatalogReload({ rescanInstalled: true });
         const msg = res.adwareProtected
-          ? 'Testlauf im Adware-Schutz (Immer Interaktiv) abgeschlossen – Silent-Parameter wurden ignoriert.'
+          ? 'Testlauf im Adware-Schutz (Immer Interaktiv) abgeschlossen - Silent-Parameter wurden ignoriert.'
           : res.effectiveSilent
             ? 'Stiller Testlauf erfolgreich abgeschlossen.'
             : 'Interaktiver Testlauf abgeschlossen.';
@@ -1006,7 +1006,7 @@ export function renderEditModal(id, initialTab = 'general') {
         return showToast('Antwortdateien (.inf) werden nur für Inno-Setup-.exe-Dateien unterstützt.', { type: 'warn' });
       }
 
-      const infInput = modal.querySelector('#editInnoInfFile');
+      const infInput = qsInput(modal, '#editInnoInfFile');
       const desiredName = sanitizeInnoInfFileName(infInput?.value.trim() || '') || 'silent.inf';
 
       actionBtn.disabled = true;
@@ -1015,7 +1015,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
       const res = await window.electronAPI.recordInnoInf({
         itemId: item.id,
-        itemName: modal.querySelector('#editName').value.trim() || item.name,
+        itemName: qsInput(modal, '#editName').value.trim() || item.name,
         itemPath: item.path,
         sourcePath: targetFile,
         infFileName: desiredName,
@@ -1032,7 +1032,7 @@ export function renderEditModal(id, initialTab = 'general') {
         recordedInfName = res.infFile;
         updateInnoInfStatus();
         await triggerCatalogReload();
-        showToast(`Antwortdatei „${res.infFile}“ im _metadata/-Ordner gespeichert!`, { type: 'success' });
+        showToast(`Antwortdatei "${res.infFile}" im _metadata/-Ordner gespeichert!`, { type: 'success' });
       } else if (res?.canceled) {
         showToast('Aufzeichnung abgebrochen.', { type: 'info' });
       } else {
@@ -1062,7 +1062,7 @@ export function renderEditModal(id, initialTab = 'general') {
 
     // Auto-Fill abrufen (überschreibt nichts automatisch -> zeigt Checkliste!)
     if (act === 'autofill-fetch') {
-      const wingetIdVal = modal.querySelector('#editWingetId').value.trim();
+      const wingetIdVal = qsInput(modal, '#editWingetId').value.trim();
       const payload = {
         sourceType: currentSourceType,
         packageManager: currentSourceType === 'winget' ? 'winget' : '',
@@ -1070,8 +1070,8 @@ export function renderEditModal(id, initialTab = 'general') {
         wingetId: wingetIdVal,
         url:
           currentSourceType === 'github'
-            ? modal.querySelector('#editGithubUrl').value.trim()
-            : modal.querySelector('#editWebUrl').value.trim(),
+            ? qsInput(modal, '#editGithubUrl').value.trim()
+            : qsInput(modal, '#editWebUrl').value.trim(),
       };
 
       actionBtn.disabled = true;
@@ -1086,10 +1086,10 @@ export function renderEditModal(id, initialTab = 'general') {
       }
 
       const m = res.metadata;
-      const box = modal.querySelector('#autofillPreviewBox');
+      const box = qs(modal, '#autofillPreviewBox');
       const hasDesc = Boolean(modal.querySelector('#editDesc').textContent.trim());
-      const hasTags = Boolean(modal.querySelector('#editTags').value.trim());
-      const hasLinks = Boolean(modal.querySelector('#editLinks').value.trim());
+      const hasTags = Boolean(qsInput(modal, '#editTags').value.trim());
+      const hasLinks = Boolean(qsTextarea(modal, '#editLinks').value.trim());
 
       const rows = [];
       if (m.description) {
@@ -1149,24 +1149,24 @@ export function renderEditModal(id, initialTab = 'general') {
     }
 
     if (act === 'autofill-close') {
-      const box = modal.querySelector('#autofillPreviewBox');
+      const box = qs(modal, '#autofillPreviewBox');
       if (box) box.hidden = true;
       return;
     }
 
     if (act === 'autofill-apply') {
-      const box = modal.querySelector('#autofillPreviewBox');
+      const box = qs(modal, '#autofillPreviewBox');
       if (!box?.dataset.payload) return;
       const m = JSON.parse(box.dataset.payload);
       let applied = 0;
 
-      if (box.querySelector('[data-af-field="description"]')?.checked && m.description) {
+      if (qsInput(box, '[data-af-field="description"]')?.checked && m.description) {
         modal.querySelector('#editDesc').textContent = m.description;
         applied++;
       }
 
-      if (box.querySelector('[data-af-field="tags"]')?.checked && m.tags?.length) {
-        const tagsInput = modal.querySelector('#editTags');
+      if (qsInput(box, '[data-af-field="tags"]')?.checked && m.tags?.length) {
+        const tagsInput = qsInput(modal, '#editTags');
         const existing = tagsInput.value
           .split(',')
           .map((s) => s.trim())
@@ -1179,8 +1179,8 @@ export function renderEditModal(id, initialTab = 'general') {
         applied++;
       }
 
-      if (box.querySelector('[data-af-field="links"]')?.checked && m.links) {
-        const linksEl = modal.querySelector('#editLinks');
+      if (qsInput(box, '[data-af-field="links"]')?.checked && m.links) {
+        const linksEl = qsTextarea(modal, '#editLinks');
         const currentLines = linksEl.value
           .split('\n')
           .map((l) => l.trim())
@@ -1208,7 +1208,7 @@ export function renderEditModal(id, initialTab = 'general') {
       actionBtn.textContent = '⏳ Speichere...';
 
       const linksObj = {};
-      for (const line of modal.querySelector('#editLinks').value.split('\n')) {
+      for (const line of qsTextarea(modal, '#editLinks').value.split('\n')) {
         const parts = line.split('|');
         if (parts.length >= 2) {
           const label = parts[0].trim();
@@ -1219,12 +1219,12 @@ export function renderEditModal(id, initialTab = 'general') {
 
       const webUrl =
         currentSourceType === 'github'
-          ? modal.querySelector('#editGithubUrl').value.trim()
+          ? qsInput(modal, '#editGithubUrl').value.trim()
           : currentSourceType === 'web'
-            ? modal.querySelector('#editWebUrl').value.trim()
+            ? qsInput(modal, '#editWebUrl').value.trim()
             : '';
 
-      const savedWingetId = currentSourceType === 'winget' ? modal.querySelector('#editWingetId').value.trim() : '';
+      const savedWingetId = currentSourceType === 'winget' ? qsInput(modal, '#editWingetId').value.trim() : '';
       const hasNonWingetPkg = Boolean(item.packageManager && item.packageManager !== 'winget' && item.packageId);
       const nextPackageManager =
         currentSourceType === 'winget' && savedWingetId ? 'winget' : hasNonWingetPkg ? item.packageManager : '';
@@ -1232,50 +1232,46 @@ export function renderEditModal(id, initialTab = 'general') {
         currentSourceType === 'winget' && savedWingetId ? savedWingetId : hasNonWingetPkg ? item.packageId : '';
 
       const payload = {
-        name: modal.querySelector('#editName').value.trim() || item.name,
-        softwareType: modal.querySelector('#editSoftwareType').value,
-        category: modal.querySelector('#editCat').value.trim(),
-        hiddenCategory: modal.querySelector('#editHidden').value.trim(),
-        tags: modal
-          .querySelector('#editTags')
+        name: qsInput(modal, '#editName').value.trim() || item.name,
+        softwareType: qsSelect(modal, '#editSoftwareType').value,
+        category: qsInput(modal, '#editCat').value.trim(),
+        hiddenCategory: qsInput(modal, '#editHidden').value.trim(),
+        tags: qsInput(modal, '#editTags')
           .value.split(',')
           .map((s) => s.trim())
           .filter(Boolean),
-        formats: modal
-          .querySelector('#editFormats')
+        formats: qsInput(modal, '#editFormats')
           .value.split(',')
           .map((s) => s.trim())
           .filter(Boolean),
-        os: modal
-          .querySelector('#editOS')
+        os: qsInput(modal, '#editOS')
           .value.split(',')
           .map((s) => s.trim())
           .filter(Boolean),
-        keepAllVersions: Boolean(modal.querySelector('#editKeepAllVersions')?.checked),
+        keepAllVersions: Boolean(qsInput(modal, '#editKeepAllVersions')?.checked),
         description: sanitizeRichHtml(modal.querySelector('#editDesc').innerHTML.trim()),
-        searchNames: modal
-          .querySelector('#editSearchNames')
+        searchNames: qsInput(modal, '#editSearchNames')
           .value.split(',')
           .map((s) => s.trim())
           .filter(Boolean),
         autoPaths: draftPaths.filter((p) => p.origin === 'auto').map((p) => p.path),
         installPaths: draftPaths.filter((p) => p.origin === 'manual').map((p) => p.path),
         installMode: currentInstallMode,
-        silentArgs: sanitizeSilentArgs(modal.querySelector('#editSilentArgs')?.value || ''),
-        innoInfFile: sanitizeInnoInfFileName(modal.querySelector('#editInnoInfFile')?.value.trim() || ''),
+        silentArgs: sanitizeSilentArgs(qsInput(modal, '#editSilentArgs')?.value || ''),
+        innoInfFile: sanitizeInnoInfFileName(qsInput(modal, '#editInnoInfFile')?.value.trim() || ''),
         webSourceType: currentSourceType,
         packageManager: nextPackageManager,
         packageId: nextPackageId,
         wingetId: savedWingetId,
         githubAssetPattern:
-          currentSourceType === 'github' ? modal.querySelector('#editGithubAssetPattern').value.trim() : '',
+          currentSourceType === 'github' ? qsInput(modal, '#editGithubAssetPattern').value.trim() : '',
         webVersionUrl: webUrl,
-        webVersionPrefix: currentSourceType === 'web' ? modal.querySelector('#editWebPrefix').value : '',
-        webVersionSuffix: currentSourceType === 'web' ? modal.querySelector('#editWebSuffix').value : '',
-        downloadUrl: currentSourceType === 'web' ? modal.querySelector('#editDownloadUrl').value.trim() : '',
-        dlPrefix: currentSourceType === 'web' ? modal.querySelector('#editDlPrefix').value : '',
-        dlSuffix: currentSourceType === 'web' ? modal.querySelector('#editDlSuffix').value : '',
-        webVersion: currentSourceType === 'none' ? '' : modal.querySelector('#editWebVersion').value.trim(),
+        webVersionPrefix: currentSourceType === 'web' ? qsInput(modal, '#editWebPrefix').value : '',
+        webVersionSuffix: currentSourceType === 'web' ? qsInput(modal, '#editWebSuffix').value : '',
+        downloadUrl: currentSourceType === 'web' ? qsInput(modal, '#editDownloadUrl').value.trim() : '',
+        dlPrefix: currentSourceType === 'web' ? qsInput(modal, '#editDlPrefix').value : '',
+        dlSuffix: currentSourceType === 'web' ? qsInput(modal, '#editDlSuffix').value : '',
+        webVersion: currentSourceType === 'none' ? '' : qsInput(modal, '#editWebVersion').value.trim(),
         links: linksObj,
       };
 

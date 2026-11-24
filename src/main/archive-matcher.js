@@ -14,22 +14,30 @@ import { wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { readRegistryUninstallEntries } from './windows-tools.js';
 
+/**
+ * @param {number} ms
+ * @param {AbortSignal | null} [signal]
+ * @returns {Promise<void>}
+ */
 function delay(ms, signal = null) {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve();
-      return;
+  return new Promise(
+    /** @param {(value?: void) => void} resolve */
+    (resolve) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
     }
-    const timer = setTimeout(() => {
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+  );
 }
 
 function buildInstalledWingetPool(wingetExports, registryEntries, catalogItems) {

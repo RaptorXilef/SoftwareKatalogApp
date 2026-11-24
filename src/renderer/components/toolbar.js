@@ -6,6 +6,7 @@ import {
   setActiveSortMode,
   state,
 } from '../state.js';
+import { closestEl, qsa, qsInput, qsSelect } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 const ORIGIN_FILTERS_BY_TAB = {
@@ -63,7 +64,7 @@ export function syncToolbarForTab() {
   const tab = state.activeTab;
   const isCatalogView = tab === 'updates' || tab === 'installed' || tab === 'archive';
 
-  document.querySelectorAll('#mainNav .nav-tab').forEach((btn) => {
+  qsa(document, '#mainNav .nav-tab').forEach((btn) => {
     const isActive = btn.dataset.mainTab === tab;
     btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
@@ -78,9 +79,9 @@ export function syncToolbarForTab() {
   const tagsDetails = document.getElementById('tagsDetails');
   if (tagsDetails) tagsDetails.hidden = tab !== 'archive';
 
-  const sortSelect = document.getElementById('sortSelect');
+  const sortSelect = qsSelect(document, '#sortSelect');
   if (sortSelect) {
-    sortSelect.querySelectorAll('option[data-archive-only="true"]').forEach((opt) => {
+    qsa(sortSelect, 'option[data-archive-only="true"]').forEach((opt) => {
       opt.hidden = tab !== 'archive';
     });
     const mode = getActiveSortMode();
@@ -135,10 +136,10 @@ export function renderTagChips() {
 
 export function initToolbar(handlers) {
   const mainNav = document.getElementById('mainNav');
-  const searchInput = document.getElementById('searchInput');
+  const searchInput = qsInput(document, '#searchInput');
   const clearSearchBtn = document.getElementById('clearSearchBtn');
-  const sortSelect = document.getElementById('sortSelect');
-  const filterSelect = document.getElementById('filterSelect');
+  const sortSelect = qsSelect(document, '#sortSelect');
+  const filterSelect = qsSelect(document, '#filterSelect');
   const originFilterBar = document.getElementById('originFilterBar');
   const tagContainer = document.getElementById('tagContainer');
   const moreBtn = document.getElementById('btnMoreActions');
@@ -152,7 +153,7 @@ export function initToolbar(handlers) {
   };
 
   mainNav?.addEventListener('click', (e) => {
-    const tabBtn = e.target.closest('[data-main-tab]');
+    const tabBtn = closestEl(e.target, '[data-main-tab]');
     if (!tabBtn) return;
     const nextTab = tabBtn.dataset.mainTab;
     if (!nextTab || nextTab === state.activeTab) return;
@@ -186,7 +187,7 @@ export function initToolbar(handlers) {
   });
 
   originFilterBar?.addEventListener('click', (e) => {
-    const chip = e.target.closest('[data-origin-filter]');
+    const chip = closestEl(e.target, '[data-origin-filter]');
     if (!chip) return;
     setActiveOriginFilter(chip.dataset.originFilter);
     renderOriginFilterBar();
@@ -194,7 +195,7 @@ export function initToolbar(handlers) {
   });
 
   tagContainer?.addEventListener('click', (e) => {
-    const chip = e.target.closest('.tag-chip');
+    const chip = closestEl(e.target, '.tag-chip');
     if (!chip) return;
     const tag = chip.dataset.tag;
     state.activeTag = tag === 'all' ? null : tag;
@@ -216,7 +217,7 @@ export function initToolbar(handlers) {
   });
 
   moreMenu?.addEventListener('click', (e) => {
-    const item = e.target.closest('[data-toolbar-action]');
+    const item = closestEl(e.target, '[data-toolbar-action]');
     if (!item) return;
     closePopovers();
     const act = item.dataset.toolbarAction;
@@ -243,9 +244,9 @@ export function initToolbar(handlers) {
 
   document.addEventListener('click', (e) => {
     if (
-      !e.target.closest('.menu-anchor') &&
-      !e.target.closest('#btnLegendToggle') &&
-      !e.target.closest('#legendPopover')
+      !closestEl(e.target, '.menu-anchor') &&
+      !closestEl(e.target, '#btnLegendToggle') &&
+      !closestEl(e.target, '#legendPopover')
     ) {
       closePopovers();
     }

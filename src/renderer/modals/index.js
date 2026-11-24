@@ -8,14 +8,19 @@ import { renderEditModal } from './edit-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
 
+/** @type {(opts?: any) => Promise<void> | void} */
 let reloadHandler = async () => {};
 
+/**
+ * @param {{ onReload?: (opts?: any) => Promise<void> | void }} [options]
+ */
 export function initModals({ onReload } = {}) {
   if (typeof onReload === 'function') {
     reloadHandler = onReload;
   }
 }
 
+/** @param {any} [opts] */
 export async function triggerCatalogReload(opts) {
   await reloadHandler(opts);
 }

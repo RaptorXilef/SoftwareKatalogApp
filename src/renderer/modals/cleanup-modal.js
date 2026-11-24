@@ -1,6 +1,7 @@
 import { clampKeepVersions, DEFAULT_KEEP_VERSIONS, formatBytes } from '../../shared/archive-cleaner-logic.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
+import { closestButton, qsaInputs, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -127,7 +128,7 @@ export async function renderCleanupModal() {
       protectedItems.length > 0
         ? `
           <details class="cleanup-protected-drawer" ${candidates.length === 0 ? 'open' : ''}>
-            <summary>🛡️ Geschützt (${protectedItems.length}) – wird niemals angefasst</summary>
+            <summary>🛡️ Geschützt (${protectedItems.length}) - wird niemals angefasst</summary>
             <div class="cleanup-protected-list">
               ${protectedItems
                 .map((p) => {
@@ -220,7 +221,7 @@ export async function renderCleanupModal() {
       </div>
     `;
 
-    const keepInput = modal.querySelector('#cleanupKeepInput');
+    const keepInput = qsInput(modal, '#cleanupKeepInput');
     if (keepInput) {
       keepInput.onchange = async () => {
         keepVersions = clampKeepVersions(keepInput.value);
@@ -229,7 +230,7 @@ export async function renderCleanupModal() {
       };
     }
 
-    modal.querySelectorAll('input[name="cleanupAction"]').forEach((radio) => {
+    qsaInputs(modal, 'input[name="cleanupAction"]').forEach((radio) => {
       radio.onchange = () => {
         if (radio.checked) {
           targetAction = radio.value === 'trash' ? 'trash' : 'archive';
@@ -256,7 +257,7 @@ export async function renderCleanupModal() {
   overlay.hidden = false;
 
   modal.onclick = async (e) => {
-    const btn = e.target.closest('[data-cleanup-action]');
+    const btn = closestButton(e.target, '[data-cleanup-action]');
     if (!btn) return;
     const action = btn.dataset.cleanupAction;
 

@@ -1,4 +1,5 @@
 import { state } from '../state.js';
+import { closestButton, closestEl, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
 
@@ -188,7 +189,7 @@ function renderResults() {
 }
 
 export function renderDiscoverView() {
-  const input = document.getElementById('discoverSearchInput');
+  const input = qsInput(document, '#discoverSearchInput');
   const clearBtn = document.getElementById('clearDiscoverSearchBtn');
   if (input && input.value !== state.discoverQuery) {
     input.value = state.discoverQuery;
@@ -203,7 +204,7 @@ export function renderDiscoverView() {
 }
 
 export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageDetail, onLinkToArchive }) {
-  const searchInput = document.getElementById('discoverSearchInput');
+  const searchInput = qsInput(document, '#discoverSearchInput');
   const clearBtn = document.getElementById('clearDiscoverSearchBtn');
   const searchBtn = document.getElementById('btnDiscoverSearch');
   const chipsContainer = document.getElementById('discoverSourceChips');
@@ -279,7 +280,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
   searchBtn?.addEventListener('click', () => executeSearch());
 
   chipsContainer?.addEventListener('click', (e) => {
-    const chip = e.target.closest('[data-discover-provider]');
+    const chip = closestEl(e.target, '[data-discover-provider]');
     if (!chip) return;
     const providerId = chip.dataset.discoverProvider;
     const idx = state.discoverSelectedProviders.indexOf(providerId);
@@ -296,7 +297,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
   });
 
   resultsContainer?.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-discover-action]');
+    const btn = closestButton(e.target, '[data-discover-action]');
     if (!btn) return;
 
     const action = btn.dataset.discoverAction;
@@ -366,7 +367,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
       } else if (res?.success) {
         await onReload?.({ rescanInstalled: true });
         if (canDownloadToArchive && saveMode === 'auto-id') {
-          showToast(`${pkg.name || packageId} installiert – speichere automatisch im Archiv...`, { type: 'info' });
+          showToast(`${pkg.name || packageId} installiert - speichere automatisch im Archiv...`, { type: 'info' });
           await onLinkToArchive?.(linkPayload, { mode: 'auto-id', downloadSetup: true });
         } else if (canDownloadToArchive && saveMode === 'ask') {
           showToast(`${pkg.name || packageId} erfolgreich installiert!`, {

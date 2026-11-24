@@ -1,5 +1,6 @@
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
+import { closestEl, closestInput, closestSelect, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -57,7 +58,7 @@ export async function renderWingetMatcherModal() {
   overlay.hidden = false;
 
   modal.onclick = (e) => {
-    const btn = e.target.closest('[data-matcher-action="close"]');
+    const btn = closestEl(e.target, '[data-matcher-action="close"]');
     if (btn) closeModal();
   };
 
@@ -82,7 +83,7 @@ export async function renderWingetMatcherModal() {
       </div>
     `;
     modal.onclick = (e) => {
-      if (e.target.closest('[data-matcher-action="close"]')) closeModal();
+      if (closestEl(e.target, '[data-matcher-action="close"]')) closeModal();
     };
     return;
   }
@@ -221,13 +222,13 @@ export async function renderWingetMatcherModal() {
       </div>
     `;
 
-    const searchInput = modal.querySelector('#matcherSearchInput');
+    const searchInput = qsInput(modal, '#matcherSearchInput');
     if (searchInput) {
       searchInput.oninput = () => {
         filterText = searchInput.value;
         const caret = searchInput.selectionStart;
         renderBody();
-        const nextInput = modal.querySelector('#matcherSearchInput');
+        const nextInput = qsInput(modal, '#matcherSearchInput');
         if (nextInput) {
           nextInput.focus();
           if (typeof caret === 'number') nextInput.setSelectionRange(caret, caret);
@@ -239,7 +240,7 @@ export async function renderWingetMatcherModal() {
   renderBody();
 
   modal.onchange = (e) => {
-    const chk = e.target.closest('[data-matcher-check]');
+    const chk = closestInput(e.target, '[data-matcher-check]');
     if (chk) {
       const row = rows.find((r) => r.itemId === chk.dataset.matcherCheck);
       if (row) {
@@ -249,7 +250,7 @@ export async function renderWingetMatcherModal() {
       return;
     }
 
-    const sel = e.target.closest('[data-matcher-select]');
+    const sel = closestSelect(e.target, '[data-matcher-select]');
     if (sel) {
       const row = rows.find((r) => r.itemId === sel.dataset.matcherSelect);
       if (row) {
@@ -261,14 +262,14 @@ export async function renderWingetMatcherModal() {
   };
 
   modal.onclick = async (e) => {
-    const stageBtn = e.target.closest('[data-matcher-stage]');
+    const stageBtn = closestEl(e.target, '[data-matcher-stage]');
     if (stageBtn) {
       stageFilter = stageBtn.dataset.matcherStage;
       renderBody();
       return;
     }
 
-    const btn = e.target.closest('[data-matcher-action]');
+    const btn = closestEl(e.target, '[data-matcher-action]');
     if (!btn) return;
     const action = btn.dataset.matcherAction;
 

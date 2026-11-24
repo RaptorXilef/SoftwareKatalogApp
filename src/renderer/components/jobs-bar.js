@@ -1,7 +1,11 @@
+import { closestButton, closestEl } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 let onJobActionCallback = null;
 
+/**
+ * @param {{ onJobAction?: (payload: { jobId?: string, type?: string, itemId?: string }) => void }} [options]
+ */
 export function initJobsBar({ onJobAction } = {}) {
   onJobActionCallback = onJobAction;
 
@@ -9,20 +13,20 @@ export function initJobsBar({ onJobAction } = {}) {
   if (!container) return;
 
   container.addEventListener('click', async (e) => {
-    const cancelBtn = e.target.closest('[data-cancel-job]');
+    const cancelBtn = closestButton(e.target, '[data-cancel-job]');
     if (cancelBtn) {
       cancelBtn.disabled = true;
       await window.electronAPI.cancelJob(cancelBtn.dataset.cancelJob);
       return;
     }
 
-    const dismissBtn = e.target.closest('[data-dismiss-job]');
+    const dismissBtn = closestEl(e.target, '[data-dismiss-job]');
     if (dismissBtn) {
       await window.electronAPI.dismissJob(dismissBtn.dataset.dismissJob);
       return;
     }
 
-    const actionBtn = e.target.closest('[data-job-action]');
+    const actionBtn = closestEl(e.target, '[data-job-action]');
     if (actionBtn) {
       const payload = {
         jobId: actionBtn.dataset.jobId,

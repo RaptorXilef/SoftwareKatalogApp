@@ -5,8 +5,8 @@ let mediaList = [];
 let currentIdx = 0;
 
 function updateView() {
-  const img = document.getElementById('lightboxImg');
-  const vid = document.getElementById('lightboxVid');
+  const img = /** @type {HTMLImageElement | null} */ (document.getElementById('lightboxImg'));
+  const vid = /** @type {HTMLVideoElement | null} */ (document.getElementById('lightboxVid'));
   const leftBtn = document.getElementById('lightboxBtnLeft');
   const rightBtn = document.getElementById('lightboxBtnRight');
 
@@ -42,7 +42,7 @@ export function openLightbox(itemId, index = 0) {
 
 export function closeLightbox() {
   const overlay = document.getElementById('lightboxOverlay');
-  const vid = document.getElementById('lightboxVid');
+  const vid = /** @type {HTMLVideoElement | null} */ (document.getElementById('lightboxVid'));
   if (vid) {
     vid.pause();
     vid.src = '';

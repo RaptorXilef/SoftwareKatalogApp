@@ -112,6 +112,10 @@ export function resolveUniqueArchiveDest(archiveDir, fileName) {
   return candidate;
 }
 
+/**
+ * @param {any} plan
+ * @param {{ isPathAllowed?: (filePath: string) => boolean, signal?: AbortSignal | null }} [options]
+ */
 export async function executeArchiveSubdirMove(plan, { isPathAllowed = () => true, signal = null } = {}) {
   let processedFiles = 0;
   let freedBytes = 0;

@@ -2,6 +2,7 @@ import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-
 import { renderBundlesView } from '../components/bundles-view.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
+import { closestEl, closestInput, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
@@ -193,7 +194,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       </div>
     `;
 
-    const chkAllowSilent = modal.querySelector('#chkBundleAllowSilent');
+    const chkAllowSilent = qsInput(modal, '#chkBundleAllowSilent');
     if (chkAllowSilent) {
       chkAllowSilent.onchange = () => {
         allowSilent = chkAllowSilent.checked;
@@ -201,7 +202,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       };
     }
 
-    const chkSilentWinget = modal.querySelector('#chkBundleSilentWinget');
+    const chkSilentWinget = qsInput(modal, '#chkBundleSilentWinget');
     if (chkSilentWinget) {
       chkSilentWinget.onchange = () => {
         silentWinget = chkSilentWinget.checked;
@@ -213,7 +214,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
   overlay.hidden = false;
 
   modal.onchange = (e) => {
-    const chk = e.target.closest('[data-runner-key]');
+    const chk = closestInput(e.target, '[data-runner-key]');
     if (!chk) return;
     const key = chk.dataset.runnerKey;
     if (chk.checked) selectedKeys.add(key);
@@ -222,7 +223,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
   };
 
   modal.onclick = async (e) => {
-    const btn = e.target.closest('[data-runner-action]');
+    const btn = closestEl(e.target, '[data-runner-action]');
     if (!btn) return;
     const action = btn.dataset.runnerAction;
 
