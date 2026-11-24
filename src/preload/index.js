@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('queue-updated', listener);
   },
 
+  // Ignorierliste fuer Updates
+  loadIgnoredUpdates: () => ipcRenderer.invoke('ignore-load'),
+  addIgnoredUpdate: (entry) => ipcRenderer.invoke('ignore-add', entry),
+  removeIgnoredUpdate: (entryId) => ipcRenderer.invoke('ignore-remove', entryId),
+  clearIgnoredUpdates: () => ipcRenderer.invoke('ignore-clear'),
+  exportIgnoredUpdates: () => ipcRenderer.invoke('ignore-export'),
+  importIgnoredUpdates: (opts) => ipcRenderer.invoke('ignore-import', opts),
+
   // Katalog & Scanner
   loadCatalog: () => ipcRenderer.invoke('load-catalog'),
   runScan: (mode) => ipcRenderer.invoke('run-scan', mode),

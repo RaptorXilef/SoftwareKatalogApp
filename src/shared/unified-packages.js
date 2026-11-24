@@ -1,4 +1,5 @@
 import { resolvePackageIcon } from './icon-logic.js';
+import { findMatchingIgnoreRule } from './ignore-logic.js';
 import { isIdLikeDisplayName } from './installed-merger.js';
 import { compareVersions, extractVersion } from './version.js';
 
@@ -544,7 +545,7 @@ export function buildRemotePackageItem({
  * Ermittelt Status & Versionen für Karte und Detailansicht.
  * Priorität für Kartenfarbe: webupdate (Lila) > update (Orange) > newer (Blau) > installed (Grün) > none
  */
-export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
+export function getPackageStatus(item, { versionCompareDepth = 3, ignoredUpdates = [] } = {}) {
   const archiveVersion = item.lastFiles?.length > 0 ? extractVersion(getBaseName(item.lastFiles[0])) : null;
   const localVersion = item.installedVersion || null;
   const webVersion = item.webVersion || null;
@@ -586,6 +587,12 @@ export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
     status = 'installed';
   }
 
+  const hasAnyUpdate = hasWebUpdate || hasArchiveUpdate;
+  const targetUpdateVersion = hasWebUpdate ? webVersion : hasArchiveUpdate ? archiveVersion : null;
+  const ignoreRule = hasAnyUpdate ? findMatchingIgnoreRule(item, targetUpdateVersion, ignoredUpdates) : null;
+  const isIgnoredUpdate = Boolean(ignoreRule);
+  const hasVisibleUpdate = Boolean(hasAnyUpdate && !isIgnoredUpdate);
+
   return {
     status,
     archiveVersion,
@@ -595,7 +602,11 @@ export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
     hasWebUpdate,
     hasArchiveUpdate,
     hasNasUpdate: hasArchiveUpdate,
-    hasAnyUpdate: hasWebUpdate || hasArchiveUpdate,
+    hasAnyUpdate,
+    targetUpdateVersion,
+    ignoreRule,
+    isIgnoredUpdate,
+    hasVisibleUpdate,
     isPcNewer,
   };
 }
@@ -638,7 +649,10 @@ export function normalizeStartTab(tab) {
   return VALID_START_TABS.includes(clean) ? clean : DEFAULT_START_TAB;
 }
 
-export function computeTabCounts(packages, { visibleHiddenCats = [], versionCompareDepth = 3, bundlesCount = 0 } = {}) {
+export function computeTabCounts(
+  packages,
+  { visibleHiddenCats = [], versionCompareDepth = 3, bundlesCount = 0, ignoredUpdates = [] } = {}
+) {
   let updates = 0;
   let installed = 0;
   let archive = 0;
@@ -646,8 +660,8 @@ export function computeTabCounts(packages, { visibleHiddenCats = [], versionComp
   for (const item of packages || []) {
     if (!isPackageVisible(item, visibleHiddenCats)) continue;
 
-    const st = getPackageStatus(item, { versionCompareDepth });
-    if (st.hasWebUpdate || st.hasArchiveUpdate) updates++;
+    const st = getPackageStatus(item, { versionCompareDepth, ignoredUpdates });
+    if (st.hasVisibleUpdate) updates++;
     if (item.isInstalled) installed++;
     if (item.inArchive) archive++;
   }

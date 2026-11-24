@@ -204,7 +204,7 @@ function matchesTabAndFilter(item, st) {
   if (tab === 'updates') {
     if (!isProviderItemVisible(item)) return false;
     if (item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) return false;
-    if (!st.hasWebUpdate && !st.hasArchiveUpdate) return false;
+    if (!st.hasVisibleUpdate) return false;
     const originFilter = getActiveOriginFilter();
     if (!['all', 'in-archive', 'not-in-archive'].includes(originFilter) && !isProviderUsable(originFilter)) {
       return false;
@@ -248,7 +248,7 @@ function getTabBaseCount(visibleHidden) {
     if (
       state.activeTab === 'updates' &&
       !(item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) &&
-      (st.hasWebUpdate || st.hasArchiveUpdate)
+      st.hasVisibleUpdate
     ) {
       count++;
     } else if (state.activeTab === 'installed' && item.isInstalled) count++;
@@ -437,10 +437,15 @@ function renderEmptyState() {
         </div>
       `;
     }
+    const ignoredNote =
+      state.ignoredUpdates.length > 0
+        ? `<p class="muted">Hinweis: ${state.ignoredUpdates.length} Update(s) befinden sich auf der Ignorierliste (oben ueber <strong>🙈 Ignoriert (${state.ignoredUpdates.length})</strong> verwaltbar).</p>`
+        : '';
     return `
       <div class="empty-state">
         <h3>Keine offenen Updates gefunden</h3>
         <p>Alle erkannten Programme sind aktuell - oder starte oben <strong>🌐 Online-Updates</strong> bzw. <strong>💻 PC prüfen</strong>.</p>
+        ${ignoredNote}
       </div>
     `;
   }
@@ -486,7 +491,7 @@ export function getPendingArchiveWebUpdateItems() {
     if (!item.inArchive) continue;
     if (!isPackageVisible(item, visibleHidden)) continue;
     const st = getItemStatus(item);
-    if (st.hasWebUpdate && canDownloadOnline(item)) {
+    if (st.hasWebUpdate && !st.isIgnoredUpdate && canDownloadOnline(item)) {
       items.push(item);
     }
   }
@@ -519,6 +524,7 @@ export function renderUpdatesBatchBar(entries = null) {
   const allSelected = totalCount > 0 && selectedCount === totalCount;
   const someSelected = selectedCount > 0 && selectedCount < totalCount;
   const pendingArchiveDownloads = getPendingArchiveWebUpdateItems().length;
+  const ignoredCount = state.ignoredUpdates.length;
   const disabledAttr = state.isBatchActionRunning ? 'disabled' : '';
 
   const modeSourceEntries =
@@ -555,6 +561,9 @@ export function renderUpdatesBatchBar(entries = null) {
       ${modePillsHtml}
     </div>
     <div class="batch-bar-right">
+      <button type="button" class="btn btn-ghost btn-ignored-list" id="btnOpenIgnoreList" title="Ignorierte Updates verwalten">
+        🙈 Ignoriert (${ignoredCount})
+      </button>
       <button type="button" class="btn btn-online" id="btnBatchDownloadArchive" ${pendingArchiveDownloads === 0 || state.isBatchActionRunning ? 'disabled' : ''}>
         ⬇️ Alle Online-Updates ins Archiv laden <span class="btn-count-badge">${pendingArchiveDownloads}</span>
       </button>

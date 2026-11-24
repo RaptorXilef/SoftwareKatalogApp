@@ -1,4 +1,5 @@
 import { buildBundleDraftFromInstalled } from '../shared/bundles-logic.js';
+import { buildIgnoreEntryFromPackage } from '../shared/ignore-logic.js';
 import { normalizeStartTab } from '../shared/unified-packages.js';
 import { initBundlesView, renderBundlesView } from './components/bundles-view.js';
 import {
@@ -7,6 +8,7 @@ import {
   renderCatalogGrid,
   renderUpdatesBatchBar,
 } from './components/cards.js';
+import { closeContextMenu, openContextMenu } from './components/context-menu.js';
 import { initDiscoverView, renderDiscoverView } from './components/discover.js';
 import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
@@ -22,6 +24,7 @@ import {
   openBundleRunnerModal,
   openCleanupModal,
   openDetailModal,
+  openIgnoreListModal,
   openProviderPackageModal,
   openSettingsModal,
   openWingetMatcherModal,
@@ -31,6 +34,7 @@ import {
   getItemStatus,
   refreshBundles,
   refreshCatalogData,
+  refreshIgnoredUpdates,
   refreshProviders,
   setInstalledApps,
   state,
@@ -86,7 +90,7 @@ async function runInstalledScan({ silent = false } = {}) {
 
 async function reloadUI({ preserveScroll = true, rescanInstalled = false, applyStartTab = false } = {}) {
   const y = window.scrollY;
-  await Promise.all([refreshCatalogData(), refreshProviders(), refreshBundles()]);
+  await Promise.all([refreshCatalogData(), refreshProviders(), refreshBundles(), refreshIgnoredUpdates()]);
   if (applyStartTab) {
     state.activeTab = normalizeStartTab(state.settings.startTab);
   }
@@ -186,9 +190,111 @@ function setupGridEvents() {
       openDetailModal(card.dataset.id);
     }
   });
+
+  grid?.addEventListener('contextmenu', (e) => {
+    if (state.activeTab !== 'updates') return;
+    if (!(e.target instanceof Element)) return;
+    const card = e.target.closest('.card');
+    if (!(card instanceof HTMLElement)) return;
+
+    const item = getItemById(card.dataset.id);
+    if (!item) return;
+
+    e.preventDefault();
+    openUpdateCardContextMenu(e, item);
+  });
 }
 
-async function enqueueUpdateItems(targetItems, { silent = false } = {}) {
+async function ignorePackageUpdate(item, { mode, targetVersion }) {
+  const entry = buildIgnoreEntryFromPackage(item, {
+    mode,
+    ignoredVersion: targetVersion,
+  });
+  const res = await window.electronAPI.addIgnoredUpdate(entry);
+  if (!res?.success) {
+    showToast(res?.error || 'Update konnte nicht ignoriert werden.', { type: 'error' });
+    return;
+  }
+
+  state.selectedUpdateIds.delete(item.id);
+  state.ignoredUpdates = Array.isArray(res.entries) ? res.entries : state.ignoredUpdates;
+  renderActiveView();
+
+  const addedId = res.entry?.id || '';
+  const msg =
+    mode === 'version' && targetVersion
+      ? `${item.name} (v${targetVersion}) wird ignoriert.`
+      : `Alle Updates für ${item.name} werden ignoriert.`;
+
+  showToast(msg, {
+    type: 'info',
+    duration: 6000,
+    action: addedId
+      ? {
+          label: 'Rückgängig',
+          onClick: async () => {
+            const undoRes = await window.electronAPI.removeIgnoredUpdate(addedId);
+            if (undoRes?.success) {
+              state.ignoredUpdates = Array.isArray(undoRes.entries) ? undoRes.entries : [];
+              renderActiveView();
+              showToast(`Ignorier-Regel für ${item.name} rückgängig gemacht.`, { type: 'success' });
+            }
+          },
+        }
+      : null,
+  });
+}
+
+function openUpdateCardContextMenu(event, item) {
+  const st = getItemStatus(item);
+  const targetVersion = st.targetUpdateVersion || st.webVersion || st.archiveVersion || '';
+  const silentLocked = item.installMode === 'interactive-required';
+
+  openContextMenu({
+    x: event.clientX,
+    y: event.clientY,
+    ariaLabel: `Aktionen für ${item.name}`,
+    items: [
+      {
+        id: 'update-interactive',
+        label: '🖱️ Jetzt interaktiv aktualisieren',
+        onSelect: () => enqueueUpdateItems([item], { silent: false, forceInteractive: true }),
+      },
+      {
+        id: 'update-silent',
+        label: '⚡ Jetzt silent aktualisieren',
+        hint: silentLocked ? '🛡️ Adware-Schutz' : '',
+        disabled: silentLocked,
+        title: silentLocked
+          ? '🛡️ Gesperrt wegen Adware-/Klick-Schutz (installMode: interactive-required)'
+          : 'Update im Hintergrund (silent) einreihen',
+        onSelect: () => enqueueUpdateItems([item], { silent: true }),
+      },
+      { type: 'separator' },
+      {
+        id: 'ignore-version',
+        label: targetVersion ? `⏭️ Diese Version ignorieren (v${targetVersion})` : '⏭️ Diese Version ignorieren',
+        disabled: !targetVersion,
+        title: !targetVersion ? 'Keine eindeutige Zielversion erkannt' : '',
+        onSelect: () => ignorePackageUpdate(item, { mode: 'version', targetVersion }),
+      },
+      {
+        id: 'ignore-all',
+        label: '🚫 Alle Updates ignorieren',
+        danger: true,
+        onSelect: () => ignorePackageUpdate(item, { mode: 'all', targetVersion }),
+      },
+      { type: 'separator' },
+      {
+        id: 'open-details',
+        label: 'ℹ️ Details öffnen',
+        onSelect: () => openDetailModal(item.id),
+      },
+    ],
+  });
+}
+
+async function enqueueUpdateItems(targetItems, { silent = false, forceInteractive = false } = {}) {
   if (!Array.isArray(targetItems) || targetItems.length === 0) return;
 
   const saveMode = state.settings.archiveSaveMode || 'ask';
@@ -255,7 +361,7 @@ async function enqueueUpdateItems(targetItems, { silent = false } = {}) {
     };
   });
 
-  const res = await window.electronAPI.enqueueUpdates(queueItems, { silent });
+  const res = await window.electronAPI.enqueueUpdates(queueItems, { silent, forceInteractive });
   if (res?.success) {
     for (const qItem of queueItems) {
       state.selectedUpdateIds.delete(qItem.itemId);
@@ -295,7 +401,14 @@ function setupUpdatesBatchBar() {
   bar.addEventListener('click', async (e) => {
     if (!(e.target instanceof Element)) return;
     const btn = e.target.closest('button');
-    if (!(btn instanceof HTMLButtonElement) || state.isBatchActionRunning) return;
+    if (!(btn instanceof HTMLButtonElement)) return;
+
+    if (btn.id === 'btnOpenIgnoreList') {
+      openIgnoreListModal();
+      return;
+    }
+
+    if (state.isBatchActionRunning) return;
 
     if (btn.id === 'btnBatchDownloadArchive') {
       const pendingItems = getPendingArchiveWebUpdateItems();
@@ -628,6 +741,7 @@ async function bootstrap() {
 
   initToolbar({
     onTabChange: (tab) => {
+      closeContextMenu();
       state.activeTab = tab;
       renderActiveView();
     },

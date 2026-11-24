@@ -28,6 +28,14 @@ import {
   saveMetaJson,
 } from './catalog-service.js';
 import { getAppFolder, getConfig, inspectArchiveRootPath, saveConfig } from './config.js';
+import {
+  addIgnoredUpdate,
+  clearIgnoredUpdates,
+  exportIgnoredUpdates,
+  importIgnoredUpdates,
+  loadIgnoredUpdates,
+  removeIgnoredUpdate,
+} from './ignore-service.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
@@ -179,6 +187,14 @@ function registerIpcHandlers() {
   handleIpc('queue-cancel-item', (_e, queueId) => cancelQueueItem(queueId));
   handleIpc('queue-cancel-all', () => cancelAllQueue());
   handleIpc('queue-get-state', () => getQueueState());
+
+  // Ignorierliste fuer Updates (zentral in data/ignored-updates.json)
+  handleIpc('ignore-load', () => loadIgnoredUpdates());
+  handleIpc('ignore-add', (_e, entry) => addIgnoredUpdate(entry));
+  handleIpc('ignore-remove', (_e, entryId) => removeIgnoredUpdate(entryId));
+  handleIpc('ignore-clear', () => clearIgnoredUpdates());
+  handleIpc('ignore-export', () => exportIgnoredUpdates());
+  handleIpc('ignore-import', (_e, opts) => importIgnoredUpdates(opts || {}));
 
   // Katalog & Scans
   handleIpc('load-catalog', () => loadCatalogWithLiveStatus());

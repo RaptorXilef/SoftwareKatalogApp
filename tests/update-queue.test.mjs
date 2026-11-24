@@ -260,4 +260,24 @@ describe('update-queue-core: Adware-Schutz (interactive-required) bei Silent-Que
       { id: 'ccleaner', mode: 'interactive', interactiveRequired: true },
     ]);
   });
+
+  it('erzwingt mit forceInteractive: true den interaktiven Modus auch bei silent-konfigurierten Paketen', async () => {
+    const executedModes = [];
+    const manager = createUpdateQueueManager({
+      executor: async (item) => {
+        executedModes.push({ id: item.itemId, mode: item.mode });
+        return { success: true };
+      },
+    });
+
+    const res = manager.enqueueUpdates([{ id: 'vlc', name: 'VLC Media Player', installMode: 'silent' }], {
+      silent: false,
+      forceInteractive: true,
+    });
+
+    assert.equal(res.added, 1);
+    assert.equal(res.state.queue[0].mode, 'interactive');
+    await manager.waitUntilIdle();
+    assert.deepEqual(executedModes, [{ id: 'vlc', mode: 'interactive' }]);
+  });
 });

@@ -6,7 +6,7 @@ function defaultGenerateId() {
   return String(globalThis.crypto.randomUUID());
 }
 
-function normalizeQueueItem(raw, { silent = false, generateId = defaultGenerateId } = {}) {
+function normalizeQueueItem(raw, { silent = false, forceInteractive = false, generateId = defaultGenerateId } = {}) {
   const itemId = String(raw?.itemId || raw?.id || '').trim();
   const name = String(raw?.name || itemId || 'Unbekannt').trim();
   const installMode = normalizeInstallMode(raw?.installMode);
@@ -23,7 +23,7 @@ function normalizeQueueItem(raw, { silent = false, generateId = defaultGenerateI
     (installMode !== 'silent' && adwareSignal.flagged);
 
   let mode;
-  if (interactiveRequired) {
+  if (interactiveRequired || forceInteractive) {
     mode = 'interactive';
   } else if (silent === true) {
     mode = 'silent';
@@ -215,7 +215,7 @@ export function createUpdateQueueManager({
     }
   };
 
-  const enqueueUpdates = (items = [], { silent = false } = {}) => {
+  const enqueueUpdates = (items = [], { silent = false, forceInteractive = false } = {}) => {
     if (!Array.isArray(items) || items.length === 0) {
       return { success: true, added: 0, skippedDuplicates: 0, state: getQueueState() };
     }
@@ -232,7 +232,11 @@ export function createUpdateQueueManager({
     let skippedDuplicates = 0;
 
     for (const raw of items) {
-      const normalized = normalizeQueueItem(raw, { silent: Boolean(silent), generateId });
+      const normalized = normalizeQueueItem(raw, {
+        silent: Boolean(silent),
+        forceInteractive: Boolean(forceInteractive),
+        generateId,
+      });
       if (!normalized.itemId) continue;
       if (existingIds.has(normalized.itemId)) {
         skippedDuplicates++;

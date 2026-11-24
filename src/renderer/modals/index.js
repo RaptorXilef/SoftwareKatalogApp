@@ -5,6 +5,7 @@ import { renderBundleRunnerModal } from './bundle-runner-modal.js';
 import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
 import { renderEditModal } from './edit-modal.js';
+import { renderIgnoreListModal } from './ignore-list-modal.js';
 import { openProviderSourcesModal } from './provider-sources-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
@@ -87,6 +88,10 @@ export function openWingetMatcherModal() {
 
 export function openCleanupModal() {
   return renderCleanupModal();
+}
+
+export function openIgnoreListModal() {
+  return renderIgnoreListModal();
 }
 
 export function openBundleEditorModal(options = {}) {

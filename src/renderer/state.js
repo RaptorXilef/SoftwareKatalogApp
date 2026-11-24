@@ -11,6 +11,7 @@ export const state = {
   installedApps: [],
   packages: [],
   bundles: [],
+  ignoredUpdates: [],
   providers: [],
   settings: {},
   favorites: [],
@@ -72,6 +73,7 @@ export function getCatalogItemById(id) {
 export function getItemStatus(item) {
   return getPackageStatus(item, {
     versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+    ignoredUpdates: state.ignoredUpdates,
   });
 }
 
@@ -103,6 +105,7 @@ export function getTabCounts() {
     visibleHiddenCats: state.settings.visibleHiddenCats || [],
     versionCompareDepth: state.settings.versionCompareDepth ?? 3,
     bundlesCount: state.bundles.length,
+    ignoredUpdates: state.ignoredUpdates,
   });
 }
 
@@ -264,5 +267,22 @@ export async function refreshBundles() {
       state.bundles = [];
       return;
     }
+  }
+}
+
+export async function refreshIgnoredUpdates() {
+  if (typeof window.electronAPI?.loadIgnoredUpdates !== 'function') {
+    state.ignoredUpdates = [];
+    return;
+  }
+  try {
+    const res = await window.electronAPI.loadIgnoredUpdates();
+    if (res?.success === false && res.error) {
+      console.error('Fehler beim Laden der Ignorierliste:', res.error);
+    }
+    state.ignoredUpdates = Array.isArray(res?.entries) ? res.entries : [];
+  } catch (err) {
+    console.error('Fehler beim Laden der Ignorierliste:', err);
+    state.ignoredUpdates = [];
   }
 }
