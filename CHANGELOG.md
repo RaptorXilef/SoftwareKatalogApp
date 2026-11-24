@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.28.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.28.0...v1.28.1) (2026-11-24)
+
+### 🐛 Bug Fixes
+
+* **build:** bundle scanner.mjs as standalone ESM for packaged builds ([d8ed49e](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d8ed49e9434cd18320619e5b7cadcc895756de6d))
+
 ## [1.28.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.27.0...v1.28.0) (2026-11-24)
 
 ### 🚀 Features
