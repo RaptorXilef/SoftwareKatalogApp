@@ -34,6 +34,7 @@ import { normalizePythonPackageName } from '../shared/python-parser.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
+import { isAdminSessionActive, runStartProcessElevated } from './elevated-helper.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
 import { getEnabledProviders, getProvider, initDefaultProviders, isProviderEnabled } from './providers/registry.js';
@@ -464,6 +465,47 @@ async function cleanupTempFiles(paths) {
   }
 }
 
+async function runProcessAndGetExitCode(filePath, argsStr = '', { signal = null } = {}) {
+  if (isAdminSessionActive()) {
+    const elevatedRes = await runStartProcessElevated(filePath, argsStr, { signal });
+    if (!elevatedRes.notElevated) {
+      if (signal?.aborted || elevatedRes.aborted) {
+        return { aborted: true, error: null, exitCode: -1 };
+      }
+      if (elevatedRes.canceled) {
+        return { aborted: false, error: null, exitCode: elevatedRes.code || 1223 };
+      }
+      if (elevatedRes.error && elevatedRes.code < 0) {
+        return { aborted: false, error: elevatedRes.error, exitCode: elevatedRes.code };
+      }
+      return { aborted: false, error: null, exitCode: elevatedRes.code };
+    }
+  }
+
+  const safeFile = String(filePath || '').replace(/'/g, "''");
+  const safeArgs = String(argsStr || '').replace(/'/g, "''");
+  const argClause = safeArgs ? `-ArgumentList '${safeArgs}'` : '';
+  const launchScript = `
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    try {
+      $p = Start-Process -FilePath '${safeFile}' ${argClause} -Wait -PassThru
+      Write-Output "EXIT:$($p.ExitCode)"
+    } catch {
+      Write-Output "ERR:$($_.Exception.Message)"
+    }
+  `;
+
+  const { stdout } = await runPowerShell(launchScript, { signal });
+  if (signal?.aborted) {
+    return { aborted: true, error: null, exitCode: -1 };
+  }
+  if (stdout.startsWith('ERR:')) {
+    return { aborted: false, error: stdout.replace('ERR:', '').trim(), exitCode: -1 };
+  }
+  const exitMatch = stdout.match(/EXIT:(-?\d+)/);
+  return { aborted: false, error: null, exitCode: exitMatch ? parseInt(exitMatch[1], 10) : 0 };
+}
+
 /**
  * Kopiert das Setup lokal ins Temp-Verzeichnis, wartet auf den Abschluss,
  * wertet den Windows-ExitCode aus und verifiziert anschließend die installierte Version.
@@ -592,37 +634,18 @@ export async function executeAndVerifyInstaller({
       return { success: false, canceled: true };
     }
 
-    reportProgress(null, plan.bannerHint);
-    const safeTemp = tempPath.replace(/'/g, "''");
-    const safeExtraArgs = plan.extraArgs.replace(/'/g, "''");
-    const msiArgList = safeExtraArgs ? `/i "${safeTemp}" ${safeExtraArgs}` : `/i "${safeTemp}"`;
-    const exeArgClause = safeExtraArgs ? `-ArgumentList '${safeExtraArgs}'` : '';
-
-    const launchScript =
+    const adminHint = isAdminSessionActive() ? ' (Admin-Sitzung)' : '';
+    reportProgress(null, `${plan.bannerHint}${adminHint}`);
+    const msiArgs = plan.extraArgs ? `/i "${tempPath}" ${plan.extraArgs}` : `/i "${tempPath}"`;
+    const procRes =
       ext === '.msi'
-        ? `
-          try {
-            $p = Start-Process -FilePath 'msiexec.exe' -ArgumentList '${msiArgList}' -Wait -PassThru
-            Write-Output "EXIT:$($p.ExitCode)"
-          } catch {
-            Write-Output "ERR:$($_.Exception.Message)"
-          }
-        `
-        : `
-          try {
-            $p = Start-Process -FilePath '${safeTemp}' ${exeArgClause} -Wait -PassThru
-            Write-Output "EXIT:$($p.ExitCode)"
-          } catch {
-            Write-Output "ERR:$($_.Exception.Message)"
-          }
-        `;
-
-    const { stdout } = await runPowerShell(launchScript, { signal });
+        ? await runProcessAndGetExitCode('msiexec.exe', msiArgs, { signal })
+        : await runProcessAndGetExitCode(tempPath, plan.extraArgs || '', { signal });
 
     // Temp-Dateien aufräumen
     await cleanupTempFiles([tempPath, tempInfPath]);
 
-    if (signal?.aborted) {
+    if (signal?.aborted || procRes.aborted) {
       job?.finish('canceled', 'Installation abgebrochen.', { autoRemoveMs: 3500 });
       return {
         success: false,
@@ -633,8 +656,8 @@ export async function executeAndVerifyInstaller({
       };
     }
 
-    if (stdout.startsWith('ERR:')) {
-      const msg = stdout.replace('ERR:', '').trim();
+    if (procRes.error) {
+      const msg = procRes.error;
       const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
       job?.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Installation durch Benutzer abgebrochen.' : msg, {
         autoRemoveMs: 4000,
@@ -649,8 +672,7 @@ export async function executeAndVerifyInstaller({
       };
     }
 
-    const exitMatch = stdout.match(/EXIT:(-?\d+)/);
-    const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
+    const exitCode = procRes.exitCode;
 
     if (exitCode === 1602 || exitCode === 1223) {
       job?.finish('canceled', 'Installation wurde abgebrochen.', { autoRemoveMs: 3500 });
@@ -767,21 +789,10 @@ export async function recordInnoInfFile({
     const plan = resolveInstallExecutionPlan({ recordInfPath: tempInfPath, ext: '.exe' });
     job.update(null, plan.bannerHint);
 
-    const safeExe = tempExePath.replace(/'/g, "''");
-    const safeArgs = plan.extraArgs.replace(/'/g, "''");
-    const launchScript = `
-      try {
-        $p = Start-Process -FilePath '${safeExe}' -ArgumentList '${safeArgs}' -Wait -PassThru
-        Write-Output "EXIT:$($p.ExitCode)"
-      } catch {
-        Write-Output "ERR:$($_.Exception.Message)"
-      }
-    `;
+    const procRes = await runProcessAndGetExitCode(tempExePath, plan.extraArgs || '');
 
-    const { stdout } = await runPowerShell(launchScript);
-
-    if (stdout.startsWith('ERR:')) {
-      const msg = stdout.replace('ERR:', '').trim();
+    if (procRes.error) {
+      const msg = procRes.error;
       const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
       job.finish(wasCanceled ? 'canceled' : 'error', wasCanceled ? 'Aufzeichnung abgebrochen.' : msg, {
         autoRemoveMs: 4000,
@@ -789,8 +800,7 @@ export async function recordInnoInfFile({
       return { success: false, canceled: wasCanceled, error: msg };
     }
 
-    const exitMatch = stdout.match(/EXIT:(-?\d+)/);
-    const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
+    const exitCode = procRes.exitCode;
 
     if (exitCode === 1602 || exitCode === 1223) {
       job.finish('canceled', 'Aufzeichnung wurde abgebrochen.', { autoRemoveMs: 3500 });
@@ -2029,29 +2039,14 @@ async function runRegistryUninstall(rawCommand, silent = false) {
     return { success: false, error: 'Ungültiger Deinstallationsbefehl.' };
   }
 
-  const safeFile = parsed.filePath.replace(/'/g, "''");
-  const safeArgs = parsed.argsStr.replace(/'/g, "''");
-  const argClause = safeArgs ? `-ArgumentList '${safeArgs}'` : '';
-
-  const psScript = `
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    try {
-      $p = Start-Process -FilePath '${safeFile}' ${argClause} -Wait -PassThru
-      Write-Output "EXIT:$($p.ExitCode)"
-    } catch {
-      Write-Output "ERR:$($_.Exception.Message)"
-    }
-  `;
-
-  const { stdout } = await runPowerShell(psScript);
-  if (stdout.startsWith('ERR:')) {
-    const msg = stdout.replace('ERR:', '').trim();
+  const procRes = await runProcessAndGetExitCode(parsed.filePath, parsed.argsStr || '');
+  if (procRes.error) {
+    const msg = procRes.error;
     const wasCanceled = /abgebrochen|canceled|cancelled|1223/i.test(msg);
     return { success: false, canceled: wasCanceled, error: msg };
   }
 
-  const exitMatch = stdout.match(/EXIT:(-?\d+)/);
-  const exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
+  const exitCode = procRes.exitCode;
 
   if (exitCode === 1602 || exitCode === 1223) {
     return { success: false, canceled: true, exitCode };

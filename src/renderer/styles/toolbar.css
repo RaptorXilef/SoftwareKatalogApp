@@ -27,7 +27,50 @@
 .header-actions {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.admin-status-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+
+  &:disabled:not(.is-elevated) {
+    opacity: 0.65;
+    cursor: wait;
+  }
+
+  &.is-off:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  &.is-active {
+    background: color-mix(in srgb, var(--color-ok) 18%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-ok) 55%, var(--border));
+    color: var(--color-ok);
+  }
+
+  &.is-elevated {
+    background: color-mix(in srgb, var(--color-warn) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-warn) 50%, var(--border));
+    color: var(--color-warn);
+    cursor: default;
+  }
 }
 
 .update-pill {

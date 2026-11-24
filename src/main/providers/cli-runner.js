@@ -2,6 +2,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  isAdminSessionActive,
+  isProcessElevated,
+  runCommandElevated,
+  runPowerShellElevated,
+} from '../elevated-helper.js';
 
 export const DEFAULT_CLI_TIMEOUT_MS = 45000;
 
@@ -32,10 +38,10 @@ function killProcessTree(child) {
  * Wirft niemals bei fehlenden Binaries oder Exit-Codes != 0.
  * @param {string} command
  * @param {string[]} [args]
- * @param {{ signal?: AbortSignal | null, timeoutMs?: number, cwd?: string, env?: NodeJS.ProcessEnv, shell?: boolean, windowsHide?: boolean, onStdout?: ((chunk: string) => void) | null, onStderr?: ((chunk: string) => void) | null }} [options]
+ * @param {{ signal?: AbortSignal | null, timeoutMs?: number, cwd?: string, env?: NodeJS.ProcessEnv, shell?: boolean, windowsHide?: boolean, preferElevated?: boolean, onStdout?: ((chunk: string) => void) | null, onStderr?: ((chunk: string) => void) | null }} [options]
  * @returns {Promise<{ code: number, stdout: string, stderr: string, timedOut: boolean, aborted: boolean, notFound: boolean, error: string | null, errorCode: string | null }>}
  */
-export function runCli(
+export async function runCli(
   command,
   args = [],
   {
@@ -45,13 +51,14 @@ export function runCli(
     env = undefined,
     shell = undefined,
     windowsHide = true,
+    preferElevated = false,
     onStdout = null,
     onStderr = null,
   } = {}
 ) {
   const cleanCommand = String(command || '').trim();
   if (!cleanCommand) {
-    return Promise.resolve({
+    return {
       code: -1,
       stdout: '',
       stderr: '',
@@ -60,11 +67,11 @@ export function runCli(
       notFound: true,
       error: 'Kein Kommando angegeben.',
       errorCode: 'EINVAL',
-    });
+    };
   }
 
   if (signal?.aborted) {
-    return Promise.resolve({
+    return {
       code: -1,
       stdout: '',
       stderr: '',
@@ -73,11 +80,35 @@ export function runCli(
       notFound: false,
       error: 'Abgebrochen.',
       errorCode: 'ABORT_ERR',
+    };
+  }
+
+  const useShell = shell ?? (process.platform === 'win32' && /\.(cmd|bat)$/i.test(cleanCommand));
+  if (preferElevated === true && isAdminSessionActive() && !(await isProcessElevated())) {
+    const elevatedRes = await runCommandElevated(cleanCommand, Array.isArray(args) ? args : [], {
+      signal,
+      timeoutMs,
+      cwd,
+      windowsHide,
+      shell: useShell,
     });
+    if (!elevatedRes.notElevated) {
+      if (elevatedRes.stdout && typeof onStdout === 'function') onStdout(elevatedRes.stdout);
+      if (elevatedRes.stderr && typeof onStderr === 'function') onStderr(elevatedRes.stderr);
+      return {
+        code: elevatedRes.code ?? -1,
+        stdout: stripBom(elevatedRes.stdout ?? ''),
+        stderr: stripBom(elevatedRes.stderr ?? ''),
+        timedOut: Boolean(elevatedRes.timedOut),
+        aborted: Boolean(elevatedRes.aborted),
+        notFound: Boolean(elevatedRes.notFound),
+        error: elevatedRes.error || null,
+        errorCode: elevatedRes.errorCode || null,
+      };
+    }
   }
 
   return new Promise((resolve) => {
-    const useShell = shell ?? (process.platform === 'win32' && /\.(cmd|bat)$/i.test(cleanCommand));
     /** @type {any} */
     let child = null;
     let stdout = '';
@@ -312,6 +343,45 @@ export async function runElevatedPowerShell(
   script,
   { signal = null, timeoutMs = 15 * 60 * 1000, onProgress = null } = {}
 ) {
+  if (await isProcessElevated()) {
+    onProgress?.(null, 'Fuehre mit bestehenden Administratorrechten aus...');
+    const directRes = await runPowerShellScript(script, { signal, timeoutMs, asTempFile: true });
+    return {
+      code: directRes.code,
+      canceled: Boolean(directRes.aborted),
+      stdout: directRes.stdout,
+      stderr: directRes.stderr,
+      timedOut: Boolean(directRes.timedOut),
+      aborted: Boolean(directRes.aborted),
+      error: directRes.aborted
+        ? 'Vorgang abgebrochen.'
+        : directRes.error ||
+          (directRes.code === 0
+            ? null
+            : (directRes.stderr || directRes.stdout || `Fehlercode ${directRes.code}`).trim()),
+    };
+  }
+
+  if (isAdminSessionActive()) {
+    onProgress?.(null, 'Fuehre ueber aktive Admin-Sitzung aus...');
+    const helperRes = await runPowerShellElevated(script, { signal, timeoutMs });
+    if (!helperRes.notElevated) {
+      return {
+        code: helperRes.code,
+        canceled: Boolean(helperRes.canceled || helperRes.aborted),
+        stdout: stripBom(helperRes.stdout || ''),
+        stderr: stripBom(helperRes.stderr || ''),
+        timedOut: Boolean(helperRes.timedOut),
+        aborted: Boolean(helperRes.aborted),
+        error:
+          helperRes.error ||
+          (helperRes.code === 0
+            ? null
+            : (helperRes.stderr || helperRes.stdout || `Fehlercode ${helperRes.code}`).trim()),
+      };
+    }
+  }
+
   const stamp = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const innerPs1 = path.join(os.tmpdir(), `sk_uac_inner_${stamp}.ps1`);
   const outLog = path.join(os.tmpdir(), `sk_uac_out_${stamp}.log`);

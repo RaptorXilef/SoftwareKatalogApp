@@ -19,6 +19,7 @@ import {
   parseWingetShowOutput,
   parseWingetUpgradeOutput,
 } from '../../shared/winget-parser.js';
+import { isAdminSessionActive } from '../elevated-helper.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runCli, runElevatedPowerShell } from './cli-runner.js';
 
@@ -40,11 +41,26 @@ function escapeSingleQuotedPs(value) {
   return String(value || '').replace(/'/g, "''");
 }
 
-function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  return runCli('winget', args, { signal, timeoutMs, windowsHide: true });
+function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS, preferElevated = false } = {}) {
+  return runCli('winget', args, { signal, timeoutMs, windowsHide: true, preferElevated });
 }
 
 async function runWingetWithUacFallback(args, { signal = null } = {}) {
+  if (isAdminSessionActive()) {
+    const elevRes = await runWinget(args, { signal, timeoutMs: 2 * 60 * 1000, preferElevated: true });
+    if (signal?.aborted || elevRes.aborted) {
+      return { success: false, canceled: true };
+    }
+    if (elevRes.notFound) {
+      return { success: false, error: elevRes.stderr || 'Winget ist auf diesem PC nicht verfuegbar.' };
+    }
+    if (elevRes.code === 0) {
+      return { success: true };
+    }
+    const elevErr = (elevRes.stderr || elevRes.stdout || elevRes.error || `Winget-Fehlercode ${elevRes.code}`).trim();
+    return { success: false, error: elevErr };
+  }
+
   const res = await runWinget(args, { signal, timeoutMs: 60000 });
   if (signal?.aborted || res.aborted) {
     return { success: false, canceled: true };
@@ -340,7 +356,11 @@ export const wingetProvider = {
     }
 
     const activeSignal = job ? job.signal : signal;
-    const { code, stdout, stderr } = await runWinget(args, { signal: activeSignal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const { code, stdout, stderr } = await runWinget(args, {
+      signal: activeSignal,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      preferElevated: true,
+    });
 
     if (activeSignal?.aborted) {
       return { success: false, canceled: true, exitCode: code };
@@ -395,7 +415,11 @@ export const wingetProvider = {
       job.update(null, 'Deinstalliere über Winget...');
     }
 
-    const { code, stdout, stderr } = await runWinget(args, { signal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const { code, stdout, stderr } = await runWinget(args, {
+      signal,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      preferElevated: true,
+    });
 
     if (code === 0 || code === 3010) {
       const rebootRequired = code === 3010;

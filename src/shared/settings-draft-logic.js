@@ -110,6 +110,7 @@ function normalizeVisibleHiddenCats(raw) {
  *   enabledProviders: string[],
  *   vcpkgRoot: string,
  *   updateInterval: number,
+ *   autoRequestAdminForBatch: boolean,
  * }}
  */
 export function createSettingsDraft(rawSettings = {}) {
@@ -140,6 +141,7 @@ export function createSettingsDraft(rawSettings = {}) {
     enabledProviders: normalizeEnabledProviders(src.enabledProviders),
     vcpkgRoot: rawVcpkgRoot.trim(),
     updateInterval: normalizeUpdateInterval(src.updateInterval),
+    autoRequestAdminForBatch: Boolean(src.autoRequestAdminForBatch),
   };
 }
 
@@ -207,6 +209,7 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   if (initial.archiveSaveMode !== current.archiveSaveMode) return true;
   if (initial.vcpkgRoot !== current.vcpkgRoot) return true;
   if (initial.updateInterval !== current.updateInterval) return true;
+  if (initial.autoRequestAdminForBatch !== current.autoRequestAdminForBatch) return true;
 
   if (!areArraysEqual(initial.archivePaths, current.archivePaths)) return true;
   if (!areArraysEqual(initial.autoExtensions, current.autoExtensions)) return true;
@@ -253,6 +256,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     askSaveDialog: !current.autoSaveDownloads,
     keepOriginalNameIfVersioned: current.keepOriginalNameIfVersioned,
     filenamePattern: current.filenamePattern,
+    autoRequestAdminForBatch: current.autoRequestAdminForBatch,
   };
 
   const needsRescan =

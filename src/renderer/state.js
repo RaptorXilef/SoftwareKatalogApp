@@ -48,6 +48,16 @@ export const state = {
   isBatchActionRunning: false,
   isBundleInstallRunning: false,
   bundlesIpcUnavailable: false,
+  adminSession: {
+    mode: 'off',
+    isProcessElevated: false,
+    isSessionActive: false,
+    canUseAdmin: false,
+    workerPid: null,
+    startedAt: null,
+    supported: true,
+  },
+  adminSessionBusy: false,
 };
 
 function rebuildUnifiedPackages() {

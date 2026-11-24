@@ -3202,3 +3202,52 @@
     margin: 6px 0 0;
   }
 }
+
+.admin-session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
+}
+
+.admin-session-card-info {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-session-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-session-status-badge {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+
+  &.is-active {
+    background: color-mix(in srgb, var(--color-ok) 18%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-ok) 50%, var(--border));
+    color: var(--color-ok);
+  }
+
+  &.is-elevated {
+    background: color-mix(in srgb, var(--color-warn) 16%, var(--surface));
+    border-color: color-mix(in srgb, var(--color-warn) 50%, var(--border));
+    color: var(--color-warn);
+  }
+}

@@ -11,6 +11,7 @@ import {
 } from '../../shared/settings-draft-logic.js';
 import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
+import { renderAdminSessionButton } from '../components/toolbar.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { openNestedDialog } from './archive-target-modal.js';
@@ -73,14 +74,65 @@ export async function renderSettingsModal(initialTab = 'general') {
   const modalToken = ++activeSettingsToken;
   let activeTab = normalizeSettingsTab(initialTab);
 
-  const [s, info, providersInfo, cacheStats] = await Promise.all([
+  const [s, info, providersInfo, cacheStats, initialAdminStatus] = await Promise.all([
     window.electronAPI.getSettings(),
     window.electronAPI.getAppInfo(),
     window.electronAPI.listProviders(),
     window.electronAPI.getProviderCacheStats(),
+    typeof window.electronAPI?.getAdminSessionStatus === 'function'
+      ? window.electronAPI.getAdminSessionStatus()
+      : Promise.resolve(state.adminSession),
   ]);
 
   if (modalToken !== activeSettingsToken) return;
+
+  let currentAdminStatus = initialAdminStatus || state.adminSession || { mode: 'off', supported: true };
+  if (initialAdminStatus) {
+    state.adminSession = { ...state.adminSession, ...initialAdminStatus };
+    renderAdminSessionButton();
+  }
+
+  const getAdminUiMeta = (adminSt) => {
+    if (adminSt?.supported === false) {
+      return {
+        badgeCls: 'is-off',
+        badgeText: 'Nicht unterstützt',
+        desc: 'Der sitzungsbasierte Admin-Modus steht nur unter Windows zur Verfügung.',
+        btnCls: 'btn-ghost',
+        btnText: 'Nicht verfügbar',
+        btnDisabled: true,
+      };
+    }
+    if (adminSt?.mode === 'elevated' || adminSt?.isProcessElevated) {
+      return {
+        badgeCls: 'is-elevated',
+        badgeText: '🛡️ Läuft als Administrator',
+        desc: 'Die App läuft bereits als Administrator. Alle Befehle und Installer werden direkt erhöht ausgeführt.',
+        btnCls: 'btn-ghost',
+        btnText: '🛡️ Läuft als Administrator',
+        btnDisabled: true,
+      };
+    }
+    if (adminSt?.mode === 'active' || adminSt?.isSessionActive) {
+      return {
+        badgeCls: 'is-active',
+        badgeText: '🛡️ Admin-Sitzung aktiv',
+        desc: 'Hintergrund-Helper aktiv - Updates, Installer, Deinstallationen und Quellen laufen ohne weitere UAC-Abfragen.',
+        btnCls: 'btn-danger',
+        btnText: '🛡️ Admin-Sitzung beenden',
+        btnDisabled: false,
+      };
+    }
+    return {
+      badgeCls: 'is-off',
+      badgeText: '🛡️ Admin-Modus: Aus',
+      desc: 'Startet auf Wunsch einmalig per UAC einen geschützten Hintergrund-Helper, sodass nachfolgende Updates ohne weitere UAC-Popups laufen.',
+      btnCls: 'btn-primary',
+      btnText: '🛡️ Admin-Sitzung aktivieren (Einmalig UAC)',
+      btnDisabled: false,
+    };
+  };
+  const initialAdminMeta = getAdminUiMeta(currentAdminStatus);
 
   let providers = Array.isArray(providersInfo?.providers) ? providersInfo.providers : [];
   const plannedProviders = Array.isArray(providersInfo?.planned) ? providersInfo.planned : [];
@@ -420,6 +472,30 @@ export async function renderSettingsModal(initialTab = 'general') {
 
       <!-- TAB 5: SICHERHEIT & RICHTLINIEN -->
       <section class="tab-panel" role="tabpanel" data-settings-panel="security" ${activeTab === 'security' ? '' : 'hidden'}>
+        <section class="settings-section" id="settingsElevationSection">
+          <h3>🛡️ Sitzungsbasierter Admin-Ausführungsmodus (UAC)</h3>
+          <div class="admin-session-card" id="settingsAdminSessionCard">
+            <div class="admin-session-card-info">
+              <div class="admin-session-head">
+                <strong>Aktueller Status</strong>
+                <span id="settingsAdminStatusBadge" class="admin-session-status-badge ${initialAdminMeta.badgeCls}">${escapeHTML(initialAdminMeta.badgeText)}</span>
+              </div>
+              <p id="settingsAdminStatusDesc" class="panel-hint">${escapeHTML(initialAdminMeta.desc)}</p>
+            </div>
+            <button
+              type="button"
+              class="btn ${initialAdminMeta.btnCls}"
+              id="btnSettingsToggleAdminSession"
+              data-settings-action="toggle-admin-session"
+              ${initialAdminMeta.btnDisabled ? 'disabled' : ''}
+            >${escapeHTML(initialAdminMeta.btnText)}</button>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="cfgAutoRequestAdminForBatch" ${draftSettings.autoRequestAdminForBatch ? 'checked' : ''}>
+            <span>Bei Massen-Updates automatisch einmalig Admin-Sitzung anfragen</span>
+          </label>
+        </section>
+
         <section class="settings-section" id="settingsAdminSection">
           <h3>🔐 Admin-Modus & Authentifizierung</h3>
           <div class="settings-placeholder-card">
@@ -553,6 +629,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       enabledProviders: draftSettings.enabledProviders,
       vcpkgRoot: vcpkgInput ? vcpkgInput.value.trim() : draftSettings.vcpkgRoot,
       updateInterval: Number.isFinite(parsedUpdateInterval) ? parsedUpdateInterval : draftSettings.updateInterval,
+      autoRequestAdminForBatch: Boolean(getInputEl(modal, '#cfgAutoRequestAdminForBatch')?.checked),
     });
     updateDirtyUi();
   };
@@ -973,7 +1050,58 @@ export async function renderSettingsModal(initialTab = 'general') {
     const act = btn.dataset.settingsAction;
 
     if (act === 'close') closeModal();
-    else if (act === 'browse-vcpkg-root') {
+    else if (act === 'toggle-admin-session') {
+      if (currentAdminStatus?.mode === 'elevated' || currentAdminStatus?.isProcessElevated) return;
+      const toggleBtn = modal.querySelector('#btnSettingsToggleAdminSession');
+      if (toggleBtn instanceof HTMLButtonElement) toggleBtn.disabled = true;
+      state.adminSessionBusy = true;
+      renderAdminSessionButton();
+      try {
+        const isCurrentlyActive = currentAdminStatus?.mode === 'active' || currentAdminStatus?.isSessionActive;
+        const res = isCurrentlyActive
+          ? await window.electronAPI.stopAdminSession()
+          : await window.electronAPI.startAdminSession();
+        if (modalToken !== activeSettingsToken) return;
+
+        if (res?.status) {
+          currentAdminStatus = res.status;
+          state.adminSession = { ...state.adminSession, ...res.status };
+        }
+        const meta = getAdminUiMeta(currentAdminStatus);
+        const badgeEl = modal.querySelector('#settingsAdminStatusBadge');
+        const descEl = modal.querySelector('#settingsAdminStatusDesc');
+        if (badgeEl instanceof HTMLElement) {
+          badgeEl.className = `admin-session-status-badge ${meta.badgeCls}`;
+          badgeEl.textContent = meta.badgeText;
+        }
+        if (descEl instanceof HTMLElement) {
+          descEl.textContent = meta.desc;
+        }
+        if (toggleBtn instanceof HTMLButtonElement) {
+          toggleBtn.className = `btn ${meta.btnCls}`;
+          toggleBtn.textContent = meta.btnText;
+          toggleBtn.disabled = meta.btnDisabled;
+        }
+
+        if (isCurrentlyActive) {
+          showToast('Admin-Sitzung wurde beendet.', { type: 'info' });
+        } else if (res?.alreadyElevated) {
+          showToast('App läuft bereits als Administrator.', { type: 'info' });
+        } else if (res?.success) {
+          showToast('Admin-Sitzung aktiv - weitere Updates laufen ohne UAC-Abfragen.', { type: 'success' });
+        } else if (res?.canceled) {
+          showToast('UAC-Abfrage abgebrochen - Admin-Modus bleibt aus.', { type: 'info' });
+        } else {
+          showToast(`Admin-Sitzung konnte nicht gestartet werden: ${res?.error || 'Unbekannter Fehler'}`, {
+            type: 'error',
+            duration: 6000,
+          });
+        }
+      } finally {
+        state.adminSessionBusy = false;
+        renderAdminSessionButton();
+      }
+    } else if (act === 'browse-vcpkg-root') {
       const dir = await window.electronAPI.selectDir({
         title: 'VCPKG_ROOT Ordner auswählen',
         defaultPath: draftSettings.vcpkgRoot || undefined,

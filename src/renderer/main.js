@@ -13,7 +13,13 @@ import { initDiscoverView, renderDiscoverView } from './components/discover.js';
 import { initJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
 import { showToast } from './components/toast.js';
-import { initToolbar, renderTagChips, syncToolbarForTab, updateNavCounts } from './components/toolbar.js';
+import {
+  initToolbar,
+  renderAdminSessionButton,
+  renderTagChips,
+  syncToolbarForTab,
+  updateNavCounts,
+} from './components/toolbar.js';
 import { initUpdateQueue, renderUpdateQueue } from './components/update-queue.js';
 import { askBatchArchiveSaveChoice, openNestedDialog, pickArchiveTargetFolder } from './modals/archive-target-modal.js';
 import {
@@ -362,6 +368,9 @@ async function enqueueUpdateItems(targetItems, { silent = false, forceInteractiv
   });
 
   const res = await window.electronAPI.enqueueUpdates(queueItems, { silent, forceInteractive });
+  if (res?.adminPrompt?.canceled) {
+    showToast('UAC-Abfrage abgebrochen - Updates laufen im normalen Modus weiter.', { type: 'info' });
+  }
   if (res?.success) {
     for (const qItem of queueItems) {
       state.selectedUpdateIds.delete(qItem.itemId);
@@ -601,6 +610,56 @@ document.addEventListener(
   true
 );
 
+function applyAdminSessionStatus(status) {
+  if (!status || typeof status !== 'object') return;
+  state.adminSession = {
+    mode: status.mode || 'off',
+    isProcessElevated: Boolean(status.isProcessElevated),
+    isSessionActive: Boolean(status.isSessionActive),
+    canUseAdmin: Boolean(status.canUseAdmin),
+    workerPid: status.workerPid ?? null,
+    startedAt: status.startedAt ?? null,
+    supported: status.supported !== false,
+  };
+  renderAdminSessionButton();
+}
+
+async function toggleAdminSession() {
+  if (state.adminSessionBusy || state.adminSession.mode === 'elevated' || state.adminSession.isProcessElevated) {
+    return;
+  }
+
+  state.adminSessionBusy = true;
+  renderAdminSessionButton();
+  try {
+    if (state.adminSession.mode === 'active' || state.adminSession.isSessionActive) {
+      const res = await window.electronAPI.stopAdminSession();
+      if (res?.status) applyAdminSessionStatus(res.status);
+      showToast('Admin-Sitzung wurde beendet.', { type: 'info' });
+    } else {
+      const res = await window.electronAPI.startAdminSession();
+      if (res?.status) applyAdminSessionStatus(res.status);
+      if (res?.alreadyElevated) {
+        showToast('App läuft bereits als Administrator.', { type: 'info' });
+      } else if (res?.success) {
+        showToast('Admin-Sitzung aktiv - Updates und Installationen laufen nun ohne weitere UAC-Abfragen.', {
+          type: 'success',
+        });
+      } else if (res?.canceled) {
+        showToast('UAC-Abfrage abgebrochen - Admin-Modus bleibt aus.', { type: 'info' });
+      } else {
+        showToast(`Admin-Sitzung konnte nicht gestartet werden: ${res?.error || 'Unbekannter Fehler'}`, {
+          type: 'error',
+          duration: 6000,
+        });
+      }
+    }
+  } finally {
+    state.adminSessionBusy = false;
+    renderAdminSessionButton();
+  }
+}
+
 async function bootstrap() {
   initLightbox();
   initModals({ onReload: reloadUI });
@@ -747,6 +806,7 @@ async function bootstrap() {
     },
     onFilterChange: () => renderCatalogGrid(),
     onOpenSettings: () => openSettingsModal(),
+    onToggleAdminSession: () => toggleAdminSession(),
     onScanArchive: async (mode) => {
       const res = await window.electronAPI.runScan(mode);
       if (res.alreadyRunning) {
@@ -837,6 +897,13 @@ async function bootstrap() {
   });
 
   try {
+    if (typeof window.electronAPI?.onAdminSessionUpdated === 'function') {
+      window.electronAPI.onAdminSessionUpdated((status) => applyAdminSessionStatus(status));
+    }
+    if (typeof window.electronAPI?.getAdminSessionStatus === 'function') {
+      void window.electronAPI.getAdminSessionStatus().then((st) => applyAdminSessionStatus(st));
+    }
+
     const info = await window.electronAPI.getAppInfo();
     const verEl = document.getElementById('appVersion');
     if (verEl) verEl.textContent = `(v${info.version})`;

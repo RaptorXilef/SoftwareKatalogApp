@@ -36,6 +36,50 @@ function getOriginFilterOptionsForTab(tab) {
   return null;
 }
 
+export function renderAdminSessionButton() {
+  const btn = document.getElementById('btnAdminSessionToggle');
+  if (!(btn instanceof HTMLButtonElement)) return;
+
+  const status = /** @type {Record<string, any>} */ (state.adminSession || {});
+  if (status.supported === false) {
+    btn.hidden = true;
+    return;
+  }
+
+  btn.hidden = false;
+  btn.classList.remove('is-off', 'is-active', 'is-elevated', 'is-busy');
+
+  if (state.adminSessionBusy) {
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    btn.textContent = '⏳ Admin-Sitzung...';
+    btn.title = 'Admin-Sitzung wird umgeschaltet...';
+    return;
+  }
+
+  if (status.mode === 'elevated' || status.isProcessElevated) {
+    btn.disabled = true;
+    btn.classList.add('is-elevated');
+    btn.textContent = '🛡️ Läuft als Administrator';
+    btn.title = 'Die App läuft bereits als Administrator - Befehle werden direkt erhöht ausgeführt.';
+    return;
+  }
+
+  if (status.mode === 'active' || status.isSessionActive) {
+    btn.disabled = false;
+    btn.classList.add('is-active');
+    btn.textContent = '🛡️ Admin-Sitzung aktiv';
+    btn.title = 'Admin-Sitzung aktiv - klicken zum Beenden des Hintergrund-Helpers.';
+    return;
+  }
+
+  btn.disabled = false;
+  btn.classList.add('is-off');
+  btn.textContent = '🛡️ Admin-Modus: Aus';
+  btn.title =
+    'Admin-Sitzung aktivieren (Einmalig UAC) - verhindert mehrfache UAC-Abfragen bei Updates und Installationen.';
+}
+
 export function updateNavCounts() {
   const counts = getTabCounts();
   const updatesEl = document.getElementById('navCountUpdates');
@@ -260,6 +304,11 @@ export function initToolbar(handlers) {
     handlers.onOpenSettings();
   });
 
+  document.getElementById('btnAdminSessionToggle')?.addEventListener('click', () => {
+    closePopovers();
+    handlers.onToggleAdminSession?.();
+  });
+
   document.addEventListener('click', (e) => {
     if (
       !closestEl(e.target, '.menu-anchor') &&
@@ -276,5 +325,6 @@ export function initToolbar(handlers) {
     tb?.classList.toggle('shrink', window.scrollY > 40);
   });
 
+  renderAdminSessionButton();
   syncToolbarForTab();
 }

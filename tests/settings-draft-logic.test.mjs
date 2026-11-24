@@ -46,6 +46,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
     assert.deepEqual(defaults.enabledProviders, ['winget', 'archive']);
     assert.equal(defaults.vcpkgRoot, '');
     assert.equal(defaults.updateInterval, 24);
+    assert.equal(defaults.autoRequestAdminForBatch, false);
 
     const zeroValues = createSettingsDraft({
       newBadgeDays: 0,
@@ -130,6 +131,7 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archiveSaveMode: 'auto-id' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, vcpkgRoot: 'C:\\vcpkg' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, updateInterval: 168 }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoRequestAdminForBatch: true }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, visibleHiddenCats: ['Beta'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoExtensions: ['.msi', '.exe'] }), true);
@@ -148,6 +150,7 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     const current = {
       ...toggleDraftProvider(initial, 'npm', true),
       autoSaveDownloads: false,
+      autoRequestAdminForBatch: true,
       vcpkgRoot: 'D:\\dev\\vcpkg',
       archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'],
     };
@@ -159,6 +162,7 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
 
     assert.equal(plan.payload.askSaveDialog, true);
     assert.equal(plan.payload.autoSaveDownloads, false);
+    assert.equal(plan.payload.autoRequestAdminForBatch, true);
     assert.equal(plan.payload.targetPath, 'D:\\Archiv2');
     assert.deepEqual(plan.payload.enabledProviders, ['winget', 'archive', 'npm']);
     assert.equal(plan.payload.providerSettings.vcpkgRoot, 'D:\\dev\\vcpkg');

@@ -29,6 +29,14 @@ import {
 } from './catalog-service.js';
 import { getAppFolder, getConfig, inspectArchiveRootPath, saveConfig } from './config.js';
 import {
+  configureElevatedHelper,
+  getAdminSessionStatus,
+  isAdminSessionActive,
+  isProcessElevated,
+  startAdminSession,
+  stopAdminSession,
+} from './elevated-helper.js';
+import {
   addIgnoredUpdate,
   clearIgnoredUpdates,
   exportIgnoredUpdates,
@@ -342,11 +350,33 @@ function registerIpcHandlers() {
   // App Self-Update
   handleIpc('check-app-update', () => checkAppUpdate());
   handleIpc('install-app-update', (_e, url, isPortable) => downloadAndInstallAppUpdate(url, isPortable));
+
+  // Sitzungsbasierter Admin-Ausfuehrungsmodus (Elevated Helper)
+  handleIpc('admin-session-status', async () => {
+    await isProcessElevated();
+    return getAdminSessionStatus();
+  });
+  handleIpc('admin-session-start', () => startAdminSession());
+  handleIpc('admin-session-stop', () => stopAdminSession());
 }
 
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  configureElevatedHelper({
+    resolveWorkerPath: () =>
+      app.isPackaged
+        ? path.join(process.resourcesPath, 'elevated-worker.ps1')
+        : path.join(getAppFolder(), 'src', 'main', 'elevated-worker.ps1'),
+    onStatusChange: (status) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('admin-session-updated', status);
+        }
+      }
+    },
+  });
+
   registerIpcHandlers();
 
   app.on('second-instance', () => {
@@ -357,6 +387,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    void isProcessElevated();
     try {
       initDefaultProviders();
     } catch (err) {
@@ -369,6 +400,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     }
     registerIpcHandlers();
     createWindow();
+  });
+
+  let isQuittingWithHelperCleanup = false;
+  app.on('before-quit', (event) => {
+    if (isQuittingWithHelperCleanup || !isAdminSessionActive()) return;
+    event.preventDefault();
+    isQuittingWithHelperCleanup = true;
+    stopAdminSession()
+      .catch((err) => console.error('Fehler beim Beenden der Admin-Sitzung:', err))
+      .finally(() => {
+        app.quit();
+      });
   });
 
   app.on('window-all-closed', () => {

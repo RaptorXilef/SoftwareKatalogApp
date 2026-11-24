@@ -16,8 +16,8 @@ import { getWingetCache, wingetProvider } from './winget-provider.js';
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
 
-function runWingetMsStore(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  return runCli('winget', args, { signal, timeoutMs, windowsHide: true });
+function runWingetMsStore(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS, preferElevated = false } = {}) {
+  return runCli('winget', args, { signal, timeoutMs, windowsHide: true, preferElevated });
 }
 
 async function fetchMsStoreShowFresh(packageId, { preferGerman = true, signal = null } = {}) {
@@ -289,6 +289,7 @@ export const msstoreProvider = {
     const { code, stdout, stderr } = await runWingetMsStore(args, {
       signal: activeSignal,
       timeoutMs: INSTALL_TIMEOUT_MS,
+      preferElevated: true,
     });
 
     if (activeSignal?.aborted) {
@@ -348,7 +349,11 @@ export const msstoreProvider = {
       job.update(null, 'Deinstalliere MS Store-App...');
     }
 
-    const { code, stdout, stderr } = await runWingetMsStore(args, { signal, timeoutMs: INSTALL_TIMEOUT_MS });
+    const { code, stdout, stderr } = await runWingetMsStore(args, {
+      signal,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      preferElevated: true,
+    });
 
     if (code === 0 || code === 3010) {
       const rebootRequired = code === 3010;

@@ -151,7 +151,7 @@ export function createWingetBootstrapRunner({ wingetId, action = 'install', name
         : `Installiere ${name || cleanId} über Winget...`
     );
 
-    const res = await runCli('winget', args, { signal, timeoutMs: 30 * 60 * 1000 });
+    const res = await runCli('winget', args, { signal, timeoutMs: 30 * 60 * 1000, preferElevated: true });
     if (res.aborted || res.code === 1602 || res.code === 1223) {
       return { success: false, canceled: true, exitCode: res.code };
     }

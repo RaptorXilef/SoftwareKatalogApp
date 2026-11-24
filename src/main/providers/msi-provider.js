@@ -9,6 +9,7 @@ import {
 import { normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import { extractVersion } from '../../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from '../archive-linker.js';
+import { isAdminSessionActive, runStartProcessElevated } from '../elevated-helper.js';
 import { createJob } from '../jobs.js';
 import { findBinaryPath, runPowerShellScript } from './cli-runner.js';
 
@@ -32,6 +33,29 @@ function formatMsiExecArgumentString(args) {
 
 async function runMsiExec(args, { signal = null, timeoutMs = INSTALL_TIMEOUT_MS } = {}) {
   const argString = formatMsiExecArgumentString(args);
+  if (isAdminSessionActive()) {
+    const elevRes = await runStartProcessElevated('msiexec.exe', argString, { signal, timeoutMs });
+    if (!elevRes.notElevated) {
+      if (elevRes.aborted) {
+        return { success: false, canceled: true, exitCode: -1 };
+      }
+      if (elevRes.timedOut) {
+        return { success: false, exitCode: -1, error: elevRes.error || 'Zeitüberschreitung bei msiexec.exe.' };
+      }
+      if (elevRes.canceled || elevRes.code === 1602 || elevRes.code === 1223) {
+        return { success: false, canceled: true, exitCode: elevRes.code || 1223 };
+      }
+      if (elevRes.code === 0 || elevRes.code === 3010) {
+        return { success: true, exitCode: elevRes.code, rebootRequired: elevRes.code === 3010 };
+      }
+      return {
+        success: false,
+        exitCode: elevRes.code,
+        error: elevRes.error || elevRes.stderr || `msiexec.exe meldete Fehlercode ${elevRes.code}.`,
+      };
+    }
+  }
+
   const psScript = `
     $ErrorActionPreference = 'Stop'
     try {

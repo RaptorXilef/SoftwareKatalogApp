@@ -134,6 +134,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetLocalVersions: () => ipcRenderer.invoke('reset-local-versions'),
   createBackup: () => ipcRenderer.invoke('create-backup'),
   restoreBackup: () => ipcRenderer.invoke('restore-backup'),
+  // App Self-Update & Admin-Sitzung
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   installAppUpdate: (url, isPortable) => ipcRenderer.invoke('install-app-update', url, isPortable),
+  getAdminSessionStatus: () => ipcRenderer.invoke('admin-session-status'),
+  startAdminSession: () => ipcRenderer.invoke('admin-session-start'),
+  stopAdminSession: () => ipcRenderer.invoke('admin-session-stop'),
+  onAdminSessionUpdated: (cb) => {
+    const listener = (_event, status) => cb(status);
+    ipcRenderer.on('admin-session-updated', listener);
+    return () => ipcRenderer.off('admin-session-updated', listener);
+  },
 });

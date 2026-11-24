@@ -5,6 +5,7 @@ import { extractVersion } from '../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-linker.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
+import { isAdminSessionActive, isProcessElevated, startAdminSession } from './elevated-helper.js';
 import { getProvider } from './providers/registry.js';
 import { downloadWebUpdate } from './web-updater.js';
 import { executeAndVerifyInstaller } from './windows-tools.js';
@@ -111,6 +112,7 @@ async function executeQueueItem(entry, { signal, onProgress }) {
     }
 
     if (entry.isInstalled || catItem.isInstalled) {
+      const adminSuffix = isAdminSessionActive() ? ' (Admin-Sitzung)' : '';
       if (!setupFile) {
         const archivePm = String(catItem.packageManager || '')
           .trim()
@@ -121,8 +123,8 @@ async function executeQueueItem(entry, { signal, onProgress }) {
           onProgress?.(
             null,
             useSilent
-              ? `⚡ Aktualisiere still über ${archiveProv.name}...`
-              : `🖱️ Aktualisiere über ${archiveProv.name}...`
+              ? `⚡ Aktualisiere still über ${archiveProv.name}${adminSuffix}...`
+              : `🖱️ Aktualisiere über ${archiveProv.name}${adminSuffix}...`
           );
           return typeof archiveProv.upgrade === 'function'
             ? archiveProv.upgrade(archivePkgId, {
@@ -144,7 +146,10 @@ async function executeQueueItem(entry, { signal, onProgress }) {
         return { success: false, error: 'Keine Setup-Datei im Archiv vorhanden.' };
       }
 
-      onProgress?.(null, useSilent ? '⚡ Starte stillen Installer...' : '🖱️ Starte Installer...');
+      onProgress?.(
+        null,
+        useSilent ? `⚡ Starte stillen Installer${adminSuffix}...` : `🖱️ Starte Installer${adminSuffix}...`
+      );
       return executeAndVerifyInstaller({
         itemId: catItem.id,
         itemName: catItem.name,
@@ -166,9 +171,12 @@ async function executeQueueItem(entry, { signal, onProgress }) {
     .toLowerCase();
   const provider = pkgPm ? getProvider(pkgPm) : null;
   if (provider?.capabilities?.install && entry.packageId) {
+    const adminSuffix = isAdminSessionActive() ? ' (Admin-Sitzung)' : '';
     onProgress?.(
       null,
-      useSilent ? `⚡ Aktualisiere still über ${provider.name}...` : `🖱️ Aktualisiere über ${provider.name}...`
+      useSilent
+        ? `⚡ Aktualisiere still über ${provider.name}${adminSuffix}...`
+        : `🖱️ Aktualisiere über ${provider.name}${adminSuffix}...`
     );
     const updRes =
       typeof provider.upgrade === 'function'
@@ -215,8 +223,33 @@ const queueManager = createUpdateQueueManager({
   onUpdate: (snapshot) => broadcastQueueState(snapshot),
 });
 
-export function enqueueUpdates(items = [], opts = {}) {
-  return queueManager.enqueueUpdates(items, opts);
+async function maybeStartAdminSessionForBatch(itemCount, { skipAutoAdminPrompt = false } = {}) {
+  if (skipAutoAdminPrompt || process.platform !== 'win32' || itemCount < 2) {
+    return { attempted: false };
+  }
+  if (getConfig().autoRequestAdminForBatch !== true) {
+    return { attempted: false };
+  }
+  if ((await isProcessElevated()) || isAdminSessionActive()) {
+    return { attempted: false };
+  }
+  const res = await startAdminSession();
+  return {
+    attempted: true,
+    activated: Boolean(res?.success),
+    canceled: Boolean(res?.canceled),
+    error: res?.error || null,
+  };
+}
+
+export async function enqueueUpdates(items = [], opts = {}) {
+  const count = Array.isArray(items) ? items.length : 0;
+  const adminPrompt = count >= 2 ? await maybeStartAdminSessionForBatch(count, opts) : { attempted: false };
+  const queueRes = queueManager.enqueueUpdates(items, opts);
+  return {
+    ...queueRes,
+    adminPrompt,
+  };
 }
 
 export function reorderQueue(fromIndex, toIndex) {

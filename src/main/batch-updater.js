@@ -3,6 +3,7 @@ import { extractVersion } from '../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-linker.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
+import { isAdminSessionActive, isProcessElevated, startAdminSession } from './elevated-helper.js';
 import { createJob } from './jobs.js';
 import { getProvider } from './providers/registry.js';
 import { downloadWebUpdate } from './web-updater.js';
@@ -166,10 +167,21 @@ async function saveUpdatedPackageToArchive(task, saveSpec, signal) {
  * Aktualisiert ausgewählte Pakete aus dem Updates-Tab der Reihe nach über eine abbrechbare Job-Queue.
  * Respektiert für Nicht-Archiv-Programme den konfigurierten / gewählten Archiv-Speichermodus.
  */
-export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {}) {
+export async function batchUpdatePackages(tasks = [], { allowSilent = true, skipAutoAdminPrompt = false } = {}) {
   const validTasks = Array.isArray(tasks) ? tasks.filter((t) => t?.id) : [];
   if (validTasks.length === 0) {
     return { success: true, completed: 0, failed: 0, skipped: 0, canceled: false, results: [] };
+  }
+
+  if (
+    !skipAutoAdminPrompt &&
+    process.platform === 'win32' &&
+    validTasks.length >= 2 &&
+    getConfig().autoRequestAdminForBatch === true &&
+    !(await isProcessElevated()) &&
+    !isAdminSessionActive()
+  ) {
+    await startAdminSession().catch(() => null);
   }
 
   const job = createJob({
