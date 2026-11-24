@@ -1,6 +1,6 @@
-export const INSTALL_MODES = Object.freeze(['interactive', 'silent', 'interactive-required']);
+const INSTALL_MODES = Object.freeze(['interactive', 'silent', 'interactive-required']);
 
-export const INSTALLER_TYPE_PRESETS = Object.freeze({
+const INSTALLER_TYPE_PRESETS = Object.freeze({
   msi: Object.freeze({
     type: 'msi',
     label: 'Windows Installer (MSI)',
@@ -95,8 +95,7 @@ const ADWARE_PE_MARKERS = ['OpenCandy', 'InstallCore', 'InstallIQ', 'FusionInsta
  * Normalisiert den Installationsmodus auf einen der drei erlaubten Werte.
  */
 export function normalizeInstallMode(mode) {
-  if (mode === 'silent' || mode === 'interactive-required') return mode;
-  return 'interactive';
+  return INSTALL_MODES.includes(mode) ? mode : 'interactive';
 }
 
 /**

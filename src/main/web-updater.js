@@ -17,7 +17,7 @@ const DIRECT_EXTS = new Set(['exe', 'msi', 'msix', 'zip', '7z', 'rar', 'tar', 'g
 // ==========================================
 // HTML PRÄFIX/SUFFIX EXTRAKTION
 // ==========================================
-export function extractBetween(html, prefix, suffix) {
+function extractBetween(html, prefix, suffix) {
   if (!html || !prefix) return null;
 
   const buildFlexRegex = (str, wildcardNumbers = false) => {
@@ -85,7 +85,7 @@ export async function searchWinget(query, opts = {}) {
   return wingetProvider.search(query, opts);
 }
 
-export async function fetchWingetInfo(wingetId, signal = null) {
+async function fetchWingetInfo(wingetId, signal = null) {
   const res = await wingetProvider.show(wingetId, { preferGerman: true, signal });
   if (!res.success || !res.package) {
     return { success: false, error: res.error || `Winget-Paket "${wingetId}" nicht gefunden.` };

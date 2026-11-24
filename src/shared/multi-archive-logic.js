@@ -110,16 +110,6 @@ export function getArchiveRootLabel(rootPath, index = 0) {
 }
 
 /**
- * Formatiert ein Rang-Badge wie `#1 NAS/Software`.
- * @param {string} rootPath
- * @param {number} [index]
- * @returns {string}
- */
-export function formatArchiveRootBadge(rootPath, index = 0) {
-  return `#${index + 1} ${getArchiveRootLabel(rootPath, index)}`;
-}
-
-/**
  * Pure Pfad-Containment-Prüfung (erwartet idealerweise bereits aufgelöste Pfade).
  * @param {string} targetPath
  * @param {string} baseDir
@@ -143,7 +133,7 @@ export function isNormalizedPathInsideDir(targetPath, baseDir, opts = {}) {
  * @param {string} name
  * @returns {string}
  */
-export function normalizeSoftwareNameKey(name) {
+function normalizeSoftwareNameKey(name) {
   return String(name || '')
     .toLowerCase()
     .normalize('NFKD')

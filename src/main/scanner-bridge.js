@@ -137,6 +137,7 @@ export async function scanSingleFolder(absSoftwarePath) {
   const { absScriptPath, appFolder, dataDir } = getConfig();
 
   return new Promise((resolve) => {
+    /** @type {any} */
     const child = spawn(process.execPath, [absScriptPath, '--single', absSoftwarePath], {
       cwd: appFolder,
       env: {

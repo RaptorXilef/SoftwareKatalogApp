@@ -145,7 +145,7 @@ function toCandidate(app, source) {
 /**
  * Prüft, ob ein Katalog-Eintrag bereits eine Paket-ID (packageId oder wingetId) besitzt.
  */
-export function hasAssignedPackageId(item) {
+function hasAssignedPackageId(item) {
   return Boolean(String(item?.packageId || item?.wingetId || '').trim());
 }
 

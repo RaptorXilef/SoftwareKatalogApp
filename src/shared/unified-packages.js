@@ -528,7 +528,7 @@ export function canDownloadOnline(item) {
   return Boolean(item.downloadUrl);
 }
 
-export const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover']);
+const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover']);
 export const DEFAULT_START_TAB = 'updates';
 
 /**

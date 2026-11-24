@@ -39,7 +39,7 @@ export function updateNavCounts() {
   if (bundlesEl) bundlesEl.textContent = String(counts.bundles);
 }
 
-export function renderOriginFilterBar() {
+function renderOriginFilterBar() {
   const bar = document.getElementById('originFilterBar');
   if (!bar) return;
 

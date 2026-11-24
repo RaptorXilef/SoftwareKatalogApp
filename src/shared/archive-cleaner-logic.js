@@ -51,7 +51,7 @@ export function formatBytes(bytes) {
 /**
  * Sortiert Dateien absteigend von der neuesten zur ältesten Version.
  */
-export function sortVersionedFilesDescending(files = []) {
+function sortVersionedFilesDescending(files = []) {
   return [...(files || [])]
     .map((file) => ({
       ...file,

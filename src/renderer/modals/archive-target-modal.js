@@ -67,7 +67,7 @@ export function openNestedDialog({ html, onAction, defaultAction = 'cancel' }) {
  * 3. Anderen Ordner wählen
  * 4. Abbrechen
  */
-export function showArchiveCollisionModal({ targetDir, existingMeta = null, softwareName = '', packageId = '' }) {
+function showArchiveCollisionModal({ targetDir, existingMeta = null, softwareName = '', packageId = '' }) {
   const existingName = existingMeta?.name || 'Bestehender Eintrag';
   const existingPkgId = existingMeta?.packageId || existingMeta?.wingetId || '';
   const targetLabel = softwareName || packageId || 'Neue Software';
@@ -122,7 +122,7 @@ export function showArchiveCollisionModal({ targetDir, existingMeta = null, soft
 /**
  * Warnt im In-App-Dialog, wenn der gewählte Ordner außerhalb des Archiv-Stammverzeichnisses liegt.
  */
-export function showOutsideArchiveDialog({ targetDir, error = '' }) {
+function showOutsideArchiveDialog({ targetDir, error = '' }) {
   const configuredRoots =
     Array.isArray(state.settings.absArchivePaths) && state.settings.absArchivePaths.length > 0
       ? state.settings.absArchivePaths
@@ -345,7 +345,7 @@ export function askBatchArchiveSaveChoice({ softwareName = '', packageId = '', i
       <div class="modal-body collision-warning-body">
         <p>
           <strong>${escapeHTML(titleLabel)}</strong> ist noch nicht im Archiv hinterlegt.
-          In den Einstellungen ist für neue Pakete „Jedes Mal fragen“ aktiviert.
+          In den Einstellungen ist für neue Pakete "Jedes Mal fragen" aktiviert.
         </p>
         ${packageId ? `<div class="collision-meta-card"><div class="tech-row"><span>Paket-ID</span><code>${escapeHTML(packageId)}</code></div></div>` : ''}
         <div class="collision-actions-grid">

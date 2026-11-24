@@ -26,8 +26,9 @@ export function getWingetCache() {
   return cacheInstance;
 }
 
-export function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function runWinget(args, { signal = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
+    /** @type {any} */
     const child = spawn('winget', args, { windowsHide: true });
     let stdout = '';
     let stderr = '';

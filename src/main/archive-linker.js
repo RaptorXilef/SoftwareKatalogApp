@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  buildAutoIdFolderName,
   buildLinkedMetaObject,
   inspectArchiveTargetCollision,
   readExistingMetaSummary,
@@ -12,8 +11,6 @@ import { getConfig } from './config.js';
 import { getProvider } from './providers/registry.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 import { downloadWebUpdate } from './web-updater.js';
-
-export { buildAutoIdFolderName };
 
 /**
  * Prüft vor dem Schreiben, ob der Zielordner in einem konfigurierten Archiv liegt und ob bereits `_metadata/` existiert.

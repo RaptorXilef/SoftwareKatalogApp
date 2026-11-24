@@ -9,7 +9,7 @@ import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
 
 /** @type {(opts?: any) => Promise<void> | void} */
-let reloadHandler = async () => {};
+let reloadHandler = () => {};
 
 /**
  * @param {{ onReload?: (opts?: any) => Promise<void> | void }} [options]

@@ -62,7 +62,7 @@ export function getDataFolder() {
  * @param {string} absPath
  * @returns {boolean}
  */
-export function isArchiveRootReachable(absPath) {
+function isArchiveRootReachable(absPath) {
   if (!absPath) return false;
   try {
     return fs.existsSync(absPath) && fs.statSync(absPath).isDirectory();
@@ -261,7 +261,7 @@ function isPathInsideBase(targetPath, baseDir) {
   });
 }
 
-export function isInsideAnyArchiveDir(targetPath) {
+function isInsideAnyArchiveDir(targetPath) {
   if (!targetPath) return false;
   const { absArchivePaths } = getConfig();
   const resolved = path.resolve(targetPath);

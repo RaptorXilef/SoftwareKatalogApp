@@ -46,7 +46,7 @@ export const state = {
   bundlesIpcUnavailable: false,
 };
 
-export function rebuildUnifiedPackages() {
+function rebuildUnifiedPackages() {
   state.packages = buildUnifiedPackages({
     catalogItems: state.catalog,
     installedApps: state.installedApps,

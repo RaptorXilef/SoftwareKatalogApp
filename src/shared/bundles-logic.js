@@ -3,7 +3,7 @@ import { scoreCatalogItem } from './search.js';
 import { canDownloadOnline, getBaseName, getPackageStatus, isPackageVisible } from './unified-packages.js';
 import { compareVersions, extractVersion } from './version.js';
 
-export const BUNDLE_SOURCES = Object.freeze(['archive', 'winget']);
+const BUNDLE_SOURCES = Object.freeze(['archive', 'winget']);
 export const DEFAULT_BUNDLE_ICON = '📦';
 export const BUNDLE_ICON_PRESETS = Object.freeze(['📦', '💻', '🛠️', '🎮', '🎬', '🚀', '🏢', '🧰', '🎨', '🔒']);
 
@@ -51,7 +51,7 @@ export function matchesSelectedItemId(item, selectedIds) {
   return false;
 }
 
-export function normalizeBundleItem(raw, fallbackOrder = 1) {
+function normalizeBundleItem(raw, fallbackOrder = 1) {
   if (!raw || typeof raw !== 'object') return null;
 
   const rawSource = String(raw.source || '')
@@ -61,7 +61,7 @@ export function normalizeBundleItem(raw, fallbackOrder = 1) {
   const packageId = String(raw.packageId || '').trim();
 
   let source;
-  if (rawSource === 'archive' || rawSource === 'winget') {
+  if (BUNDLE_SOURCES.includes(rawSource)) {
     source = rawSource;
   } else if (refId) {
     source = 'archive';
@@ -479,7 +479,7 @@ export function mergeProviderEditorResults({ knownPackages = [], remoteResults =
   return merged;
 }
 
-export function findMatchingPackageForBundleItem(item, packages = []) {
+function findMatchingPackageForBundleItem(item, packages = []) {
   if (!item || !Array.isArray(packages) || packages.length === 0) return null;
 
   const refId = String(item.refId || '').trim();

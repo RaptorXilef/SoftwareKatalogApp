@@ -14,7 +14,7 @@ export function buildAutoIdFolderName(packageId) {
   return cleaned || 'Package';
 }
 
-export function isPathInsideDir(targetPath, baseDir) {
+function isPathInsideDir(targetPath, baseDir) {
   if (!targetPath || !baseDir) return false;
   const ensureSlash = (p) => (p.endsWith(path.sep) ? p : p + path.sep);
   let resolvedTarget = ensureSlash(path.resolve(targetPath));

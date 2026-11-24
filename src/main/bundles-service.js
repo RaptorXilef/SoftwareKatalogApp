@@ -22,7 +22,7 @@ import { wingetProvider } from './providers/winget-provider.js';
 import { downloadWebUpdate } from './web-updater.js';
 import { executeAndVerifyInstaller, scanInstalledSoftware, scanLocalVersions } from './windows-tools.js';
 
-export function getBundlesFilePath() {
+function getBundlesFilePath() {
   return path.join(getDataFolder(), 'bundles.json');
 }
 

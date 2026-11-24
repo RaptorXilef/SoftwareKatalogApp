@@ -41,7 +41,7 @@ export function initJobsBar({ onJobAction } = {}) {
   window.electronAPI.getJobs().then((jobs) => renderJobs(jobs));
 }
 
-export function renderJobs(jobs) {
+function renderJobs(jobs) {
   const container = document.getElementById('jobsContainer');
   if (!container) return;
 
