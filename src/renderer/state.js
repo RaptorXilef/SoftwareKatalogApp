@@ -28,6 +28,7 @@ export const state = {
   activeTag: null,
   searchQuery: '',
   bundleSearchQuery: '',
+  bundleProviderFilter: 'all',
   discoverQuery: '',
   discoverSelectedProviders: [],
   discoverResults: [],
@@ -80,6 +81,10 @@ export function isProviderUsable(providerId) {
   const provider = state.providers.find((p) => p.id === cleanId);
   if (!provider) return true;
   return isProviderUsableInUi(provider);
+}
+
+export function getUsableProviders({ capability = null, excludeIds = [] } = {}) {
+  return filterUsableProviders(state.providers, { capability, excludeIds });
 }
 
 function getVisibleTabPackages() {

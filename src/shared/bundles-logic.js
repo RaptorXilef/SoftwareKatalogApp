@@ -3,21 +3,25 @@ import { scoreCatalogItem } from './search.js';
 import { canDownloadOnline, getBaseName, getPackageStatus, isPackageVisible } from './unified-packages.js';
 import { compareVersions, extractVersion } from './version.js';
 
-const BUNDLE_SOURCES = Object.freeze(['archive', 'winget']);
+const BUNDLE_SOURCES = Object.freeze(['archive', 'winget', 'scoop', 'chocolatey', 'msstore', 'msi']);
+const BUNDLE_REMOTE_SOURCES = Object.freeze(['winget', 'scoop', 'chocolatey', 'msstore']);
 export const DEFAULT_BUNDLE_ICON = '📦';
 export const BUNDLE_ICON_PRESETS = Object.freeze(['📦', '💻', '🛠️', '🎮', '🎬', '🚀', '🏢', '🧰', '🎨', '🔒']);
 
 export function getBundleItemKey(item) {
   if (!item) return '';
-  const source = item.source === 'winget' ? 'winget' : 'archive';
+  const rawSource = String(item.source || '')
+    .trim()
+    .toLowerCase();
+  const source = BUNDLE_SOURCES.includes(rawSource) ? rawSource : 'archive';
   const refId = String(item.refId || '').trim();
   const packageId = String(item.packageId || '').trim();
 
   if (source === 'archive' && refId) {
     return `archive:${refId}`;
   }
-  if (source === 'winget' && packageId) {
-    return `winget:${packageId.toLowerCase()}`;
+  if (source !== 'archive' && packageId) {
+    return `${source}:${packageId.toLowerCase()}`;
   }
   const fallback = String(refId || packageId || item.name || '')
     .trim()
@@ -72,7 +76,7 @@ function normalizeBundleItem(raw, fallbackOrder = 1) {
   }
 
   if (source === 'archive' && !refId) return null;
-  if (source === 'winget' && !packageId) return null;
+  if (source !== 'archive' && !packageId) return null;
 
   const parsedOrder = Number(raw.order);
   const order = Number.isFinite(parsedOrder) && parsedOrder > 0 ? Math.round(parsedOrder) : fallbackOrder;
@@ -507,6 +511,9 @@ function findMatchingPackageForBundleItem(item, packages = []) {
 
   if (!pkgIdLower) return null;
 
+  const targetPm = String(item.source || 'winget')
+    .trim()
+    .toLowerCase();
   const matches = packages.filter((p) => {
     const pId = String(p.packageId || p.wingetId || '')
       .trim()
@@ -515,7 +522,10 @@ function findMatchingPackageForBundleItem(item, packages = []) {
     const pPm = String(p.packageManager || (p.wingetId ? 'winget' : ''))
       .trim()
       .toLowerCase();
-    return !pPm || pPm === 'winget';
+    if (targetPm === 'winget') {
+      return !pPm || pPm === 'winget';
+    }
+    return pPm === targetPm;
   });
 
   if (matches.length === 0) return null;
@@ -523,9 +533,12 @@ function findMatchingPackageForBundleItem(item, packages = []) {
 }
 
 export function evaluateBundleItemStatus(item, packages = [], { versionCompareDepth = 3 } = {}) {
+  const rawSrc = String(item?.source || '')
+    .trim()
+    .toLowerCase();
   const normalizedItem = normalizeBundleItem(item) || {
     order: Number(item?.order) || 1,
-    source: item?.source === 'winget' ? 'winget' : 'archive',
+    source: BUNDLE_SOURCES.includes(rawSrc) ? rawSrc : 'archive',
     refId: String(item?.refId || '').trim(),
     packageId: String(item?.packageId || '').trim(),
     name: String(item?.name || '').trim(),
@@ -593,6 +606,8 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
     normalizedItem.source === 'archive' && !adwareProtected && installMode === 'silent' && silentArgs.length > 0;
   const canRunWingetSilent =
     normalizedItem.source === 'winget' && !adwareProtected && installMode !== 'interactive-required';
+  const canRunProviderSilent =
+    normalizedItem.source !== 'archive' && !adwareProtected && installMode !== 'interactive-required';
 
   const installedVersion = pkgStatus?.localVersion || matchedPackage?.installedVersion || null;
   const archiveVersion = pkgStatus?.archiveVersion || null;
@@ -624,6 +639,7 @@ export function evaluateBundleItemStatus(item, packages = [], { versionCompareDe
     adwareReason,
     canRunArchiveSilent,
     canRunWingetSilent,
+    canRunProviderSilent,
     defaultSelected,
     matchedPackage: matchedPackage || null,
   };
@@ -687,6 +703,8 @@ export function planBundleExecution(evaluatedItems = [], { allowSilent = true, s
         willRunSilent = Boolean(allowSilent && item.canRunArchiveSilent);
       } else if (item.source === 'winget') {
         willRunSilent = Boolean(silentWinget && item.canRunWingetSilent);
+      } else if (item.source !== 'archive') {
+        willRunSilent = Boolean(silentWinget && (item.canRunProviderSilent ?? item.canRunWingetSilent));
       }
     }
 
@@ -729,17 +747,21 @@ export function planBundleExecution(evaluatedItems = [], { allowSilent = true, s
 
 export function buildBundleDraftFromInstalled(packages = [], { name = '', description = '', icon = '💻' } = {}) {
   const seenKeys = new Set();
-  const seenWingetIds = new Set();
+  const seenProviderKeys = new Set();
   const rawItems = [];
   let archiveCount = 0;
   let wingetCount = 0;
   let excludedCount = 0;
+  const providerCounts = {};
 
   const installedPackages = (packages || []).filter((p) => p?.isInstalled);
-  // Archiv-Einträge zuerst verarbeiten, damit sie Vorrang vor reinen Winget-Duplikaten haben
+  // Archiv-Einträge zuerst verarbeiten, damit sie Vorrang vor reinen Provider-Duplikaten haben
   installedPackages.sort((a, b) => Number(Boolean(b.inArchive)) - Number(Boolean(a.inArchive)));
 
   for (const pkg of installedPackages) {
+    const pkgPm = String(pkg.packageManager || (pkg.wingetId ? 'winget' : ''))
+      .trim()
+      .toLowerCase();
     const pkgId = String(pkg.packageId || pkg.wingetId || '').trim();
     const pkgIdLower = pkgId.toLowerCase();
 
@@ -752,7 +774,9 @@ export function buildBundleDraftFromInstalled(packages = [], { name = '', descri
       const key = `archive:${refId}`;
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
-      if (pkgIdLower) seenWingetIds.add(pkgIdLower);
+      if (pkgIdLower && pkgPm) {
+        seenProviderKeys.add(`${pkgPm}:${pkgIdLower}`);
+      }
       archiveCount++;
       rawItems.push({
         source: 'archive',
@@ -764,15 +788,15 @@ export function buildBundleDraftFromInstalled(packages = [], { name = '', descri
       continue;
     }
 
-    if (pkg.packageManager === 'winget' && pkgId) {
-      if (seenWingetIds.has(pkgIdLower)) continue;
-      const key = `winget:${pkgIdLower}`;
-      if (seenKeys.has(key)) continue;
+    if (BUNDLE_REMOTE_SOURCES.includes(pkgPm) && pkgId) {
+      const key = `${pkgPm}:${pkgIdLower}`;
+      if (seenProviderKeys.has(key) || seenKeys.has(key)) continue;
       seenKeys.add(key);
-      seenWingetIds.add(pkgIdLower);
-      wingetCount++;
+      seenProviderKeys.add(key);
+      if (pkgPm === 'winget') wingetCount++;
+      providerCounts[pkgPm] = (providerCounts[pkgPm] || 0) + 1;
       rawItems.push({
-        source: 'winget',
+        source: pkgPm,
         refId: '',
         packageId: pkgId,
         name: pkg.name || pkgId,
@@ -791,7 +815,7 @@ export function buildBundleDraftFromInstalled(packages = [], { name = '', descri
   const resolvedName = String(name || '').trim() || `PC-Snapshot (${dateStr})`;
   const resolvedDesc =
     String(description || '').trim() ||
-    'Automatischer Snapshot der installierten Programme dieses PCs (Archiv & Winget).';
+    'Automatischer Snapshot der installierten Programme dieses PCs (Archiv & Paketmanager).';
 
   return {
     draft: {
@@ -804,6 +828,7 @@ export function buildBundleDraftFromInstalled(packages = [], { name = '', descri
     includedCount: items.length,
     archiveCount,
     wingetCount,
+    providerCounts,
     excludedCount,
   };
 }

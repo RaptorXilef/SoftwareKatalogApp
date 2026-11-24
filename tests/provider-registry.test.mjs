@@ -87,11 +87,9 @@ describe('provider-registry', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it('enthält geplante zukünftige Paketmanager in PLANNED_PROVIDERS', () => {
+  it('enthält geplante zukünftige Paketmanager in PLANNED_PROVIDERS und registriert neue Windows-Provider deaktiviert', () => {
     assert.ok(Array.isArray(PLANNED_PROVIDERS));
     const ids = PLANNED_PROVIDERS.map((p) => p.id);
-    assert.ok(ids.includes('scoop'));
-    assert.ok(ids.includes('chocolatey'));
     assert.ok(ids.includes('npm'));
     assert.ok(ids.includes('pip'));
     assert.ok(ids.includes('cargo'));
@@ -99,6 +97,12 @@ describe('provider-registry', () => {
       assert.equal(typeof entry.id, 'string');
       assert.equal(typeof entry.name, 'string');
       assert.equal(entry.status, 'planned');
+    }
+
+    for (const defaultOffId of ['scoop', 'chocolatey', 'msstore', 'msi']) {
+      const prov = getProvider(defaultOffId);
+      assert.ok(prov, `Provider ${defaultOffId} muss registriert sein`);
+      assert.equal(isProviderEnabled(defaultOffId), false);
     }
   });
 

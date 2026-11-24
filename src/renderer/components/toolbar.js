@@ -2,7 +2,7 @@ import {
   getActiveOriginFilter,
   getActiveSortMode,
   getTabCounts,
-  isProviderUsable,
+  getUsableProviders,
   setActiveOriginFilter,
   setActiveSortMode,
   state,
@@ -12,11 +12,15 @@ import { escapeHTML } from '../utils/sanitize.js';
 
 function getOriginFilterOptionsForTab(tab) {
   if (tab === 'updates') {
-    return [
+    const options = [
       { id: 'all', label: 'Alle' },
       { id: 'in-archive', label: 'Im Archiv' },
       { id: 'not-in-archive', label: 'Nicht im Archiv' },
     ];
+    for (const provider of getUsableProviders({ capability: 'listUpgrades', excludeIds: ['archive'] })) {
+      options.push({ id: provider.id, label: provider.name });
+    }
+    return options;
   }
   if (tab === 'installed') {
     const options = [
@@ -24,8 +28,8 @@ function getOriginFilterOptionsForTab(tab) {
       { id: 'in-archive', label: 'Im Archiv' },
       { id: 'not-in-archive', label: 'Nicht im Archiv' },
     ];
-    if (isProviderUsable('winget')) {
-      options.push({ id: 'winget', label: 'Winget-verwaltet' });
+    for (const provider of getUsableProviders({ capability: 'listInstalled', excludeIds: ['archive'] })) {
+      options.push({ id: provider.id, label: provider.name });
     }
     return options;
   }

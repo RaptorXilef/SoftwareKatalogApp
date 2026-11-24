@@ -1,5 +1,7 @@
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
-import { state } from '../state.js';
+import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
+import { openNestedDialog, pickArchiveTargetFolder } from '../modals/archive-target-modal.js';
+import { isProviderUsable, state } from '../state.js';
 import { closestButton, closestEl, qsInput } from '../utils/dom.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
@@ -94,6 +96,140 @@ function renderSourceChips() {
     .join('');
 }
 
+function renderLocalActions() {
+  const container = document.getElementById('discoverLocalActions');
+  if (!container) return;
+
+  const msiProvider = state.providers.find((p) => p.id === 'msi');
+  const showMsiBtn = msiProvider ? isProviderUsable('msi') : false;
+  if (!showMsiBtn) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = `
+    <span class="discover-sources-label">Lokale Pakete:</span>
+    <button type="button" class="btn btn-local btn-xs" id="btnInstallLocalMsi">
+      📦 Lokale .msi-Datei installieren
+    </button>
+  `;
+}
+
+async function runLocalMsiWizard({ onReload }) {
+  const filePath = await window.electronAPI.selectFile(
+    [{ name: 'Windows Installer (*.msi)', extensions: ['msi'] }],
+    true
+  );
+  if (!filePath) return;
+
+  const meta = await window.electronAPI.inspectMsiFile(filePath);
+  const pkgName = meta?.name || filePath.split(/[\\/]/).pop() || 'MSI-Paket';
+  const pkgVer = meta?.version || '';
+  const pkgPublisher = meta?.publisher || '';
+  const productCode = meta?.productCode || '';
+
+  const choice = await openNestedDialog({
+    defaultAction: 'cancel',
+    html: `
+      <div class="modal-header">
+        <h2>📦 Lokale .msi-Datei installieren</h2>
+        <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+      </div>
+
+      <div class="modal-body collision-warning-body">
+        <div class="collision-meta-card">
+          <div class="tech-row"><span>Paketname</span><strong>${escapeHTML(pkgName)}</strong></div>
+          ${pkgVer ? `<div class="tech-row"><span>Version</span><code>v${escapeHTML(pkgVer)}</code></div>` : ''}
+          ${pkgPublisher ? `<div class="tech-row"><span>Herausgeber</span><span>${escapeHTML(pkgPublisher)}</span></div>` : ''}
+          ${productCode ? `<div class="tech-row"><span>ProductCode</span><code>${escapeHTML(productCode)}</code></div>` : ''}
+          <div class="tech-row"><span>Datei</span><code>${escapeHTML(filePath)}</code></div>
+        </div>
+
+        <div class="archive-link-options">
+          <label class="radio-card">
+            <input type="radio" name="msiInstallMode" value="interactive" checked>
+            <div>
+              <strong>🖱️ Interaktiv (Standard)</strong>
+              <p>Startet den Windows-Installer-Assistenten mit sichtbaren Dialogen.</p>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" name="msiInstallMode" value="silent">
+            <div>
+              <strong>⚡ Silent (<code>/qn /norestart</code>)</strong>
+              <p>Installiert im Hintergrund ohne Rückfragen (Opt-in).</p>
+            </div>
+          </label>
+        </div>
+
+        <label class="check-row">
+          <input type="checkbox" id="chkMsiSaveToArchive">
+          <span>🗄️ .msi-Datei nach erfolgreicher Installation zusätzlich im Archiv ablegen</span>
+        </label>
+      </div>
+
+      <div class="modal-footer">
+        <span></span>
+        <div class="footer-group">
+          <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+          <button type="button" class="btn btn-primary" data-dialog-action="install">▶️ Installieren</button>
+        </div>
+      </div>
+    `,
+    onAction: (action) => {
+      if (action !== 'install') return 'cancel';
+      const dialog = document.getElementById('dialogContent');
+      const modeInput = dialog?.querySelector('input[name="msiInstallMode"]:checked');
+      const archiveChk = dialog?.querySelector('#chkMsiSaveToArchive');
+      return {
+        confirmed: true,
+        silent: modeInput instanceof HTMLInputElement && modeInput.value === 'silent',
+        saveToArchive: archiveChk instanceof HTMLInputElement && archiveChk.checked,
+      };
+    },
+  });
+
+  if (!choice || choice === 'cancel' || !choice.confirmed) return;
+
+  let targetDir = '';
+  let collisionMode = 'create';
+  if (choice.saveToArchive) {
+    const picked = await pickArchiveTargetFolder({ softwareName: pkgName, packageId: productCode || pkgName });
+    if (picked.canceled) return;
+    targetDir = picked.targetDir;
+    collisionMode = picked.collisionMode;
+  }
+
+  showToast(`Starte MSI-Installation für ${pkgName}...`, { type: 'info' });
+  const res = await window.electronAPI.installLocalMsi({
+    filePath,
+    silent: choice.silent,
+    itemName: pkgName,
+    saveToArchive: choice.saveToArchive,
+    targetDir,
+    collisionMode,
+  });
+
+  if (res?.alreadyRunning) {
+    showToast('Für diese .msi-Datei läuft bereits eine Installation.', { type: 'warn' });
+  } else if (res?.canceled) {
+    showToast('MSI-Installation wurde abgebrochen.', { type: 'info' });
+  } else if (res?.success) {
+    await onReload?.({ rescanInstalled: true });
+    if (choice.saveToArchive && res.archived) {
+      showToast(`${pkgName} installiert und im Archiv gespeichert!`, { type: 'success' });
+    } else if (choice.saveToArchive && res.archiveError) {
+      showToast(`${pkgName} installiert (Archiv-Fehler: ${res.archiveError})`, { type: 'warn', duration: 6000 });
+    } else {
+      showToast(`${pkgName} erfolgreich installiert!`, { type: 'success' });
+    }
+  } else {
+    showToast(`MSI-Installationsfehler: ${res?.error || 'Unbekannter Fehler'}`, { type: 'error', duration: 6000 });
+  }
+}
+
 function renderNotice() {
   const notice = document.getElementById('discoverNotice');
   if (!notice) return;
@@ -149,7 +285,9 @@ function renderResults() {
   container.innerHTML = state.discoverResults
     .map((pkg, idx) => {
       const providerId = pkg.providerId || pkg.packageManager || 'winget';
-      const providerLabel = pkg.providerName || (providerId === 'archive' ? 'Archiv' : 'Winget');
+      const badgeInfo = getProviderBadgeInfo(providerId, state.providers);
+      const providerLabel = pkg.providerName || badgeInfo?.label || providerId;
+      const badgeClass = badgeInfo?.badgeClass || '';
       const isArchiveSource = providerId === 'archive';
       const archiveMatch = findMatchingArchivePackage(pkg);
       const isInstalled = findMatchingInstalledPackage(pkg);
@@ -167,7 +305,7 @@ function renderResults() {
           <div class="discover-card-main">
             <div class="discover-card-title">
               <strong>${escapeHTML(pkg.name || pkg.packageId)}</strong>
-              <span class="provider-badge ${isArchiveSource ? 'is-archive' : ''}">${escapeHTML(providerLabel)}</span>
+              <span class="provider-badge ${escapeHTML(badgeClass)}">${escapeHTML(providerLabel)}</span>
               ${pkg.version ? `<span class="card-chip">v${escapeHTML(pkg.version)}</span>` : ''}
               ${archiveMatch && !isArchiveSource ? '<span class="discover-status-badge">Im Archiv</span>' : ''}
               ${isInstalled ? '<span class="discover-status-badge">Installiert</span>' : ''}
@@ -200,6 +338,7 @@ export function renderDiscoverView() {
   }
 
   renderSourceChips();
+  renderLocalActions();
   renderNotice();
   renderResults();
 }
@@ -209,6 +348,7 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
   const clearBtn = document.getElementById('clearDiscoverSearchBtn');
   const searchBtn = document.getElementById('btnDiscoverSearch');
   const chipsContainer = document.getElementById('discoverSourceChips');
+  const localActionsContainer = document.getElementById('discoverLocalActions');
   const resultsContainer = document.getElementById('discoverResults');
 
   const executeSearch = async () => {
@@ -294,6 +434,13 @@ export function initDiscoverView({ onReload, onOpenArchiveDetail, onOpenPackageD
 
     if (state.discoverHasSearched && state.discoverSelectedProviders.length > 0) {
       executeSearch();
+    }
+  });
+
+  localActionsContainer?.addEventListener('click', (e) => {
+    const btn = closestButton(e.target, '#btnInstallLocalMsi');
+    if (btn) {
+      void runLocalMsiWizard({ onReload });
     }
   });
 

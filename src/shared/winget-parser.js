@@ -99,12 +99,15 @@ function deriveShortDescription(description) {
 
 /**
  * Parst die Ausgabe von `winget show` (Deutsch & Englisch, inkl. eingerücktem Installer-Block).
+ * @param {string} stdout
+ * @param {string} [fallbackPackageId]
+ * @param {{ packageManager?: string }} [options]
  */
-export function parseWingetShowOutput(stdout, fallbackPackageId = '') {
+export function parseWingetShowOutput(stdout, fallbackPackageId = '', { packageManager = 'winget' } = {}) {
   const lines = cleanCliLines(stdout);
   const result = {
     name: '',
-    packageManager: 'winget',
+    packageManager: packageManager || 'winget',
     packageId: fallbackPackageId ? String(fallbackPackageId).trim() : '',
     publisher: '',
     publisherUrl: '',
@@ -255,13 +258,13 @@ export function parseWingetShowOutput(stdout, fallbackPackageId = '') {
  * Führt eine lokalisierte `winget show`-Ausgabe (z. B. de-DE) mit dem Standard-Fallback zusammen,
  * sodass deutsche Texte erhalten bleiben, aber fehlende Installer-Daten ergänzt werden.
  */
-export function mergeWingetShowResults(localized, fallback) {
+export function mergeWingetShowResults(localized, fallback, { packageManager = 'winget' } = {}) {
   if (!localized) return fallback || null;
   if (!fallback) return localized;
 
   const merged = {
     name: localized.name || fallback.name || '',
-    packageManager: 'winget',
+    packageManager: localized.packageManager || fallback.packageManager || packageManager || 'winget',
     packageId: localized.packageId || fallback.packageId || '',
     publisher: localized.publisher || fallback.publisher || '',
     publisherUrl: localized.publisherUrl || fallback.publisherUrl || '',
@@ -312,8 +315,15 @@ function isValidPackageId(id) {
 
 /**
  * Parst die Ausgabe von `winget search`.
+ * @param {string} stdout
+ * @param {number} [limit]
+ * @param {{ packageManager?: string, defaultSource?: string, requireDotInId?: boolean }} [options]
  */
-export function parseWingetSearchOutput(stdout, limit = 25) {
+export function parseWingetSearchOutput(
+  stdout,
+  limit = 25,
+  { packageManager = 'winget', defaultSource = 'winget', requireDotInId = true } = {}
+) {
   const lines = cleanCliLines(stdout).filter((l) => l.trim().length > 0);
   const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
   if (sepIdx === -1) return [];
@@ -348,15 +358,16 @@ export function parseWingetSearchOutput(stdout, limit = 25) {
       }
     }
 
-    if (!isValidPackageId(packageId) || !packageId.includes('.')) continue;
+    if (!isValidPackageId(packageId) || !/^[A-Za-z0-9._-]+$/.test(packageId)) continue;
+    if (requireDotInId && !packageId.includes('.')) continue;
 
     results.push({
-      packageManager: 'winget',
+      packageManager: packageManager || 'winget',
       packageId,
       id: packageId,
       name,
       version,
-      source: source || 'winget',
+      source: source || defaultSource || 'winget',
     });
   }
 
@@ -407,8 +418,10 @@ function parseUpgradeLineFallback(trimmed) {
 
 /**
  * Parst die Ausgabe von `winget upgrade` (inkl. abgeschnittener `…`-IDs und `< Version`-Angaben).
+ * @param {string} stdout
+ * @param {{ packageManager?: string, defaultSource?: string }} [options]
  */
-export function parseWingetUpgradeOutput(stdout) {
+export function parseWingetUpgradeOutput(stdout, { packageManager = 'winget', defaultSource = 'winget' } = {}) {
   const lines = cleanCliLines(stdout).filter((l) => l.trim().length > 0);
   const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
   if (sepIdx === -1) return [];
@@ -459,14 +472,14 @@ export function parseWingetUpgradeOutput(stdout) {
     const idTruncated = packageId.endsWith('…') || packageId.endsWith('...');
 
     results.push({
-      packageManager: 'winget',
+      packageManager: packageManager || 'winget',
       packageId,
       id: packageId,
       name: name.trim(),
       installedVersion: normalizeUpgradeVersion(rawInstalledVersion),
       rawInstalledVersion: rawInstalledVersion.trim(),
       availableVersion: availableVersion.trim(),
-      source: source.trim() || 'winget',
+      source: source.trim() || defaultSource || 'winget',
       idTruncated,
     });
   }

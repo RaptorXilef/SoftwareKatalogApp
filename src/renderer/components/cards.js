@@ -1,6 +1,11 @@
 import { getInstallModeBadge } from '../../shared/installer-logic.js';
 import { scoreCatalogItem } from '../../shared/search.js';
-import { canDownloadOnline, isPackageVisible } from '../../shared/unified-packages.js';
+import {
+  canDownloadOnline,
+  getProviderBadgeInfo,
+  isPackageVisible,
+  matchesProviderFilter,
+} from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import {
   getActiveOriginFilter,
@@ -142,19 +147,20 @@ function matchesTabAndFilter(item, st) {
     if (item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) return false;
     if (!st.hasWebUpdate && !st.hasArchiveUpdate) return false;
     const originFilter = getActiveOriginFilter();
-    if (originFilter === 'in-archive' && !item.inArchive) return false;
-    if (originFilter === 'not-in-archive' && item.origin !== 'pc') return false;
-    return true;
+    if (!['all', 'in-archive', 'not-in-archive'].includes(originFilter) && !isProviderUsable(originFilter)) {
+      return false;
+    }
+    return matchesProviderFilter(item, originFilter);
   }
 
   if (tab === 'installed') {
     if (!isProviderItemVisible(item)) return false;
     if (!item.isInstalled) return false;
     const originFilter = getActiveOriginFilter();
-    if (originFilter === 'in-archive' && item.origin !== 'both') return false;
-    if (originFilter === 'not-in-archive' && item.origin !== 'pc') return false;
-    if (originFilter === 'winget' && (!isProviderUsable('winget') || item.packageManager !== 'winget')) return false;
-    return true;
+    if (!['all', 'in-archive', 'not-in-archive'].includes(originFilter) && !isProviderUsable(originFilter)) {
+      return false;
+    }
+    return matchesProviderFilter(item, originFilter);
   }
 
   // Archiv-Tab
@@ -296,10 +302,16 @@ function renderCardHtml(item, st) {
   else if (item.softwareType === 'driver') secondaryTag = '<span class="card-chip">Treiber</span>';
 
   let originTag = '';
+  let providerTag = '';
   if (state.activeTab !== 'archive') {
     originTag = item.inArchive
       ? '<span class="card-chip chip-origin-archive" title="Im Archiv hinterlegt">Archiv</span>'
       : '<span class="card-chip chip-origin-pc" title="Nur lokal auf diesem PC installiert">Nur PC</span>';
+
+    const providerBadge = getProviderBadgeInfo(item.packageManager, state.providers);
+    if (providerBadge) {
+      providerTag = `<span class="provider-badge ${escapeHTML(providerBadge.badgeClass)}">${escapeHTML(providerBadge.label)}</span>`;
+    }
   }
 
   let installModeTag = '';
@@ -333,6 +345,7 @@ function renderCardHtml(item, st) {
         <div class="card-badges">
           ${selectHtml}
           ${statusCfg ? `<span class="status-pill is-${st.status}" title="${escapeHTML(statusCfg.title)}">${escapeHTML(statusCfg.label)}</span>` : ''}
+          ${providerTag}
           ${originTag}
           ${installModeTag}
           ${secondaryTag}

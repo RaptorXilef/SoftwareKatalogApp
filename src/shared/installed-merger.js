@@ -1,4 +1,5 @@
 import { parseDisplayIcon } from './icon-logic.js';
+import { extractMsiProductCodeFromEntry } from './msi-parser.js';
 
 const GENERIC_ID_TAILS = new Set([
   'app',
@@ -188,6 +189,7 @@ function cleanRegistryEntries(entries, includeSystemComponents) {
       displayIcon: String(raw?.displayIcon || raw?.DisplayIcon || '').trim(),
       installLocation: String(raw?.installLocation || raw?.InstallLocation || '').trim(),
       registryKey: String(raw?.registryKey || raw?.PSChildName || '').trim(),
+      windowsInstaller: Number(raw?.windowsInstaller ?? raw?.WindowsInstaller ?? 0),
     };
 
     const dedupeKey = `${normalizeText(displayName)}|${entry.displayVersion.toLowerCase()}`;
@@ -200,8 +202,11 @@ function cleanRegistryEntries(entries, includeSystemComponents) {
   return [...deduped.values()];
 }
 
-function findMatchingRegistryIndex(wingetItem, upgradeInfo, registryEntries, usedRegIndices, archiveLookup = null) {
-  const pkgId = wingetItem.packageId;
+function findMatchingRegistryIndex(pkgItem, upgradeInfo, registryEntries, usedRegIndices, archiveLookup = null) {
+  const pkgPm = String(pkgItem.packageManager || 'winget')
+    .trim()
+    .toLowerCase();
+  const pkgId = String(pkgItem.packageId || '').trim();
   const pkgIdLower = pkgId.toLowerCase();
   const idSegments = pkgId
     .split('.')
@@ -214,8 +219,8 @@ function findMatchingRegistryIndex(wingetItem, upgradeInfo, registryEntries, use
   const idPublisherCompact = idPartsCompact[0] || '';
   const idFullCompact = normalizeCompact(idSegments.join(''));
 
-  const wingetVer = (wingetItem.version || upgradeInfo?.installedVersion || '').toLowerCase();
-  const archiveItem = archiveLookup?.byPackageKey?.get(`winget:${pkgIdLower}`) || null;
+  const pkgVer = (pkgItem.version || upgradeInfo?.installedVersion || '').toLowerCase();
+  const archiveItem = archiveLookup?.byPackageKey?.get(`${pkgPm}:${pkgIdLower}`) || null;
   const archivePaths = archiveItem
     ? collectStrictPaths([
         archiveItem.validInstallPath,
@@ -288,10 +293,10 @@ function findMatchingRegistryIndex(wingetItem, upgradeInfo, registryEntries, use
     if (idPublisherCompact && regPubCompact && regPubCompact === idPublisherCompact) {
       tieScore += 15;
     }
-    if (wingetVer && reg.displayVersion) {
+    if (pkgVer && reg.displayVersion) {
       const regVer = reg.displayVersion.toLowerCase();
-      if (regVer === wingetVer) tieScore += 20;
-      else if (regVer.startsWith(wingetVer) || wingetVer.startsWith(regVer)) tieScore += 10;
+      if (regVer === pkgVer) tieScore += 20;
+      else if (regVer.startsWith(pkgVer) || pkgVer.startsWith(regVer)) tieScore += 10;
     }
 
     if (tieScore > bestScore) {
@@ -342,29 +347,43 @@ function findArchiveMatch(lookup, { packageManager, packageId, name }) {
 }
 
 /**
- * Führt `winget export`, `winget upgrade`, Windows-Registry-Uninstall-Daten
- * und den Archiv-Katalog zu einer einheitlichen Programmliste zusammen.
+ * Führt `winget export`, `winget upgrade`, zusätzliche System-Provider (`scoop`, `chocolatey`, `msstore`, `msi`),
+ * Windows-Registry-Uninstall-Daten und den Archiv-Katalog zu einer einheitlichen Programmliste zusammen.
  */
 export function mergeInstalledSoftware({
   wingetExports = [],
   wingetUpgrades = [],
+  providerInstalled = [],
+  providerUpgrades = [],
   registryEntries = [],
   catalogItems = [],
   includeSystemComponents = false,
+  msiEnabled = false,
 }) {
   const cleanRegistry = cleanRegistryEntries(registryEntries, includeSystemComponents);
   const archiveLookup = buildArchiveLookup(catalogItems);
 
+  const hasSeparateMsStore =
+    (providerInstalled || []).some((p) => String(p?.packageManager || '').toLowerCase() === 'msstore') ||
+    (providerUpgrades || []).some((u) => String(u?.packageManager || '').toLowerCase() === 'msstore');
+
+  const filteredWingetExports = hasSeparateMsStore
+    ? (wingetExports || []).filter((e) => String(e?.source || '').toLowerCase() !== 'msstore')
+    : wingetExports || [];
+  const filteredWingetUpgrades = hasSeparateMsStore
+    ? (wingetUpgrades || []).filter((u) => String(u?.source || '').toLowerCase() !== 'msstore')
+    : wingetUpgrades || [];
+
   const upgradeById = new Map();
-  for (const up of wingetUpgrades || []) {
-    const resolvedId = resolveTruncatedWingetId(up.packageId, wingetExports);
+  for (const up of filteredWingetUpgrades) {
+    const resolvedId = resolveTruncatedWingetId(up.packageId, filteredWingetExports);
     if (resolvedId) {
       upgradeById.set(resolvedId.toLowerCase(), { ...up, packageId: resolvedId });
     }
   }
 
   const wingetMap = new Map();
-  for (const exp of wingetExports || []) {
+  for (const exp of filteredWingetExports) {
     if (!exp.packageId) continue;
     wingetMap.set(exp.packageId.toLowerCase(), {
       packageManager: 'winget',
@@ -380,6 +399,50 @@ export function mergeInstalledSoftware({
         packageId: up.packageId,
         version: up.installedVersion || '',
         source: up.source || 'winget',
+      });
+    }
+  }
+
+  const genericUpgradeByKey = new Map();
+  for (const up of providerUpgrades || []) {
+    const pm = String(up?.packageManager || '')
+      .trim()
+      .toLowerCase();
+    const pkgId = String(up?.packageId || up?.id || '').trim();
+    if (!pm || !pkgId || pm === 'winget' || pm === 'archive') continue;
+    genericUpgradeByKey.set(`${pm}:${pkgId.toLowerCase()}`, up);
+  }
+
+  const genericPkgMap = new Map();
+  for (const pkg of providerInstalled || []) {
+    const pm = String(pkg?.packageManager || '')
+      .trim()
+      .toLowerCase();
+    const pkgId = String(pkg?.packageId || pkg?.id || '').trim();
+    if (!pm || !pkgId || pm === 'winget' || pm === 'archive' || pm === 'msi') continue;
+    const key = `${pm}:${pkgId.toLowerCase()}`;
+    if (!genericPkgMap.has(key)) {
+      genericPkgMap.set(key, {
+        packageManager: pm,
+        packageId: pkgId,
+        name: String(pkg?.name || pkgId).trim(),
+        version: String(pkg?.version || pkg?.installedVersion || '').trim(),
+        bucket: String(pkg?.bucket || '').trim(),
+        source: String(pkg?.source || pm).trim(),
+      });
+    }
+  }
+  for (const [key, up] of genericUpgradeByKey.entries()) {
+    if (!genericPkgMap.has(key)) {
+      const pm = String(up.packageManager).trim().toLowerCase();
+      const pkgId = String(up.packageId || up.id).trim();
+      genericPkgMap.set(key, {
+        packageManager: pm,
+        packageId: pkgId,
+        name: String(up.name || pkgId).trim(),
+        version: String(up.installedVersion || '').trim(),
+        bucket: String(up.bucket || '').trim(),
+        source: String(up.source || pm).trim(),
       });
     }
   }
@@ -425,9 +488,82 @@ export function mergeInstalledSoftware({
     });
   }
 
+  for (const [key, provPkg] of genericPkgMap.entries()) {
+    const up = genericUpgradeByKey.get(key) || null;
+    const regIdx = findMatchingRegistryIndex(provPkg, up, cleanRegistry, usedRegIndices, archiveLookup);
+    const reg = regIdx !== -1 ? cleanRegistry[regIdx] : null;
+    if (regIdx !== -1) usedRegIndices.add(regIdx);
+
+    const displayName = reg?.displayName || up?.name || provPkg.name || provPkg.packageId;
+    const installedVersion = provPkg.version || reg?.displayVersion || up?.installedVersion || '';
+    const availableVersion = up?.availableVersion || '';
+    const archiveMatch = findArchiveMatch(archiveLookup, {
+      packageManager: provPkg.packageManager,
+      packageId: provPkg.packageId,
+      name: displayName,
+    });
+
+    programs.push({
+      id: `${provPkg.packageManager}:${provPkg.packageId.toLowerCase()}`,
+      name: displayName,
+      publisher: reg?.publisher || '',
+      installedVersion,
+      availableVersion,
+      hasUpdate: Boolean(availableVersion),
+      packageManager: provPkg.packageManager,
+      packageId: provPkg.packageId,
+      bucket: provPkg.bucket || '',
+      source: provPkg.source || up?.source || provPkg.packageManager,
+      uninstallString: reg?.uninstallString || '',
+      quietUninstallString: reg?.quietUninstallString || '',
+      displayIcon: reg?.displayIcon || '',
+      installLocation: reg?.installLocation || '',
+      registryKey: reg?.registryKey || '',
+      canUninstall: true,
+      inArchive: Boolean(archiveMatch),
+      archiveItemId: archiveMatch?.id || null,
+      archivePath: archiveMatch?.path || null,
+      archiveIcon: archiveMatch?.icon || null,
+    });
+  }
+
   for (let i = 0; i < cleanRegistry.length; i++) {
     if (usedRegIndices.has(i)) continue;
     const reg = cleanRegistry[i];
+    const msiCode = msiEnabled && reg.windowsInstaller === 1 ? extractMsiProductCodeFromEntry(reg) : '';
+
+    if (msiCode) {
+      const archiveMatch = findArchiveMatch(archiveLookup, {
+        packageManager: 'msi',
+        packageId: msiCode,
+        name: reg.displayName,
+      });
+
+      programs.push({
+        id: `msi:${msiCode.toLowerCase()}`,
+        name: reg.displayName,
+        publisher: reg.publisher || '',
+        installedVersion: reg.displayVersion || '',
+        availableVersion: '',
+        hasUpdate: false,
+        packageManager: 'msi',
+        packageId: msiCode,
+        source: 'msi',
+        uninstallString: reg.uninstallString || `msiexec.exe /X${msiCode}`,
+        quietUninstallString: reg.quietUninstallString || `msiexec.exe /X${msiCode} /qn /norestart`,
+        displayIcon: reg.displayIcon || '',
+        installLocation: reg.installLocation || '',
+        registryKey: reg.registryKey || msiCode,
+        windowsInstaller: 1,
+        canUninstall: true,
+        inArchive: Boolean(archiveMatch),
+        archiveItemId: archiveMatch?.id || null,
+        archivePath: archiveMatch?.path || null,
+        archiveIcon: archiveMatch?.icon || null,
+      });
+      continue;
+    }
+
     const archiveMatch = findArchiveMatch(archiveLookup, {
       packageManager: '',
       packageId: '',

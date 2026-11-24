@@ -13,6 +13,64 @@ const GENERIC_DIRS = new Set([
   'c:\\programdata',
 ]);
 
+export const PROVIDER_DISPLAY_META = Object.freeze({
+  archive: { id: 'archive', label: 'Archiv', badgeClass: 'is-archive' },
+  winget: { id: 'winget', label: 'Winget', badgeClass: 'is-winget' },
+  scoop: { id: 'scoop', label: 'Scoop', badgeClass: 'is-scoop' },
+  chocolatey: { id: 'chocolatey', label: 'Chocolatey', badgeClass: 'is-chocolatey' },
+  msstore: { id: 'msstore', label: 'MS Store', badgeClass: 'is-msstore' },
+  msi: { id: 'msi', label: 'MSI', badgeClass: 'is-msi' },
+});
+
+/**
+ * Liefert Anzeigelabel und CSS-Modifier-Klasse für einen Paket-Provider.
+ * @param {unknown} providerId
+ * @param {Array<Record<string, any>>} [providersList]
+ * @returns {{ id: string, label: string, badgeClass: string } | null}
+ */
+export function getProviderBadgeInfo(providerId, providersList = []) {
+  const cleanId = String(providerId || '')
+    .trim()
+    .toLowerCase();
+  if (!cleanId) return null;
+
+  const meta = PROVIDER_DISPLAY_META[cleanId];
+  const dynamicProvider = Array.isArray(providersList)
+    ? providersList.find((p) => String(p?.id || '').toLowerCase() === cleanId)
+    : null;
+
+  return {
+    id: cleanId,
+    label: dynamicProvider?.name || meta?.label || cleanId,
+    badgeClass: meta?.badgeClass || `is-${cleanId}`,
+  };
+}
+
+/**
+ * Prüft, ob ein vereinheitlichtes Paket dem gewählten Herkunfts-/Provider-Filter entspricht.
+ * @param {Record<string, any> | null | undefined} item
+ * @param {unknown} filterId
+ * @returns {boolean}
+ */
+export function matchesProviderFilter(item, filterId) {
+  if (!item) return false;
+  const cleanFilter = String(filterId || 'all')
+    .trim()
+    .toLowerCase();
+  if (!cleanFilter || cleanFilter === 'all') return true;
+  if (cleanFilter === 'in-archive') return Boolean(item.inArchive);
+  if (cleanFilter === 'not-in-archive') return item.origin === 'pc';
+
+  const targetPm = cleanFilter.startsWith('provider:') ? cleanFilter.slice(9) : cleanFilter;
+  if (!targetPm) return true;
+  if (targetPm === 'archive') return Boolean(item.inArchive);
+
+  const itemPm = String(item.packageManager || (item.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  return itemPm === targetPm;
+}
+
 export function getBaseName(filePath) {
   if (!filePath) return '';
   return String(filePath).split('\\').pop().split('/').pop();
@@ -269,6 +327,8 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       packageManager,
       packageId,
       wingetId,
+      providerName: getProviderBadgeInfo(packageManager)?.label || '',
+      bucket: matchedPc?.bucket || item.bucket || '',
       publisher: matchedPc?.publisher || '',
       pcApp: matchedPc || null,
       canUninstall: Boolean(matchedPc?.canUninstall),
@@ -278,6 +338,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       displayIcon: matchedPc?.displayIcon || '',
       pcSource: matchedPc?.source || null,
       hasWingetUpgrade: Boolean(matchedPc?.hasUpdate),
+      hasProviderUpgrade: Boolean(matchedPc?.hasUpdate),
       installMode: item.installMode || 'interactive',
       silentArgs: item.silentArgs || '',
       innoInfFile: item.innoInfFile || '',
@@ -313,6 +374,8 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       packageManager: pkgManager,
       packageId: pkgId,
       wingetId: pkgManager === 'winget' ? pkgId || '' : '',
+      providerName: getProviderBadgeInfo(pkgManager)?.label || '',
+      bucket: pcApp.bucket || '',
       webSourceType: pkgManager === 'winget' ? 'winget' : 'none',
       tags: pcApp.publisher ? [pcApp.publisher] : [],
       mainCategory: '',
@@ -339,6 +402,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
       registryKey: pcApp.registryKey || '',
       pcSource: pcApp.source || 'registry',
       hasWingetUpgrade: Boolean(pcApp.hasUpdate),
+      hasProviderUpgrade: Boolean(pcApp.hasUpdate),
       installMode: 'interactive',
       silentArgs: '',
       innoInfFile: '',
@@ -413,7 +477,8 @@ export function buildRemotePackageItem({
     packageId: cleanPkgId,
     wingetId: cleanProviderId === 'winget' ? cleanPkgId : '',
     webSourceType: cleanProviderId === 'winget' ? 'winget' : 'none',
-    providerName: providerName || (cleanProviderId === 'winget' ? 'Winget' : cleanProviderId),
+    providerName: providerName || getProviderBadgeInfo(cleanProviderId)?.label || cleanProviderId,
+    bucket: summary.bucket || '',
     publisher: summary.publisher || matchedPcItem?.publisher || '',
     shortDescription: summary.shortDescription || '',
     description: summary.description || '',
@@ -439,6 +504,7 @@ export function buildRemotePackageItem({
     registryKey: matchedPcItem?.registryKey || '',
     pcSource: matchedPcItem?.pcSource || null,
     hasWingetUpgrade: Boolean(matchedPcItem?.hasWingetUpgrade),
+    hasProviderUpgrade: Boolean(matchedPcItem?.hasProviderUpgrade || matchedPcItem?.hasWingetUpgrade),
     installMode: matchedArchiveItem?.installMode || 'interactive',
     silentArgs: matchedArchiveItem?.silentArgs || '',
     innoInfFile: matchedArchiveItem?.innoInfFile || '',
@@ -472,7 +538,7 @@ export function getPackageStatus(item, { versionCompareDepth = 3 } = {}) {
     hasWebUpdate = Boolean(
       webVersion &&
         ((localVersion && compareVersions(webVersion, localVersion, depth) > 0) ||
-          (item.hasWingetUpgrade && webVersion !== localVersion))
+          ((item.hasWingetUpgrade || item.hasProviderUpgrade) && webVersion !== localVersion))
     );
   } else {
     hasWebUpdate = Boolean(webVersion && (!archiveVersion || compareVersions(webVersion, archiveVersion, depth) > 0));

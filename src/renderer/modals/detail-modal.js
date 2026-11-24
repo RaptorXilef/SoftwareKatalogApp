@@ -1,6 +1,6 @@
 import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
 import { formatMultiRootFileLabel } from '../../shared/multi-archive-logic.js';
-import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
+import { buildRemotePackageItem, canDownloadOnline, getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
@@ -53,10 +53,27 @@ function getEffectivePackageId(item) {
   return String(item.packageId || item.wingetId || '').trim();
 }
 
-function isCanUninstall(item, effectivePm, effectivePkgId) {
+function getProviderMeta(effectivePm) {
+  const cleanPm = String(effectivePm || '')
+    .trim()
+    .toLowerCase();
+  const prov = cleanPm ? state.providers.find((p) => p.id === cleanPm) || null : null;
+  const badge = getProviderBadgeInfo(cleanPm, state.providers);
+  return {
+    provider: prov,
+    label: badge?.label || (cleanPm === 'winget' ? 'Winget' : cleanPm),
+    badge,
+    canInstall: prov ? Boolean(prov.capabilities?.install) : cleanPm === 'winget',
+    canShow: prov ? Boolean(prov.capabilities?.show) : cleanPm === 'winget',
+    canUninstall: prov ? Boolean(prov.capabilities?.uninstall) : cleanPm === 'winget',
+    supportsArchiveDownload: prov ? Boolean(prov.capabilities?.supportsArchiveDownload) : cleanPm === 'winget',
+  };
+}
+
+function isCanUninstall(item, provMeta, effectivePkgId) {
   if (!item.isInstalled) return false;
   if (item.canUninstall || item.uninstallString || item.quietUninstallString) return true;
-  return item.softwareType !== 'portable' && effectivePm === 'winget' && Boolean(effectivePkgId);
+  return item.softwareType !== 'portable' && provMeta.canUninstall && Boolean(effectivePkgId);
 }
 
 function buildArchiveHeroAction(item, st) {
@@ -102,15 +119,17 @@ function buildArchiveHeroAction(item, st) {
   return null;
 }
 
-function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive }) {
+function buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive }) {
   const buttons = [];
+  const provLabel = provMeta.label || 'Paketmanager';
+  const canProviderInstall = provMeta.canInstall && Boolean(getEffectivePackageId(item));
 
   if (item.origin === 'remote') {
     const installLabel =
       item.isInstalled && st.hasWebUpdate
-        ? `⬆️ Über Winget aktualisieren (v${st.webVersion})`
+        ? `⬆️ Über ${provLabel} aktualisieren (v${st.webVersion})`
         : item.isInstalled
-          ? '🔄 Erneut über Winget installieren'
+          ? `🔄 Erneut über ${provLabel} installieren`
           : '⬇️ Jetzt installieren';
     buttons.push(
       `<button type="button" class="btn btn-lg ${item.isInstalled && st.hasWebUpdate ? 'btn-online' : 'btn-primary'}" data-detail-action="provider-install">${escapeHTML(installLabel)}</button>`
@@ -120,15 +139,15 @@ function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive 
       buttons.push(
         '<button type="button" class="btn btn-ghost" data-detail-action="open-archive-item">📂 Im Archiv öffnen</button>'
       );
-    } else if (isWingetPkg) {
+    } else if (provMeta.supportsArchiveDownload && canProviderInstall) {
       buttons.push(
         '<button type="button" class="btn btn-archive" data-detail-action="save-to-archive">📥 Ins Archiv aufnehmen</button>'
       );
     }
   } else if (item.origin === 'pc') {
-    if (isWingetPkg && st.hasWebUpdate) {
+    if (canProviderInstall && st.hasWebUpdate) {
       buttons.push(
-        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über Winget aktualisieren (v${escapeHTML(st.webVersion)})</button>`
+        `<button type="button" class="btn btn-lg btn-online" data-detail-action="provider-install">⬆️ Über ${escapeHTML(provLabel)} aktualisieren (v${escapeHTML(st.webVersion)})</button>`
       );
     } else if (item.validInstallPath) {
       buttons.push(
@@ -172,7 +191,7 @@ function buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive 
 function buildInstallModeToggleHtml({
   item,
   st,
-  isWingetPkg,
+  canProviderInstall,
   hasFreshDownload,
   selectedMode,
   isSilentLocked,
@@ -180,7 +199,7 @@ function buildInstallModeToggleHtml({
 }) {
   const hasInstallAction =
     item.origin === 'remote' ||
-    (item.origin === 'pc' && isWingetPkg && st.hasWebUpdate) ||
+    (item.origin === 'pc' && canProviderInstall && st.hasWebUpdate) ||
     (item.inArchive && (item.lastFiles?.length > 0 || hasFreshDownload || canDownloadOnline(item)));
 
   if (!hasInstallAction) return '';
@@ -221,9 +240,9 @@ function buildInstallModeToggleHtml({
   `;
 }
 
-function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive }) {
+function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, canArchiveDownload, matchedArchive }) {
   const hasProviderInstallBtn = item.origin === 'remote' || (item.origin === 'pc' && st.hasWebUpdate);
-  if (!hasProviderInstallBtn || !isWingetPkg || item.inArchive || matchedArchive) return '';
+  if (!hasProviderInstallBtn || !canArchiveDownload || item.inArchive || matchedArchive) return '';
 
   const saveMode = state.settings.archiveSaveMode || 'ask';
   const checked = saveMode === 'ask' || saveMode === 'auto-id';
@@ -243,10 +262,9 @@ function buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, mat
 }
 
 function buildVersionGridHtml(item, st, { matchedArchive }) {
-  const sourceLabel =
-    SOURCE_LABELS[item.webSourceType] ||
-    item.providerName ||
-    (getEffectivePackageManager(item) === 'winget' ? 'Winget' : '');
+  const effectivePm = getEffectivePackageManager(item);
+  const provBadge = effectivePm ? getProviderBadgeInfo(effectivePm, state.providers) : null;
+  const sourceLabel = SOURCE_LABELS[item.webSourceType] || item.providerName || provBadge?.label || '';
 
   const archiveVersion =
     st.archiveVersion || (matchedArchive?.lastFiles?.length > 0 ? getBaseName(matchedArchive.lastFiles[0]) : '') || '';
@@ -262,7 +280,7 @@ function buildVersionGridHtml(item, st, { matchedArchive }) {
 
   const onlineVal = st.webVersion
     ? `v${escapeHTML(st.webVersion)}`
-    : sourceLabel === 'Winget' && item.origin === 'pc'
+    : provBadge && item.origin === 'pc'
       ? 'Aktuell'
       : 'Nicht eingerichtet';
 
@@ -563,8 +581,8 @@ function renderPackageProfileBody(container, pkg, { fromCache, isStale, updatedA
   const shortDesc = String(pkg.shortDescription || '').trim();
   const fullDesc = String(pkg.description || '').trim();
   const tags = Array.isArray(pkg.tags) ? pkg.tags : [];
-  const pmLabel =
-    (pkg.packageManager || fallbackPm || 'winget') === 'winget' ? 'Winget' : pkg.packageManager || fallbackPm;
+  const pmId = String(pkg.packageManager || fallbackPm || 'winget').toLowerCase();
+  const pmLabel = getProviderBadgeInfo(pmId, state.providers)?.label || pmId;
   const pidLabel = pkg.packageId || fallbackPkgId;
   const formattedTime = formatCacheTimestamp(updatedAt);
 
@@ -664,14 +682,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const statusBadge = STATUS_BADGES[st.status];
   const effectivePm = getEffectivePackageManager(item);
   const effectivePkgId = getEffectivePackageId(item);
+  const provMeta = getProviderMeta(effectivePm);
   const isWingetPkg = effectivePm === 'winget' && Boolean(effectivePkgId);
-  const hasPackageProfile = Boolean(effectivePkgId) && (!effectivePm || effectivePm === 'winget');
+  const canProviderInstall = provMeta.canInstall && Boolean(effectivePkgId);
+  const canArchiveDownload = provMeta.supportsArchiveDownload && Boolean(effectivePkgId);
+  const hasPackageProfile = Boolean(effectivePkgId) && provMeta.canShow;
   const matchedArchive = item.matchedArchiveItem || null;
   const metaSource = item.inArchive ? item : matchedArchive || item;
   const initialModeState = resolveDetailInstallMode(metaSource.installMode || item.installMode);
   let selectedInstallMode = initialModeState.selected;
   const isSilentLocked = initialModeState.silentLocked;
-  const canUninstall = isCanUninstall(item, effectivePm, effectivePkgId);
+  const canUninstall = isCanUninstall(item, provMeta, effectivePkgId);
   const onlineReady = canDownloadOnline(item);
   const supportsChangelog = (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) || isWingetPkg;
 
@@ -680,9 +701,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     ? `<img class="detail-icon" src="${escapeHTML(toMediaUrl(item.icon))}" alt="">`
     : `<div class="detail-icon-fallback">${fallbackEmoji}</div>`;
 
+  const providerChip =
+    effectivePm && provMeta.badge
+      ? `<span class="provider-badge ${escapeHTML(provMeta.badge.badgeClass)}">${escapeHTML(provMeta.label)}</span>`
+      : '';
   const originChip = ORIGIN_CHIPS[item.origin]
     ? `<span class="card-chip ${ORIGIN_CHIPS[item.origin].cls}">${escapeHTML(ORIGIN_CHIPS[item.origin].label)}</span>`
-    : `<span class="provider-badge">${escapeHTML(item.providerName || effectivePm || 'Online')}</span>`;
+    : providerChip || `<span class="provider-badge">${escapeHTML(item.providerName || effectivePm || 'Online')}</span>`;
+  const extraProviderChip = ORIGIN_CHIPS[item.origin] ? providerChip : '';
 
   const newChip = isItemNew(item) ? '<span class="card-chip chip-new">NEU</span>' : '';
   const typeChip =
@@ -741,13 +767,13 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       <section class="pkg-profile-card">
         <div class="pkg-profile-head">
           <div class="pkg-profile-title">
-            <h4>📦 Paketmanager-Steckbrief (Winget)</h4>
+            <h4>📦 Paketmanager-Steckbrief (${escapeHTML(provMeta.label || 'Provider')})</h4>
             <span id="pkgProfileCacheBadge" class="pkg-cache-meta">Lade...</span>
           </div>
           <button type="button" class="btn btn-ghost btn-xs" id="btnRefreshPkgProfile" data-detail-action="refresh-pkg-profile" title="Steckbrief neu abrufen">🔄 Aktualisieren</button>
         </div>
         <div id="pkgProfileBody">
-          <span class="muted">⏳ Lade Paket-Informationen aus Cache / Winget...</span>
+          <span class="muted">⏳ Lade Paket-Informationen aus Cache / ${escapeHTML(provMeta.label || 'Provider')}...</span>
         </div>
       </section>
     `
@@ -772,6 +798,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
           <div class="detail-title-row">
             <h2>${escapeHTML(item.name)}</h2>
             ${statusBadge ? `<span class="status-pill ${statusBadge.cls}">${escapeHTML(statusBadge.label)}</span>` : ''}
+            ${extraProviderChip}
             ${originChip}
             ${inArchiveRemoteChip}
             ${offlineArchiveChip}
@@ -799,17 +826,17 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       <section class="tab-panel" data-detail-panel="overview" ${initialTab === 'overview' ? '' : 'hidden'}>
         ${buildVersionGridHtml(item, st, { matchedArchive })}
         ${postDownloadBanner}
-        ${buildHeroBarHtml(item, st, { isWingetPkg, canUninstall, matchedArchive })}
+        ${buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive })}
         ${buildInstallModeToggleHtml({
           item,
           st,
-          isWingetPkg,
+          canProviderInstall,
           hasFreshDownload: Boolean(freshDownload),
           selectedMode: selectedInstallMode,
           isSilentLocked,
           lockTooltip: initialModeState.lockTooltip,
         })}
-        ${buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, isWingetPkg, matchedArchive })}
+        ${buildArchiveSaveChoiceHtml(item, st, { effectivePkgId, canArchiveDownload, matchedArchive })}
         ${pinnedNotice}
         ${packageProfileHtml}
         ${buildCustomMetaSectionHtml(metaSource, hasPackageProfile)}
@@ -856,7 +883,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     if (refreshBtn instanceof HTMLButtonElement) refreshBtn.disabled = true;
     if (badgeEl) badgeEl.textContent = forceRefresh ? 'Aktualisiere...' : 'Lade...';
     if (forceRefresh) {
-      bodyEl.innerHTML = '<span class="muted">⏳ Frage aktuelle Paketdaten von Winget ab...</span>';
+      bodyEl.innerHTML = `<span class="muted">⏳ Frage aktuelle Paketdaten von ${escapeHTML(provMeta.label || 'Provider')} ab...</span>`;
     }
 
     const res = await window.electronAPI.showPackage(effectivePm, effectivePkgId, { forceRefresh });
@@ -1120,9 +1147,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   };
 
   const runProviderInstallFlow = async (btn) => {
-    if (!isWingetPkg) return;
+    if (!canProviderInstall) return;
     const archiveCheck = modal.querySelector('#detailAlsoSaveArchive');
-    const shouldSaveToArchive = archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
+    const shouldSaveToArchive =
+      canArchiveDownload && archiveCheck instanceof HTMLInputElement ? archiveCheck.checked : false;
 
     let archiveTargetSpec = null;
     if (shouldSaveToArchive) {
@@ -1138,13 +1166,14 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
     const origText = btn.textContent;
     btn.textContent = item.isInstalled ? '⏳ Aktualisiere...' : '⏳ Installiere...';
     showToast(
-      `Starte Winget-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`,
+      `Starte ${provMeta.label || effectivePm}-${item.isInstalled ? 'Aktualisierung' : 'Installation'} für ${item.name} (${useSilent ? 'Silent' : 'Interaktiv'})...`,
       {
         type: 'info',
       }
     );
 
     const res = await window.electronAPI.installPackage(effectivePm, effectivePkgId, {
+      upgrade: item.isInstalled && st.hasWebUpdate,
       silent: useSilent,
       itemName: item.name,
     });
@@ -1271,7 +1300,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       const targetMode = state.settings.archiveSaveMode === 'auto-id' ? 'auto-id' : 'ask';
       const res = await savePackageToArchive(buildArchivePayloadFromItem(), {
         mode: targetMode,
-        downloadSetup: isWingetPkg,
+        downloadSetup: canArchiveDownload,
       });
       if (res?.success && res.item?.id && isStillActive()) {
         renderDetailModal(res.item.id);

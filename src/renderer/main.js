@@ -158,8 +158,12 @@ async function enqueueUpdateItems(targetItems, { silent = false } = {}) {
   if (!Array.isArray(targetItems) || targetItems.length === 0) return;
 
   const saveMode = state.settings.archiveSaveMode || 'ask';
+  const supportsArchiveSave = (pm) => {
+    const provider = state.providers.find((p) => p.id === pm);
+    return provider ? Boolean(provider.capabilities?.supportsArchiveDownload) : pm === 'winget';
+  };
   const nonArchiveWinget = targetItems.filter(
-    (item) => !item.inArchive && item.packageManager === 'winget' && item.packageId
+    (item) => !item.inArchive && item.packageId && supportsArchiveSave(String(item.packageManager || '').toLowerCase())
   );
   const saveSpecsById = new Map();
 
@@ -422,7 +426,7 @@ document.addEventListener(
     if (target.classList.contains('card-icon')) {
       const card = target.closest('.card');
       const id = card instanceof HTMLElement ? card.dataset.id : '';
-      const isPcOnly = Boolean(id?.startsWith('winget:') || id?.startsWith('registry:'));
+      const isPcOnly = Boolean(id && /^(?:winget|scoop|chocolatey|msstore|msi|registry):/.test(id));
       const fallback = document.createElement('div');
       fallback.className = 'card-icon-fallback';
       fallback.textContent = isPcOnly ? '💻' : '📦';
@@ -431,7 +435,7 @@ document.addEventListener(
     }
     if (target.classList.contains('detail-icon')) {
       const id = state.currentModalId || '';
-      const isPcOnly = Boolean(id.startsWith('winget:') || id.startsWith('registry:'));
+      const isPcOnly = /^(?:winget|scoop|chocolatey|msstore|msi|registry):/.test(id);
       const fallback = document.createElement('div');
       fallback.className = 'detail-icon-fallback';
       fallback.textContent = id.startsWith('remote:') ? '🛍️' : isPcOnly ? '💻' : '📦';
@@ -500,7 +504,7 @@ async function bootstrap() {
       }
       const snapshot = buildBundleDraftFromInstalled(state.packages);
       if (snapshot.includedCount === 0) {
-        showToast('Keine übernehmbaren Archiv- oder Winget-Programme auf diesem PC erkannt.', { type: 'warn' });
+        showToast('Keine übernehmbaren Archiv- oder Paketmanager-Programme auf diesem PC erkannt.', { type: 'warn' });
         return;
       }
       openBundleEditorModal({
@@ -632,7 +636,7 @@ async function bootstrap() {
         await reloadUI();
         const total = pcRes.stats?.total ?? pcRes.programs?.length ?? 0;
         const upd = pcRes.stats?.updatesAvailable ?? 0;
-        showToast(`${total} PC-Programme geprüft (${upd} Winget-Updates).`, { type: 'success' });
+        showToast(`${total} PC-Programme geprüft (${upd} Updates verfügbar).`, { type: 'success' });
       } else if (localRes?.success) {
         await reloadUI();
         showToast(`${localRes.count} lokale Programme geprüft.`, { type: 'success' });

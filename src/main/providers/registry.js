@@ -1,6 +1,10 @@
 import { normalizeProviderCategory, normalizeProviderVersion } from '../../shared/provider-lifecycle-logic.js';
 import { getConfig, saveConfig } from '../config.js';
 import { archiveProvider } from './archive-provider.js';
+import { chocoProvider } from './choco-provider.js';
+import { msiProvider } from './msi-provider.js';
+import { msstoreProvider } from './msstore-provider.js';
+import { scoopProvider } from './scoop-provider.js';
 import { getWingetCache, wingetProvider } from './winget-provider.js';
 
 const CAPABILITY_KEYS = [
@@ -17,8 +21,6 @@ const CAPABILITY_KEYS = [
  * Strukturell vorbereitete Liste künftiger Paketquellen (noch nicht registriert/implementiert).
  */
 export const PLANNED_PROVIDERS = [
-  { id: 'scoop', name: 'Scoop', status: 'planned' },
-  { id: 'chocolatey', name: 'Chocolatey', status: 'planned' },
   { id: 'npm', name: 'npm', status: 'planned' },
   { id: 'bun', name: 'Bun', status: 'planned' },
   { id: 'pip', name: 'pip', status: 'planned' },
@@ -26,7 +28,6 @@ export const PLANNED_PROVIDERS = [
   { id: 'vcpkg', name: 'vcpkg', status: 'planned' },
   { id: 'dotnet', name: '.NET Tools', status: 'planned' },
   { id: 'powershell', name: 'PowerShell Gallery', status: 'planned' },
-  { id: 'msi', name: 'MSI / EXE Lokal', status: 'planned' },
 ];
 
 const registry = new Map();
@@ -82,6 +83,7 @@ export function registerProvider(provider) {
     name: cleanName,
     category: normalizeProviderCategory(provider.category),
     description: String(provider.description || '').trim(),
+    uninstallWarning: String(provider.uninstallWarning || '').trim(),
     requiresAdminForBootstrap: Boolean(provider.requiresAdminForBootstrap),
     canInstallManager: Boolean(provider.canInstallManager),
     canUninstallManager: Boolean(provider.canUninstallManager),
@@ -110,6 +112,10 @@ export function initDefaultProviders() {
   defaultsInitialized = true;
   registerProvider(archiveProvider);
   registerProvider(wingetProvider);
+  registerProvider(msstoreProvider);
+  registerProvider(scoopProvider);
+  registerProvider(chocoProvider);
+  registerProvider(msiProvider);
 }
 
 export function getProvider(id) {
@@ -160,6 +166,7 @@ export function listProvidersInfo() {
       name: p.name,
       category: p.category,
       description: p.description,
+      uninstallWarning: p.uninstallWarning || '',
       requiresAdminForBootstrap: p.requiresAdminForBootstrap,
       canInstallManager: p.canInstallManager,
       canUninstallManager: p.canUninstallManager,

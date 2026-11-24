@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('providers-uninstall', providerId, packageId, opts),
   getProviderCacheStats: () => ipcRenderer.invoke('providers-cache-stats'),
   clearProviderCache: () => ipcRenderer.invoke('providers-cache-clear'),
+  inspectMsiFile: (filePath) => ipcRenderer.invoke('msi-inspect-file', filePath),
+  installLocalMsi: (payload) => ipcRenderer.invoke('msi-install-local', payload),
   checkArchiveCollision: (targetDir) => ipcRenderer.invoke('archive-check-collision', targetDir),
   findArchiveLink: (packageManager, packageId) => ipcRenderer.invoke('archive-find-link', packageManager, packageId),
   linkPackageToArchive: (payload) => ipcRenderer.invoke('archive-link-package', payload),

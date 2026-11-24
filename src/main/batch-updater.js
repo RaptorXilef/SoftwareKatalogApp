@@ -4,7 +4,7 @@ import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-lin
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { createJob } from './jobs.js';
-import { wingetProvider } from './providers/winget-provider.js';
+import { getProvider } from './providers/registry.js';
 import { downloadWebUpdate } from './web-updater.js';
 import { executeAndVerifyInstaller } from './windows-tools.js';
 
@@ -274,20 +274,33 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
         continue;
       }
 
-      // Nicht-Archiv-Programm -> Winget Update (Silent bleibt strikt opt-in, Standard interaktiv)
-      if (task.packageManager === 'winget' && task.packageId) {
-        job.update(basePct, `${prefix}: Aktualisiere via Winget...`);
-        const wgRes = await wingetProvider.install(task.packageId, {
-          silent: false,
-          itemName: task.name,
-          signal: job.signal,
-          useJob: false,
-        });
+      // Nicht-Archiv-Programm -> Provider Update (Silent bleibt strikt opt-in, Standard interaktiv)
+      const taskPm = String(task.packageManager || '')
+        .trim()
+        .toLowerCase();
+      const provider = taskPm ? getProvider(taskPm) : null;
+      if (provider?.capabilities?.install && task.packageId) {
+        job.update(basePct, `${prefix}: Aktualisiere via ${provider.name}...`);
+        const provRes =
+          typeof provider.upgrade === 'function'
+            ? await provider.upgrade(task.packageId, {
+                silent: false,
+                itemName: task.name,
+                signal: job.signal,
+                useJob: false,
+              })
+            : await provider.install(task.packageId, {
+                upgrade: true,
+                silent: false,
+                itemName: task.name,
+                signal: job.signal,
+                useJob: false,
+              });
 
         if (job.signal.aborted) break;
 
-        if (!wgRes?.success) {
-          if (wgRes?.canceled) {
+        if (!provRes?.success) {
+          if (provRes?.canceled) {
             skipped++;
             results.push({ id: task.id, name: task.name, status: 'canceled' });
           } else {
@@ -296,17 +309,19 @@ export async function batchUpdatePackages(tasks = [], { allowSilent = true } = {
               id: task.id,
               name: task.name,
               status: 'error',
-              error: wgRes?.error || 'Winget fehlgeschlagen',
+              error: provRes?.error || `${provider.name} fehlgeschlagen`,
             });
           }
           continue;
         }
 
-        const saveMode = task.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
-        if (saveMode !== 'none') {
-          job.update(basePct + 60 / validTasks.length, `${prefix}: Speichere Setup im Archiv...`);
-          await saveUpdatedWingetPackageToArchive(task, task.archiveSaveSpec, job.signal);
-          if (job.signal.aborted) break;
+        if (provider.capabilities.supportsArchiveDownload) {
+          const saveMode = task.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
+          if (saveMode !== 'none') {
+            job.update(basePct + 60 / validTasks.length, `${prefix}: Speichere Setup im Archiv...`);
+            await saveUpdatedWingetPackageToArchive(task, task.archiveSaveSpec, job.signal);
+            if (job.signal.aborted) break;
+          }
         }
 
         completed++;

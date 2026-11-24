@@ -5,6 +5,7 @@ import { buildArchiveFilename } from '../../shared/version.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
+import { openNestedDialog } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeSettingsToken = 0;
@@ -550,21 +551,45 @@ export async function renderSettingsModal() {
       const providerId = uninstallProviderBtn.dataset.providerUninstall;
       if (!providerId || busyProviderIds.has(providerId)) return;
 
-      if (uninstallProviderBtn.dataset.armed !== 'true') {
-        uninstallProviderBtn.dataset.armed = 'true';
-        uninstallProviderBtn.dataset.origText = uninstallProviderBtn.textContent || '';
-        uninstallProviderBtn.textContent = '⚠️ Wirklich deinstallieren?';
-        setTimeout(() => {
-          if (uninstallProviderBtn.isConnected && uninstallProviderBtn.dataset.armed === 'true') {
-            uninstallProviderBtn.dataset.armed = 'false';
-            uninstallProviderBtn.textContent = uninstallProviderBtn.dataset.origText || '🗑️ Deinstallieren';
-          }
-        }, 4000);
-        return;
+      const providerObj = providers.find((p) => p.id === providerId);
+      const providerName = providerObj?.name || providerId;
+      const customWarning = providerObj?.uninstallWarning || '';
+
+      if (customWarning) {
+        const decision = await openNestedDialog({
+          defaultAction: 'cancel',
+          html: `
+            <div class="modal-header">
+              <h2>⚠️ ${escapeHTML(providerName)} deinstallieren</h2>
+              <button type="button" class="icon-btn" data-dialog-action="cancel" title="Abbrechen" aria-label="Abbrechen">✕</button>
+            </div>
+            <div class="modal-body collision-warning-body">
+              <p>${escapeHTML(customWarning)}</p>
+              <div class="collision-actions-grid">
+                <button type="button" class="btn btn-ghost" data-dialog-action="cancel">Abbrechen</button>
+                <button type="button" class="btn btn-danger" data-dialog-action="confirm">🗑️ Trotzdem deinstallieren</button>
+              </div>
+            </div>
+          `,
+          onAction: (act) => (act === 'confirm' ? 'confirm' : 'cancel'),
+        });
+        if (decision !== 'confirm') return;
+      } else {
+        if (uninstallProviderBtn.dataset.armed !== 'true') {
+          uninstallProviderBtn.dataset.armed = 'true';
+          uninstallProviderBtn.dataset.origText = uninstallProviderBtn.textContent || '';
+          uninstallProviderBtn.textContent = '⚠️ Wirklich deinstallieren?';
+          setTimeout(() => {
+            if (uninstallProviderBtn.isConnected && uninstallProviderBtn.dataset.armed === 'true') {
+              uninstallProviderBtn.dataset.armed = 'false';
+              uninstallProviderBtn.textContent = uninstallProviderBtn.dataset.origText || '🗑️ Deinstallieren';
+            }
+          }, 4000);
+          return;
+        }
+        uninstallProviderBtn.dataset.armed = 'false';
       }
 
-      uninstallProviderBtn.dataset.armed = 'false';
-      const providerName = providers.find((p) => p.id === providerId)?.name || providerId;
       busyProviderIds.add(providerId);
       refreshProvidersSectionUi();
       showToast(`Deinstalliere ${providerName}...`, { type: 'info' });

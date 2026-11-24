@@ -26,7 +26,7 @@ import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { createJob } from './jobs.js';
-import { isProviderEnabled } from './providers/registry.js';
+import { getProvider, initDefaultProviders, isProviderEnabled } from './providers/registry.js';
 import { getWingetCache, wingetProvider } from './providers/winget-provider.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
@@ -835,6 +835,7 @@ export async function readRegistryUninstallEntries(signal = null) {
           displayIcon = [string]$_.DisplayIcon
           installLocation = [string]$_.InstallLocation
           registryKey = [string]$_.PSChildName
+          windowsInstaller = if ($null -ne $_.WindowsInstaller) { [int]$_.WindowsInstaller } else { 0 }
           systemComponent = if ($null -ne $_.SystemComponent) { [int]$_.SystemComponent } else { 0 }
           parentKeyName = [string]$_.ParentKeyName
         }
@@ -895,13 +896,42 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
   const signal = job?.signal || null;
 
   try {
-    job?.update(15, 'Lese Windows-Registry, Winget-Export & verfügbare Updates...');
+    initDefaultProviders();
+    job?.update(15, 'Lese Windows-Registry & aktive Paketmanager...');
 
     const wingetEnabled = isProviderEnabled('winget');
-    const [registryEntries, exportRes, upgradeRes] = await Promise.all([
+    const msstoreEnabled = isProviderEnabled('msstore');
+    const scoopEnabled = isProviderEnabled('scoop');
+    const chocoEnabled = isProviderEnabled('chocolatey');
+    const msiEnabled = isProviderEnabled('msi');
+
+    const scoopProv = scoopEnabled ? getProvider('scoop') : null;
+    const chocoProv = chocoEnabled ? getProvider('chocolatey') : null;
+    const msstoreProv = msstoreEnabled ? getProvider('msstore') : null;
+
+    const emptyInstalled = Promise.resolve({ success: false, packages: [] });
+    const emptyUpgrades = Promise.resolve({ success: false, upgrades: [] });
+
+    const [
+      registryEntries,
+      exportRes,
+      upgradeRes,
+      msstoreInstalledRes,
+      msstoreUpgradeRes,
+      scoopInstalledRes,
+      scoopUpgradeRes,
+      chocoInstalledRes,
+      chocoUpgradeRes,
+    ] = await Promise.all([
       readRegistryUninstallEntries(signal),
-      wingetEnabled ? wingetProvider.listInstalled({ signal }) : Promise.resolve({ success: false, packages: [] }),
-      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : Promise.resolve({ success: false, upgrades: [] }),
+      wingetEnabled ? wingetProvider.listInstalled({ signal }) : emptyInstalled,
+      wingetEnabled ? wingetProvider.listUpgrades({ signal }) : emptyUpgrades,
+      !wingetEnabled && msstoreProv ? msstoreProv.listInstalled({ signal }) : emptyInstalled,
+      msstoreProv ? msstoreProv.listUpgrades({ signal }) : emptyUpgrades,
+      scoopProv ? scoopProv.listInstalled({ signal }) : emptyInstalled,
+      scoopProv ? scoopProv.listUpgrades({ signal }) : emptyUpgrades,
+      chocoProv ? chocoProv.listInstalled({ signal }) : emptyInstalled,
+      chocoProv ? chocoProv.listUpgrades({ signal }) : emptyUpgrades,
     ]);
 
     if (signal?.aborted) {
@@ -914,12 +944,34 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
     const wingetExports = exportRes.success ? exportRes.packages : [];
     const wingetUpgrades = upgradeRes.success ? upgradeRes.upgrades : [];
 
+    const msstoreFromWingetExport =
+      wingetEnabled && msstoreEnabled
+        ? wingetExports
+            .filter((pkg) => String(pkg.source || '').toLowerCase() === 'msstore')
+            .map((pkg) => ({ ...pkg, packageManager: 'msstore', source: 'msstore' }))
+        : [];
+
+    const providerInstalled = [
+      ...(msstoreInstalledRes.success ? msstoreInstalledRes.packages : msstoreFromWingetExport),
+      ...(scoopInstalledRes.success ? scoopInstalledRes.packages : []),
+      ...(chocoInstalledRes.success ? chocoInstalledRes.packages : []),
+    ];
+
+    const providerUpgrades = [
+      ...(msstoreUpgradeRes.success ? msstoreUpgradeRes.upgrades : []),
+      ...(scoopUpgradeRes.success ? scoopUpgradeRes.upgrades : []),
+      ...(chocoUpgradeRes.success ? chocoUpgradeRes.upgrades : []),
+    ];
+
     const programs = mergeInstalledSoftware({
       wingetExports,
       wingetUpgrades,
+      providerInstalled,
+      providerUpgrades,
       registryEntries,
       catalogItems,
       includeSystemComponents,
+      msiEnabled,
     });
 
     syncArchiveInstalledVersions(programs);
@@ -1656,12 +1708,19 @@ export async function uninstallSoftware({
   archiveItemId = null,
   silent = false,
 }) {
+  initDefaultProviders();
   const displayTitle = itemName || packageId || 'Programm';
-  const useWinget = Boolean(packageId) && (!packageManager || packageManager === 'winget');
+  const effectivePm = String(packageManager || (packageId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  const provider = effectivePm ? getProvider(effectivePm) : null;
+  const useProvider = Boolean(
+    packageId && provider?.capabilities?.uninstall && typeof provider.uninstall === 'function'
+  );
   const regCommand = silent && quietUninstallString ? quietUninstallString : uninstallString;
 
-  if (!useWinget && !regCommand) {
-    return { success: false, error: 'Keine Winget-ID oder Deinstallations-Befehl vorhanden.' };
+  if (!useProvider && !regCommand) {
+    return { success: false, error: 'Keine Paket-ID oder Deinstallations-Befehl vorhanden.' };
   }
 
   const job = createJob({
@@ -1676,14 +1735,14 @@ export async function uninstallSoftware({
     let res;
     let method = 'registry';
 
-    if (useWinget) {
-      method = 'winget';
-      job.update(null, `Deinstalliere ${displayTitle} über Winget...`);
-      res = await wingetProvider.uninstall(packageId, { silent, itemName: displayTitle, useJob: false });
+    if (useProvider && provider) {
+      method = effectivePm;
+      job.update(null, `Deinstalliere ${displayTitle} über ${provider.name}...`);
+      res = await provider.uninstall(packageId, { silent, itemName: displayTitle, useJob: false });
 
-      if (!res.success && !res.canceled && regCommand) {
+      if (!res.success && !res.canceled && regCommand && effectivePm !== 'msi') {
         method = 'registry-fallback';
-        job.update(null, 'Winget fehlgeschlagen - starte Registry-Deinstaller...');
+        job.update(null, `${provider.name} fehlgeschlagen - starte Registry-Deinstaller...`);
         res = await runRegistryUninstall(regCommand, silent);
       }
     } else {

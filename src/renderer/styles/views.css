@@ -472,6 +472,48 @@
     background: color-mix(in srgb, var(--color-archive) 18%, transparent);
     color: var(--color-archive);
   }
+
+  &.is-winget {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+  }
+
+  &.is-scoop {
+    background: color-mix(in srgb, var(--color-ok) 18%, transparent);
+    color: var(--color-ok);
+  }
+
+  &.is-chocolatey {
+    background: color-mix(in srgb, var(--color-warn) 18%, transparent);
+    color: var(--color-warn);
+  }
+
+  &.is-msstore {
+    background: color-mix(in srgb, var(--color-newer) 18%, transparent);
+    color: var(--color-newer);
+  }
+
+  &.is-msi {
+    background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+    color: var(--text);
+  }
+}
+
+.discover-local-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font-size: 13px;
+}
+
+.bundles-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .discover-status-badge {

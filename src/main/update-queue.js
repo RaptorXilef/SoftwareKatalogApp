@@ -5,7 +5,7 @@ import { extractVersion } from '../shared/version.js';
 import { checkArchiveTargetCollision, linkPackageToArchive } from './archive-linker.js';
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig } from './config.js';
-import { wingetProvider } from './providers/winget-provider.js';
+import { getProvider } from './providers/registry.js';
 import { downloadWebUpdate } from './web-updater.js';
 import { executeAndVerifyInstaller } from './windows-tools.js';
 
@@ -126,27 +126,45 @@ async function executeQueueItem(entry, { signal, onProgress }) {
     return { success: true };
   }
 
-  if (entry.packageManager === 'winget' && entry.packageId) {
-    onProgress?.(null, useSilent ? '⚡ Aktualisiere still über Winget...' : '🖱️ Aktualisiere über Winget...');
-    const wgRes = await wingetProvider.install(entry.packageId, {
-      silent: useSilent,
-      itemName: entry.name,
-      signal,
-      useJob: false,
-    });
+  const pkgPm = String(entry.packageManager || '')
+    .trim()
+    .toLowerCase();
+  const provider = pkgPm ? getProvider(pkgPm) : null;
+  if (provider?.capabilities?.install && entry.packageId) {
+    onProgress?.(
+      null,
+      useSilent ? `⚡ Aktualisiere still über ${provider.name}...` : `🖱️ Aktualisiere über ${provider.name}...`
+    );
+    const updRes =
+      typeof provider.upgrade === 'function'
+        ? await provider.upgrade(entry.packageId, {
+            silent: useSilent,
+            itemName: entry.name,
+            signal,
+            useJob: false,
+          })
+        : await provider.install(entry.packageId, {
+            upgrade: true,
+            silent: useSilent,
+            itemName: entry.name,
+            signal,
+            useJob: false,
+          });
 
-    if (signal?.aborted || wgRes?.canceled) {
+    if (signal?.aborted || updRes?.canceled) {
       return { success: false, canceled: true };
     }
-    if (!wgRes?.success) {
-      return { success: false, error: wgRes?.error || 'Winget-Update fehlgeschlagen' };
+    if (!updRes?.success) {
+      return { success: false, error: updRes?.error || `${provider.name}-Update fehlgeschlagen` };
     }
 
-    const saveMode = entry.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
-    if (saveMode !== 'none') {
-      onProgress?.(null, 'Speichere Setup im Archiv...');
-      await saveUpdatedWingetPackageToArchive(entry, entry.archiveSaveSpec, signal);
-      if (signal?.aborted) return { success: false, canceled: true };
+    if (provider.capabilities.supportsArchiveDownload) {
+      const saveMode = entry.archiveSaveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
+      if (saveMode !== 'none') {
+        onProgress?.(null, 'Speichere Setup im Archiv...');
+        await saveUpdatedWingetPackageToArchive(entry, entry.archiveSaveSpec, signal);
+        if (signal?.aborted) return { success: false, canceled: true };
+      }
     }
 
     return { success: true };

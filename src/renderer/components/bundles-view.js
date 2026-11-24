@@ -1,5 +1,6 @@
 import { evaluateBundleStatus } from '../../shared/bundles-logic.js';
-import { state } from '../state.js';
+import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
+import { getUsableProviders, state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
 
 let viewHandlers = {};
@@ -43,8 +44,20 @@ function renderBundleCardHtml(bundle) {
   });
   const { items, summary } = evaluation;
 
-  const archiveCount = items.filter((it) => it.source === 'archive').length;
-  const wingetCount = items.filter((it) => it.source === 'winget').length;
+  const sourceCountsMap = new Map();
+  for (const it of items) {
+    const src = String(it.source || 'archive').toLowerCase();
+    sourceCountsMap.set(src, (sourceCountsMap.get(src) || 0) + 1);
+  }
+  const sourceSummaryParts = [`${summary.total} Paket(e)`];
+  const countBadgesHtml = [...sourceCountsMap.entries()]
+    .map(([src, cnt]) => {
+      const badge = getProviderBadgeInfo(src, state.providers);
+      const label = badge?.label || src;
+      return `<span class="provider-badge ${escapeHTML(badge?.badgeClass || '')}">${escapeHTML(label)}: ${cnt}</span>`;
+    })
+    .join('');
+
   const pct = summary.total > 0 ? Math.round((summary.installedCount / summary.total) * 100) : 0;
 
   const previewItems = items.slice(0, 5);
@@ -64,7 +77,7 @@ function renderBundleCardHtml(bundle) {
           <span class="bundle-card-icon">${escapeHTML(bundle.icon || '📦')}</span>
           <div class="bundle-card-title-text">
             <h3>${escapeHTML(bundle.name)}</h3>
-            <span class="bundle-card-counts">${summary.total} Paket(e) · ${archiveCount} Archiv · ${wingetCount} Winget</span>
+            <span class="bundle-card-counts">${sourceSummaryParts.join('')} ${countBadgesHtml}</span>
           </div>
         </div>
         <button type="button" class="btn btn-ghost btn-xs" data-bundle-action="export" data-bundle-id="${escapeHTML(bundle.id)}" title="Bündel als JSON exportieren">📤 Exportieren</button>
@@ -111,16 +124,63 @@ function renderBundleCardHtml(bundle) {
   `;
 }
 
+function getBundleProviderFilterOptions() {
+  const options = [
+    { id: 'all', label: 'Alle' },
+    { id: 'archive', label: 'Archiv' },
+  ];
+  const seen = new Set(['all', 'archive']);
+
+  for (const prov of getUsableProviders({ excludeIds: ['archive', 'msi'] })) {
+    if (!seen.has(prov.id)) {
+      seen.add(prov.id);
+      options.push({ id: prov.id, label: prov.name });
+    }
+  }
+  for (const bundle of state.bundles || []) {
+    for (const item of bundle.items || []) {
+      const src = String(item.source || '')
+        .trim()
+        .toLowerCase();
+      if (!src || seen.has(src)) continue;
+      seen.add(src);
+      const badge = getProviderBadgeInfo(src, state.providers);
+      options.push({ id: src, label: badge?.label || src });
+    }
+  }
+  return options;
+}
+
 export function renderBundlesView() {
   const container = document.getElementById('bundlesView');
   if (!container) return;
 
+  const filterOptions = getBundleProviderFilterOptions();
+  if (!filterOptions.some((opt) => opt.id === state.bundleProviderFilter)) {
+    state.bundleProviderFilter = 'all';
+  }
+  const activeFilter = state.bundleProviderFilter || 'all';
+
   const q = state.bundleSearchQuery.trim().toLowerCase();
   const filtered = state.bundles.filter((b) => {
+    if (activeFilter !== 'all') {
+      const hasSource = (b.items || []).some((it) => String(it.source || '').toLowerCase() === activeFilter);
+      if (!hasSource) return false;
+    }
     if (!q) return true;
     const itemNames = (b.items || []).map((i) => `${i.name} ${i.packageId}`).join(' ');
     return `${b.name} ${b.description} ${itemNames}`.toLowerCase().includes(q);
   });
+
+  const filterBarHtml =
+    filterOptions.length > 1
+      ? `<div class="bundles-filter-bar">${filterOptions
+          .map(
+            (opt) =>
+              `<button type="button" class="origin-chip ${activeFilter === opt.id ? 'active' : ''}" data-bundle-provider-filter="${escapeHTML(opt.id)}">${escapeHTML(opt.label)}</button>`
+          )
+          .join('')}</div>`
+      : '';
 
   const activeEl = document.activeElement;
   const activeElId = activeEl instanceof HTMLElement ? activeEl.id : '';
@@ -153,13 +213,14 @@ export function renderBundlesView() {
         </div>
         <span class="muted">${filtered.length} von ${state.bundles.length} Bündel(n)</span>
       </div>
+      ${filterBarHtml}
     </div>
 
     ${ipcNoticeHtml}
 
     ${
       filtered.length === 0
-        ? renderEmptyBundlesHtml(Boolean(q))
+        ? renderEmptyBundlesHtml(Boolean(q || activeFilter !== 'all'))
         : `<div class="bundles-grid">${filtered.map(renderBundleCardHtml).join('')}</div>`
     }
   `;
@@ -205,6 +266,14 @@ export function initBundlesView(handlers) {
   container.addEventListener('click', (e) => {
     const target = e.target;
     if (!(target instanceof Element)) return;
+
+    const filterBtn = target.closest('[data-bundle-provider-filter]');
+    if (filterBtn instanceof HTMLElement) {
+      state.bundleProviderFilter = filterBtn.dataset.bundleProviderFilter || 'all';
+      renderBundlesView();
+      return;
+    }
+
     const btn = target.closest('[data-bundle-action]');
     if (!(btn instanceof HTMLElement)) return;
     const action = btn.dataset.bundleAction;
@@ -221,6 +290,7 @@ export function initBundlesView(handlers) {
       viewHandlers.onExportAllBundles?.();
     } else if (action === 'clear-search') {
       state.bundleSearchQuery = '';
+      state.bundleProviderFilter = 'all';
       renderBundlesView();
     } else if (action === 'run' && bundle) {
       viewHandlers.onRunBundle?.(bundle.id);

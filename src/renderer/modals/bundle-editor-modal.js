@@ -10,6 +10,7 @@ import {
   sortBundleItems,
 } from '../../shared/bundles-logic.js';
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
+import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { showToast } from '../components/toast.js';
 import { isProviderUsable, state } from '../state.js';
 import { escapeHTML } from '../utils/sanitize.js';
@@ -215,13 +216,14 @@ export function renderBundleEditorModal({
           const key = getBundleItemKey(entry.editorItem);
           const alreadyAdded = existingKeys.has(key);
           const isArchive = entry.providerId === 'archive';
-          const providerLabel = getProviderLabel(entry.providerId);
+          const badgeInfo = getProviderBadgeInfo(entry.providerId, state.providers);
+          const providerLabel = badgeInfo?.label || getProviderLabel(entry.providerId);
           return `
             <div class="bundle-search-row">
               <div class="bundle-search-row-main">
                 <div class="bundle-search-row-title">
                   <strong>${escapeHTML(entry.name)}</strong>
-                  <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${escapeHTML(providerLabel)}</span>
+                  <span class="provider-badge ${escapeHTML(badgeInfo?.badgeClass || (isArchive ? 'is-archive' : ''))}">${escapeHTML(providerLabel)}</span>
                   ${entry.isInstalled ? '<span class="card-chip">💻 Installiert</span>' : ''}
                   ${entry.version ? `<span class="card-chip">v${escapeHTML(entry.version)}</span>` : ''}
                 </div>
@@ -363,12 +365,30 @@ export function renderBundleEditorModal({
 
   const renderSnapshotBannerHtml = () => {
     if (!isSnapshotMode) return '';
+    const sourceCounts = new Map();
+    for (const item of draftItems) {
+      const src = String(item.source || 'archive').toLowerCase();
+      sourceCounts.set(src, (sourceCounts.get(src) || 0) + 1);
+    }
     const stats = snapshotStats || {
       includedCount: draftItems.length,
-      archiveCount: draftItems.filter((i) => i.source === 'archive').length,
-      wingetCount: draftItems.filter((i) => i.source === 'winget').length,
       excludedCount: 0,
     };
+
+    const countParts = [...sourceCounts.entries()].map(([src, cnt]) => {
+      const label = getProviderBadgeInfo(src, state.providers)?.label || getProviderLabel(src);
+      return `${cnt} ${label}`;
+    });
+    if (stats.excludedCount > 0) {
+      countParts.push(`${stats.excludedCount} ohne Quelle ausgelassen`);
+    }
+
+    const filterBtnsHtml = [...sourceCounts.keys()]
+      .map((src) => {
+        const label = getProviderBadgeInfo(src, state.providers)?.label || getProviderLabel(src);
+        return `<button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-provider" data-snap-provider="${escapeHTML(src)}">Nur ${escapeHTML(label)}</button>`;
+      })
+      .join('');
 
     const checkedCount = draftItems.filter((it) => snapshotCheckedKeys.has(getBundleItemKey(it))).length;
 
@@ -377,17 +397,14 @@ export function renderBundleEditorModal({
         <div class="bundle-snapshot-info">
           <strong>📸 1-Klick-Snapshot dieses PCs</strong>
           <p class="muted">
-            ${stats.includedCount} übernehmbare Programme erkannt (${stats.archiveCount} Archiv · ${stats.wingetCount} Winget${
-              stats.excludedCount > 0 ? ` · ${stats.excludedCount} ohne Quelle ausgelassen` : ''
-            }). Hake ab, was ins Bündel soll.
+            ${stats.includedCount} übernehmbare Programme erkannt (${escapeHTML(countParts.join(' · '))}). Hake ab, was ins Bündel soll.
           </p>
         </div>
         <div class="bundle-snapshot-controls">
           <input type="text" id="bundleSnapshotFilter" value="${escapeHTML(snapshotFilterText)}" placeholder="Snapshot-Liste filtern...">
           <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-all">Alle (${draftItems.length})</button>
           <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-none">Keine</button>
-          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-archive">Nur Archiv</button>
-          <button type="button" class="btn btn-ghost btn-xs" data-editor-action="snap-winget">Nur Winget</button>
+          ${filterBtnsHtml}
           <span class="bundle-snapshot-counter"><strong>${checkedCount}</strong> von ${draftItems.length} gewählt</span>
         </div>
       </div>
@@ -423,7 +440,7 @@ export function renderBundleEditorModal({
           versionCompareDepth: state.settings.versionCompareDepth ?? 3,
         });
         const isChecked = !isSnapshotMode || snapshotCheckedKeys.has(key);
-        const isArchive = item.source === 'archive';
+        const itemBadge = getProviderBadgeInfo(item.source, state.providers);
 
         let modeHintHtml = '';
         if (evalInfo.adwareProtected) {
@@ -446,7 +463,7 @@ export function renderBundleEditorModal({
             <div class="bundle-item-main">
               <div class="bundle-item-title">
                 <strong>${escapeHTML(item.name)}</strong>
-                <span class="provider-badge ${isArchive ? 'is-archive' : ''}">${isArchive ? 'Archiv' : escapeHTML(getProviderLabel(item.source))}</span>
+                <span class="provider-badge ${escapeHTML(itemBadge?.badgeClass || '')}">${escapeHTML(itemBadge?.label || getProviderLabel(item.source))}</span>
                 ${modeHintHtml}
               </div>
               <div class="bundle-item-meta">
@@ -800,6 +817,16 @@ export function renderBundleEditorModal({
 
     if (action === 'snap-none') {
       snapshotCheckedKeys.clear();
+      render();
+      return;
+    }
+
+    if (action === 'snap-provider') {
+      const targetProv = actionBtn.dataset.snapProvider || '';
+      snapshotCheckedKeys.clear();
+      for (const it of draftItems) {
+        if (String(it.source || '').toLowerCase() === targetProv) snapshotCheckedKeys.add(getBundleItemKey(it));
+      }
       render();
       return;
     }

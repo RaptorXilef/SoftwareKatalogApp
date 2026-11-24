@@ -1,4 +1,5 @@
 import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-logic.js';
+import { getProviderBadgeInfo } from '../../shared/unified-packages.js';
 import { renderBundlesView } from '../components/bundles-view.js';
 import { showToast } from '../components/toast.js';
 import { state } from '../state.js';
@@ -93,6 +94,8 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
                 phaseBadgeHtml = '<span class="card-chip">🖱️ Phase 2: Interaktiv</span>';
               }
 
+              const entryBadge = getProviderBadgeInfo(entry.source, state.providers);
+
               return `
                 <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${entry.archiveMissing ? 'is-disabled' : ''}">
                   <input
@@ -106,7 +109,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
                   <div class="bundle-runner-info">
                     <div class="bundle-item-title">
                       <strong>${escapeHTML(entry.name)}</strong>
-                      <span class="provider-badge ${entry.source === 'archive' ? 'is-archive' : ''}">${entry.source === 'archive' ? 'Archiv' : 'Winget'}</span>
+                      <span class="provider-badge ${escapeHTML(entryBadge?.badgeClass || '')}">${escapeHTML(entryBadge?.label || entry.source)}</span>
                       ${entry.optional ? '<span class="card-chip">Optional</span>' : ''}
                       ${phaseBadgeHtml}
                     </div>
@@ -169,7 +172,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
           </label>
           <label class="check-row">
             <input type="checkbox" id="chkBundleSilentWinget" ${silentWinget ? 'checked' : ''} ${isStarting ? 'disabled' : ''}>
-            <span>⚡ Saubere Winget-Pakete still installieren (Opt-in · 🛡️ Adware-Kandidaten bleiben immer interaktiv)</span>
+            <span>⚡ Saubere Paketmanager-Pakete still installieren (Opt-in · 🛡️ Adware-Kandidaten bleiben immer interaktiv)</span>
           </label>
           <div class="bundle-save-mode-hint muted">
             Archiv-Speicherung für Nicht-Archiv-Winget-Pakete: <strong>${escapeHTML(getArchiveSaveModeLabel(saveMode))}</strong>
@@ -279,8 +282,16 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
       if (selectedEntries.length === 0 || state.isBundleInstallRunning) return;
 
       const saveMode = state.settings.archiveSaveMode || 'ask';
+      const supportsArchiveSave = (pm) => {
+        const prov = state.providers.find((p) => p.id === pm);
+        return prov ? Boolean(prov.capabilities?.supportsArchiveDownload) : pm === 'winget';
+      };
       const nonArchiveWinget = selectedEntries.filter(
-        (entry) => entry.source === 'winget' && entry.packageId && !entry.matchedPackage?.inArchive
+        (entry) =>
+          entry.source !== 'archive' &&
+          entry.packageId &&
+          !entry.matchedPackage?.inArchive &&
+          supportsArchiveSave(entry.source)
       );
       const archiveSaveSpecs = {};
 

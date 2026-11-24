@@ -18,7 +18,7 @@ import { checkArchiveTargetCollision, findExistingArchiveLink, linkPackageToArch
 import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig, getDataFolder } from './config.js';
 import { createJob } from './jobs.js';
-import { wingetProvider } from './providers/winget-provider.js';
+import { getProvider } from './providers/registry.js';
 import { downloadWebUpdate } from './web-updater.js';
 import { executeAndVerifyInstaller, scanInstalledSoftware, scanLocalVersions } from './windows-tools.js';
 
@@ -529,10 +529,23 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
         continue;
       }
 
-      // Winget-Paket
-      const existingArchiveLink = findExistingArchiveLink('winget', entry.packageId);
-      job.update(basePct, `${prefix}: Installiere über Winget...`);
-      const wgRes = await wingetProvider.install(entry.packageId, {
+      // Paketmanager-Paket (Winget, Scoop, Chocolatey, MS Store)
+      const provider = getProvider(entry.source);
+      if (!provider?.capabilities?.install || !entry.packageId) {
+        failed++;
+        results.push({
+          key: entry.key,
+          name: entry.name,
+          source: entry.source,
+          status: 'error',
+          error: `Paketquelle "${entry.source}" unterstützt keine Bündel-Installation.`,
+        });
+        continue;
+      }
+
+      const existingArchiveLink = findExistingArchiveLink(entry.source, entry.packageId);
+      job.update(basePct, `${prefix}: Installiere über ${provider.name}...`);
+      const provRes = await provider.install(entry.packageId, {
         silent: entry.willRunSilent,
         itemName: entry.name,
         signal: job.signal,
@@ -541,8 +554,8 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
 
       if (job.signal.aborted) break;
 
-      if (!wgRes?.success) {
-        if (wgRes?.canceled) {
+      if (!provRes?.success) {
+        if (provRes?.canceled) {
           skipped++;
           results.push({ key: entry.key, name: entry.name, source: entry.source, status: 'canceled' });
         } else {
@@ -552,13 +565,13 @@ export async function runBundleInstall(bundleId, selectedItemIds = null, options
             name: entry.name,
             source: entry.source,
             status: 'error',
-            error: wgRes?.error || 'Winget-Installation fehlgeschlagen',
+            error: provRes?.error || `${provider.name}-Installation fehlgeschlagen`,
           });
         }
         continue;
       }
 
-      if (!existingArchiveLink) {
+      if (!existingArchiveLink && provider.capabilities.supportsArchiveDownload) {
         const saveSpec = options.archiveSaveSpecs?.[entry.key] || null;
         const saveMode = saveSpec?.saveMode || getConfig().archiveSaveMode || 'none';
         if (saveMode !== 'none') {
