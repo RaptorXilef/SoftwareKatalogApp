@@ -10,6 +10,7 @@ import {
   renderUpdatesBatchBar,
 } from './components/cards.js';
 import { closeContextMenu, openContextMenu } from './components/context-menu.js';
+import { handleDevFolderDrop, initDevView, renderDevView } from './components/dev-projects-view.js';
 import { initDiscoverView, renderDiscoverView } from './components/discover.js';
 import { initJobsBar, rerenderJobsBar } from './components/jobs-bar.js';
 import { closeLightbox, initLightbox, isLightboxOpen, nextLightbox, prevLightbox } from './components/lightbox.js';
@@ -45,9 +46,11 @@ import {
   evaluateItemPolicy,
   getItemById,
   getItemStatus,
+  getSelectedDevProject,
   refreshAuthStatus,
   refreshBundles,
   refreshCatalogData,
+  refreshDevProjects,
   refreshIgnoredUpdates,
   refreshProviders,
   setInstalledApps,
@@ -88,6 +91,8 @@ function renderActiveView() {
     renderDiscoverView();
   } else if (state.activeTab === 'bundles') {
     renderBundlesView();
+  } else if (state.activeTab === 'dev') {
+    renderDevView();
   } else {
     renderCatalogGrid();
   }
@@ -142,12 +147,15 @@ async function reloadUI({
     refreshCatalogData(),
     refreshProviders(),
     refreshBundles(),
+    refreshDevProjects(),
     refreshIgnoredUpdates(),
     refreshAuthStatus(),
   ]);
   renderAuthHeaderControls();
   if (applyStartTab) {
-    state.activeTab = normalizeStartTab(state.settings.startTab);
+    state.activeTab = normalizeStartTab(state.settings.startTab, {
+      showDevTab: state.settings.showDevTab !== false,
+    });
   }
   if (applyStartTab || applySortDefaults) {
     applyDefaultSortModesFromSettings(state.settings);
@@ -547,13 +555,27 @@ function setupGlobalDragAndDrop() {
   const overlay = document.getElementById('dropOverlay');
   let dragDepth = 0;
 
+  const updateDropOverlayText = () => {
+    if (!overlay) return;
+    const h2 = overlay.querySelector('h2');
+    const p = overlay.querySelector('p');
+    if (state.activeTab === 'dev') {
+      if (h2) h2.textContent = t('dev.dropOverlayTitle');
+      if (p) p.textContent = t('dev.dropOverlaySubtitle');
+    } else {
+      if (h2) h2.textContent = t('dropOverlay.title');
+      if (p) p.textContent = t('dropOverlay.subtitle');
+    }
+  };
+
   document.body.addEventListener('dragenter', (e) => {
     e.preventDefault();
-    if (state.activeTab !== 'archive') return;
+    if (state.activeTab !== 'archive' && state.activeTab !== 'dev') return;
     if (!document.getElementById('modalOverlay').hidden) return;
     if (!document.getElementById('dialogOverlay')?.hidden) return;
     if (e.target instanceof Element && e.target.closest('.media-dropzone')) return;
     dragDepth++;
+    updateDropOverlayText();
     if (overlay) overlay.hidden = false;
   });
 
@@ -572,7 +594,7 @@ function setupGlobalDragAndDrop() {
     dragDepth = 0;
     if (overlay) overlay.hidden = true;
 
-    if (state.activeTab !== 'archive') return;
+    if (state.activeTab !== 'archive' && state.activeTab !== 'dev') return;
     // Drops innerhalb offener Modals werden vom jeweiligen Modal verarbeitet
     if (!document.getElementById('modalOverlay').hidden) return;
     if (!document.getElementById('dialogOverlay')?.hidden) return;
@@ -582,6 +604,11 @@ function setupGlobalDragAndDrop() {
 
     const droppedPath = window.electronAPI.getFilePath(files[0]);
     if (!droppedPath) return;
+
+    if (state.activeTab === 'dev') {
+      await handleDevFolderDrop(droppedPath);
+      return;
+    }
 
     const ok = await ensureAdminAuthenticated({
       reason: t('toasts.authReasonAddArchive'),
@@ -635,6 +662,21 @@ function setupKeyboardShortcuts() {
         discoverInput?.focus();
       } else if (state.activeTab === 'bundles') {
         document.getElementById('bundleSearchInput')?.focus();
+      } else if (state.activeTab === 'dev') {
+        if (getSelectedDevProject()) {
+          const sub = state.devWorkspace.activeSubTab;
+          const targetId =
+            sub === 'updates'
+              ? 'devUpdatesSearchInput'
+              : sub === 'installed'
+                ? 'devInstalledSearchInput'
+                : sub === 'dependencies'
+                  ? 'devDepsSearchInput'
+                  : 'devDiscoverSearchInput';
+          document.getElementById(targetId)?.focus();
+        } else {
+          document.getElementById('devProjectSearchInput')?.focus();
+        }
       } else {
         searchInput?.focus();
       }
@@ -831,6 +873,8 @@ async function bootstrap() {
     onOpenPackageDetail: (providerId, packageId, summary) => openProviderPackageModal(providerId, packageId, summary),
     onLinkToArchive: (pkg, opts) => openArchiveLinkModal(pkg, opts),
   });
+
+  initDevView();
 
   initBundlesView({
     onNewBundle: () => openBundleEditorModal(),
@@ -1076,7 +1120,9 @@ async function bootstrap() {
     if (typeof window.electronAPI?.onNavigateTab === 'function') {
       window.electronAPI.onNavigateTab((tab) => {
         closeContextMenu();
-        state.activeTab = normalizeStartTab(tab);
+        state.activeTab = normalizeStartTab(tab, {
+          showDevTab: state.settings.showDevTab !== false,
+        });
         renderActiveView();
       });
     }

@@ -61,6 +61,32 @@ export const state = {
   isBatchActionRunning: false,
   isBundleInstallRunning: false,
   bundlesIpcUnavailable: false,
+  devProjects: [],
+  devProjectsIpcUnavailable: false,
+  devSelectedProjectId: null,
+  devProjectSearchQuery: '',
+  devScanByProjectId: {},
+  devScanningProjectIds: new Set(),
+  devScanningAll: false,
+  devBusyActionKeys: new Set(),
+  devWorkspace: {
+    activeSubTab: 'updates',
+    managerFilter: 'all',
+    updatesQuery: '',
+    selectedUpdateKeys: new Set(),
+    installedScopeFilter: 'all',
+    installedQuery: '',
+    depsDirectFilter: 'all',
+    depsQuery: '',
+    depsRenderLimit: 150,
+    discoverManager: '',
+    discoverQuery: '',
+    discoverIsDev: false,
+    discoverResults: [],
+    discoverLoading: false,
+    discoverHasSearched: false,
+    discoverError: '',
+  },
   adminSession: {
     mode: 'off',
     isProcessElevated: false,
@@ -243,14 +269,80 @@ export function getVisibleBundles() {
 }
 
 export function getTabCounts() {
-  return computeTabCounts(getVisibleTabPackages(), {
-    visibleHiddenCats: state.settings.visibleHiddenCats || [],
-    versionCompareDepth: state.settings.versionCompareDepth ?? 3,
-    bundlesCount: getVisibleBundles().length,
-    ignoredUpdates: state.ignoredUpdates,
-    accessPolicy: getAccessPolicy(),
-    isAdmin: isAdminAuthenticated(),
-  });
+  return {
+    ...computeTabCounts(getVisibleTabPackages(), {
+      visibleHiddenCats: state.settings.visibleHiddenCats || [],
+      versionCompareDepth: state.settings.versionCompareDepth ?? 3,
+      bundlesCount: getVisibleBundles().length,
+      ignoredUpdates: state.ignoredUpdates,
+      accessPolicy: getAccessPolicy(),
+      isAdmin: isAdminAuthenticated(),
+    }),
+    dev: Array.isArray(state.devProjects) ? state.devProjects.length : 0,
+  };
+}
+
+export function isDevTabEnabled() {
+  return state.settings.showDevTab !== false;
+}
+
+export function getSelectedDevProject() {
+  if (!state.devSelectedProjectId) return null;
+  return state.devProjects.find((p) => p.id === state.devSelectedProjectId) || null;
+}
+
+export function getTotalDevPendingUpdates() {
+  let total = 0;
+  for (const proj of state.devProjects || []) {
+    const scan = state.devScanByProjectId?.[proj.id];
+    if (Array.isArray(scan?.updates)) {
+      total += scan.updates.length;
+    }
+  }
+  return total;
+}
+
+export function setDevScanResult(projectId, scanRes, { checkedUpdates = true } = {}) {
+  const cleanId = String(projectId || '').trim();
+  if (!cleanId || !scanRes || typeof scanRes !== 'object') return;
+  const prev = state.devScanByProjectId[cleanId];
+  const preservedUpdates =
+    !checkedUpdates && Array.isArray(prev?.updates) && prev.hasCheckedUpdates ? prev.updates : scanRes.updates || [];
+
+  state.devScanByProjectId[cleanId] = {
+    ...scanRes,
+    updates: preservedUpdates,
+    hasCheckedUpdates: Boolean(checkedUpdates || prev?.hasCheckedUpdates),
+  };
+
+  if (scanRes.project && typeof scanRes.project === 'object') {
+    const idx = state.devProjects.findIndex((p) => p.id === cleanId);
+    if (idx !== -1) {
+      state.devProjects[idx] = { ...state.devProjects[idx], ...scanRes.project };
+    }
+  }
+}
+
+export function resetDevWorkspaceForProject(projectId) {
+  state.devSelectedProjectId = projectId || null;
+  state.devWorkspace = {
+    activeSubTab: 'updates',
+    managerFilter: 'all',
+    updatesQuery: '',
+    selectedUpdateKeys: new Set(),
+    installedScopeFilter: 'all',
+    installedQuery: '',
+    depsDirectFilter: 'all',
+    depsQuery: '',
+    depsRenderLimit: 150,
+    discoverManager: '',
+    discoverQuery: '',
+    discoverIsDev: false,
+    discoverResults: [],
+    discoverLoading: false,
+    discoverHasSearched: false,
+    discoverError: '',
+  };
 }
 
 export function getActiveSortMode() {
@@ -465,5 +557,48 @@ export async function refreshIgnoredUpdates() {
   } catch (err) {
     console.error('Fehler beim Laden der Ignorierliste:', err);
     state.ignoredUpdates = [];
+  }
+}
+
+export async function refreshDevProjects() {
+  if (typeof window.electronAPI?.listDevProjects !== 'function') {
+    state.devProjectsIpcUnavailable = true;
+    state.devProjects = [];
+    return;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await window.electronAPI.listDevProjects();
+      state.devProjectsIpcUnavailable = false;
+      if (res?.success === false && res.error) {
+        console.error('Fehler beim Laden der DEV-Projekte:', res.error);
+      }
+      state.devProjects = Array.isArray(res?.projects) ? res.projects : [];
+      const activeIds = new Set(state.devProjects.map((p) => p.id));
+      for (const cachedId of Object.keys(state.devScanByProjectId)) {
+        if (!activeIds.has(cachedId)) {
+          delete state.devScanByProjectId[cachedId];
+        }
+      }
+      if (state.devSelectedProjectId && !activeIds.has(state.devSelectedProjectId)) {
+        state.devSelectedProjectId = null;
+      }
+      return;
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (/No handler registered/i.test(msg)) {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+        state.devProjectsIpcUnavailable = true;
+      } else {
+        state.devProjectsIpcUnavailable = false;
+        console.error('Fehler beim Laden der DEV-Projekte:', err);
+      }
+      state.devProjects = [];
+      return;
+    }
   }
 }

@@ -90,6 +90,10 @@
     <button type="button" class="nav-tab" role="tab" data-main-tab="discover" aria-selected="false">
       <span class="nav-tab-label">🛍️ <span data-i18n="tabs.discover">Install New</span></span>
     </button>
+    <button type="button" class="nav-tab" id="navTabDev" role="tab" data-main-tab="dev" aria-selected="false">
+      <span class="nav-tab-label">🛠️ <span data-i18n="tabs.dev">Dev</span></span>
+      <span class="nav-count" id="navCountDev">0</span>
+    </button>
   </div>
 
   <section class="toolbar" id="mainToolbar">
@@ -201,6 +205,9 @@
     <div id="discoverNotice" class="discover-notice" hidden></div>
     <div id="discoverResults" class="discover-results"></div>
   </section>
+
+  <!-- DEV-Projekte & Arbeitsbereich -->
+  <section class="dev-view" id="devView" hidden></section>
 
   <!-- Modal Container -->
   <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" hidden>

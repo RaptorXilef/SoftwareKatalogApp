@@ -98,6 +98,7 @@ function normalizeVisibleHiddenCats(raw) {
  * @param {Record<string, any> | null | undefined} [rawSettings]
  * @returns {{
  *   language: string,
+ *   showDevTab: boolean,
  *   startTab: string,
  *   newBadgeDays: number,
  *   versionCompareDepth: number,
@@ -138,10 +139,12 @@ export function createSettingsDraft(rawSettings = {}) {
         ? src.vcpkgRoot
         : '';
   const bg = normalizeBackgroundSettings(src);
+  const showDevTab = src.showDevTab !== false;
 
   return {
     language: normalizeConfiguredLanguage(src.language),
-    startTab: normalizeStartTab(src.startTab),
+    showDevTab,
+    startTab: normalizeStartTab(src.startTab, { showDevTab }),
     defaultSortModes: normalizeDefaultSortModes(src.defaultSortModes),
     newBadgeDays: normalizeBoundedInt(src.newBadgeDays, 0, 365, 14),
     versionCompareDepth: normalizeBoundedInt(src.versionCompareDepth, 1, 10, 3),
@@ -216,6 +219,7 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   const current = createSettingsDraft(currentDraft);
 
   if (initial.language !== current.language) return true;
+  if (initial.showDevTab !== current.showDevTab) return true;
   if (initial.startTab !== current.startTab) return true;
   if (initial.newBadgeDays !== current.newBadgeDays) return true;
   if (initial.versionCompareDepth !== current.versionCompareDepth) return true;
@@ -282,6 +286,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     autoExtensions: current.autoExtensions,
     newBadgeDays: current.newBadgeDays,
     versionCompareDepth: current.versionCompareDepth,
+    showDevTab: current.showDevTab,
     startTab: current.startTab,
     defaultSortModes: current.defaultSortModes,
     autoSaveDownloads: current.autoSaveDownloads,

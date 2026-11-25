@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = {
   autoExtensions: ['.exe', '.msi', '.zip'],
   newBadgeDays: 14,
   versionCompareDepth: 3,
+  showDevTab: true,
   startTab: 'updates',
   defaultSortModes: { ...DEFAULT_SORT_MODES },
   // Komfortable Download- & Benennungs-Defaults
@@ -272,7 +273,8 @@ export function getConfig() {
 
   const validSaveModes = new Set(['ask', 'auto-id', 'none']);
   const archiveSaveMode = validSaveModes.has(config.archiveSaveMode) ? config.archiveSaveMode : 'ask';
-  const startTab = normalizeStartTab(config.startTab);
+  const showDevTab = config.showDevTab !== false;
+  const startTab = normalizeStartTab(config.startTab, { showDevTab });
   const language = normalizeConfiguredLanguage(config.language);
   const defaultSortModes = normalizeDefaultSortModes(config.defaultSortModes);
   const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
@@ -302,6 +304,7 @@ export function getConfig() {
     archivePaths,
     targetPath,
     archiveSaveMode,
+    showDevTab,
     startTab,
     language,
     defaultSortModes,
@@ -318,6 +321,8 @@ export function saveConfig(newSettings) {
   const merged = { ...current, ...newSettings };
   Object.assign(merged, normalizeBackgroundSettings(merged));
   merged.language = normalizeConfiguredLanguage(merged.language);
+  merged.showDevTab = merged.showDevTab !== false;
+  merged.startTab = normalizeStartTab(merged.startTab, { showDevTab: merged.showDevTab });
   merged.defaultSortModes = normalizeDefaultSortModes(merged.defaultSortModes);
 
   if (newSettings?.enabledProviders !== undefined) {

@@ -536,6 +536,11 @@
     color: #fab387;
   }
 
+  &.is-yarn {
+    background: color-mix(in srgb, #2c8ebb 22%, transparent);
+    color: #89dceb;
+  }
+
   &.is-composer {
     background: color-mix(in srgb, #885630 24%, transparent);
     color: #f2cdcd;

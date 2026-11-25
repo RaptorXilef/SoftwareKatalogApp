@@ -27,6 +27,7 @@ export const PROVIDER_DISPLAY_META = Object.freeze({
   bun: { id: 'bun', label: 'Bun', badgeClass: 'is-bun' },
   nvm: { id: 'nvm', label: 'NVM', badgeClass: 'is-nvm' },
   pnpm: { id: 'pnpm', label: 'pnpm', badgeClass: 'is-pnpm' },
+  yarn: { id: 'yarn', label: 'Yarn', badgeClass: 'is-yarn' },
   composer: { id: 'composer', label: 'Composer', badgeClass: 'is-composer' },
   pip: { id: 'pip', label: 'pip', badgeClass: 'is-pip' },
   uv: { id: 'uv', label: 'uv tool', badgeClass: 'is-uv' },
@@ -637,7 +638,7 @@ export function canDownloadOnline(item) {
   return Boolean(item.downloadUrl);
 }
 
-const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover']);
+const VALID_START_TABS = Object.freeze(['updates', 'installed', 'archive', 'bundles', 'discover', 'dev']);
 export const DEFAULT_START_TAB = 'updates';
 
 const VALID_COMMON_SORT_MODES = new Set(['az', 'updates', 'webarchive', 'update']);
@@ -651,11 +652,16 @@ export const DEFAULT_SORT_MODES = Object.freeze({
 
 /**
  * Normalisiert den konfigurierten Start-Tab auf einen gültigen Tab-Namen (Fallback: 'updates').
+ * @param {unknown} tab
+ * @param {{ showDevTab?: boolean }} [options]
  */
-export function normalizeStartTab(tab) {
+export function normalizeStartTab(tab, { showDevTab = true } = {}) {
   const clean = String(tab || '')
     .trim()
     .toLowerCase();
+  if (!showDevTab && clean === 'dev') {
+    return DEFAULT_START_TAB;
+  }
   return VALID_START_TABS.includes(clean) ? clean : DEFAULT_START_TAB;
 }
 

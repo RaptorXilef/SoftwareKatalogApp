@@ -1380,6 +1380,7 @@ export async function renderSettingsModal(initialTab = 'general') {
                 <option value="archive" ${draftSettings.startTab === 'archive' ? 'selected' : ''}>🗄️ ${escapeHTML(t('tabs.archive'))}</option>
                 <option value="bundles" ${draftSettings.startTab === 'bundles' ? 'selected' : ''}>📦 ${escapeHTML(t('tabs.bundles'))}</option>
                 <option value="discover" ${draftSettings.startTab === 'discover' ? 'selected' : ''}>🛍️ ${escapeHTML(t('tabs.discover'))}</option>
+                <option value="dev" ${draftSettings.startTab === 'dev' ? 'selected' : ''} ${draftSettings.showDevTab ? '' : 'hidden'}>🛠️ ${escapeHTML(t('tabs.dev'))}</option>
               </select>
             </label>
             <label class="form-field">
@@ -1421,6 +1422,10 @@ export async function renderSettingsModal(initialTab = 'general') {
               </select>
             </label>
           </div>
+          <label class="check-row">
+            <input type="checkbox" id="cfgShowDevTab" ${draftSettings.showDevTab ? 'checked' : ''}>
+            <span>🛠️ ${escapeHTML(t('settings.general.showDevTabLabel'))}</span>
+          </label>
           <p class="panel-hint">
             ${escapeHTML(t('settings.general.languageHintPrefix'))}<code>fr.json</code>${escapeHTML(t('settings.general.languageHintSuffix'))}
             <code>${escapeHTML(userLocalesDir)}</code>
@@ -1700,10 +1705,20 @@ export async function renderSettingsModal(initialTab = 'general') {
     const parsedBgInterval = Number.parseInt(rawBgInterval, 10);
     const rawAutoExt = getInputEl(modal, '#cfgAutoExt')?.value ?? '';
     const vcpkgInput = getInputEl(modal, '#cfgVcpkgRoot');
+    const showDevTab = getInputEl(modal, '#cfgShowDevTab')?.checked !== false;
+    const startTabSel = getSelectEl(modal, '#cfgStartTab');
+    const devStartOpt = startTabSel?.querySelector('option[value="dev"]');
+    if (devStartOpt instanceof HTMLOptionElement) {
+      devStartOpt.hidden = !showDevTab;
+    }
+    if (!showDevTab && startTabSel?.value === 'dev') {
+      startTabSel.value = 'updates';
+    }
 
     draftSettings = createSettingsDraft({
       language: getSelectEl(modal, '#cfgLanguage')?.value || draftSettings.language,
-      startTab: getSelectEl(modal, '#cfgStartTab')?.value || draftSettings.startTab,
+      showDevTab,
+      startTab: startTabSel?.value || draftSettings.startTab,
       defaultSortModes: {
         updates: getSelectEl(modal, '#cfgDefaultSortUpdates')?.value || draftSettings.defaultSortModes.updates,
         installed: getSelectEl(modal, '#cfgDefaultSortInstalled')?.value || draftSettings.defaultSortModes.installed,

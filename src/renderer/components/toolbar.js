@@ -2,7 +2,9 @@ import {
   getActiveOriginFilter,
   getActiveSortMode,
   getTabCounts,
+  getTotalDevPendingUpdates,
   getUsableProviders,
+  isDevTabEnabled,
   isItemVisibleForTab,
   setActiveOriginFilter,
   setActiveSortMode,
@@ -113,6 +115,7 @@ export function updateNavCounts() {
   const installedEl = document.getElementById('navCountInstalled');
   const archiveEl = document.getElementById('navCountArchive');
   const bundlesEl = document.getElementById('navCountBundles');
+  const devEl = document.getElementById('navCountDev');
 
   if (updatesEl) {
     updatesEl.textContent = String(counts.updates);
@@ -121,6 +124,10 @@ export function updateNavCounts() {
   if (installedEl) installedEl.textContent = String(counts.installed);
   if (archiveEl) archiveEl.textContent = String(counts.archive);
   if (bundlesEl) bundlesEl.textContent = String(counts.bundles);
+  if (devEl) {
+    devEl.textContent = String(counts.dev ?? 0);
+    devEl.classList.toggle('has-updates', getTotalDevPendingUpdates() > 0);
+  }
 }
 
 function renderOriginFilterBar() {
@@ -150,8 +157,15 @@ function renderOriginFilterBar() {
 }
 
 export function syncToolbarForTab() {
+  const devEnabled = isDevTabEnabled();
+  if (!devEnabled && state.activeTab === 'dev') {
+    state.activeTab = 'updates';
+  }
   const tab = state.activeTab;
   const isCatalogView = tab === 'updates' || tab === 'installed' || tab === 'archive';
+
+  const navTabDev = document.getElementById('navTabDev');
+  if (navTabDev) navTabDev.hidden = !devEnabled;
 
   qsa(document, '#mainNav .nav-tab').forEach((btn) => {
     const isActive = btn.dataset.mainTab === tab;
@@ -192,9 +206,11 @@ export function syncToolbarForTab() {
   const grid = document.getElementById('grid');
   const bundlesView = document.getElementById('bundlesView');
   const discoverView = document.getElementById('discoverView');
+  const devView = document.getElementById('devView');
   if (grid) grid.hidden = !isCatalogView;
   if (bundlesView) bundlesView.hidden = tab !== 'bundles';
   if (discoverView) discoverView.hidden = tab !== 'discover';
+  if (devView) devView.hidden = tab !== 'dev';
 }
 
 export function renderTagChips() {

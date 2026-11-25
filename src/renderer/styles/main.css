@@ -5,6 +5,7 @@
 @import "./jobs.css" layer(components);
 @import "./cards.css" layer(components);
 @import "./views.css" layer(components);
+@import "./dev.css" layer(components);
 @import "./modals.css" layer(modals);
 
 /* Ungelayert: überschreibt alle Layer-Regeln (z. B. display: flex) ohne !important */
