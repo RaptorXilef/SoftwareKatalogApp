@@ -4,7 +4,7 @@
   "description": "Ein portabler Software-Katalog für das NAS",
   "main": "./out/main/index.js",
   "author": "Felix Maywald / RaptorXilef",
-  "license": "CC-BY-SA-4.0",
+  "license": "SEE LICENSE IN LICENSE.md",
   "homepage": "https://github.com/RaptorXilef/SoftwareKatalogApp#readme",
   "repository": {
     "type": "git",
