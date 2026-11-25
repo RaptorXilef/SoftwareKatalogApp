@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.31.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.30.0...v1.31.0) (2026-11-25)
+
+### 🚀 Features
+
+* **dev,detail,icons:** add DEV dependency views & SemVer tiers, fix version selection & taskbar icon, persist icon cache ([989548a](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/989548aa60843cfd45462fae376249177e3cba7d))
+
 ## [1.30.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.29.0...v1.30.0) (2026-11-25)
 
 ### 🚀 Features
