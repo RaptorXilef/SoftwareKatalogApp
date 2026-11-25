@@ -65,13 +65,26 @@ import {
 } from './config.js';
 import {
   configureDevActions,
+  devAuditFixProject,
+  devAuditProject,
   devInstallPackage,
+  devInstallPackagesBatch,
   devSearchPackages,
   devSyncProject,
   devToggleScope,
   devUninstallPackage,
   devUpdatePackage,
 } from './dev-projects/dev-actions.js';
+import {
+  configureDevBundlesService,
+  deleteDevBundle,
+  duplicateDevBundle,
+  exportDevBundle,
+  importDevBundle,
+  installDevBundleInProject,
+  loadDevBundles,
+  saveDevBundle,
+} from './dev-projects/dev-bundles-service.js';
 import { configureDevCli } from './dev-projects/dev-cli.js';
 import {
   addDevProject,
@@ -346,6 +359,21 @@ function registerDevProjectsIpcHandlers() {
   handleIpc('dev-projects-sync', (_e, projectId, manager, opts) => devSyncProject(projectId, manager, opts || {}));
   handleIpc('dev-projects-search-packages', (_e, manager, query, opts) =>
     devSearchPackages(manager, query, opts || {})
+  );
+  handleIpc('dev-projects-audit', (_e, projectId, opts) => devAuditProject(projectId, opts || {}));
+  handleIpc('dev-projects-audit-fix', (_e, projectId, payload, opts) =>
+    devAuditFixProject(projectId, payload || {}, opts || {})
+  );
+
+  // Dev-Buendel (zentral in data/dev-bundles.json)
+  handleIpc('dev-bundles-load', () => loadDevBundles());
+  handleIpc('dev-bundles-save', (_e, bundle) => saveDevBundle(bundle));
+  handleIpc('dev-bundles-delete', (_e, bundleId) => deleteDevBundle(bundleId));
+  handleIpc('dev-bundles-duplicate', (_e, bundleId) => duplicateDevBundle(bundleId));
+  handleIpc('dev-bundles-export', (_e, bundleId) => exportDevBundle(bundleId));
+  handleIpc('dev-bundles-import', () => importDevBundle());
+  handleIpc('dev-bundles-install', (_e, projectId, bundleId, selectedPackageNames, opts) =>
+    installDevBundleInProject(projectId, bundleId, selectedPackageNames, opts || {})
   );
 }
 
@@ -711,6 +739,15 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       }
       return provider.search(query, opts);
     },
+  });
+  configureDevBundlesService({
+    getDataFolderFn: getDataFolder,
+    getProjectFn: getDevProject,
+    scanProjectFn: scanDevProject,
+    installPackagesBatchFn: devInstallPackagesBatch,
+    createJobFn: createJob,
+    showSaveDialogFn: (opts) => dialog.showSaveDialog(opts),
+    showOpenDialogFn: (opts) => dialog.showOpenDialog(opts),
   });
 
   configureI18nService({

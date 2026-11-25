@@ -66,6 +66,12 @@ export const PROTECTED_ADMIN_IPC_CHANNELS = new Set([
   'dev-projects-uninstall-package',
   'dev-projects-toggle-scope',
   'dev-projects-sync',
+  'dev-projects-audit-fix',
+  'dev-bundles-save',
+  'dev-bundles-delete',
+  'dev-bundles-duplicate',
+  'dev-bundles-import',
+  'dev-bundles-install',
 ]);
 
 Object.freeze(PROTECTED_ADMIN_IPC_CHANNELS);

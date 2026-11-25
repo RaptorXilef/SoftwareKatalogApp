@@ -1,4 +1,10 @@
 import {
+  AUDIT_SUPPORTED_MANAGERS,
+  buildDevBundleDraftFromProject,
+  evaluateDevBundleForProject,
+  filterDevBundlesForProject,
+} from '../../shared/dev-bundles-logic.js';
+import {
   buildDevUpdateKey,
   filterDevDependencies,
   filterDevInstalled,
@@ -9,8 +15,9 @@ import {
   isCompatibleDevUpdate,
   shortenProjectPath,
 } from '../../shared/dev-ui-logic.js';
+import { openDevAuditModal, openDevBundleEditorModal, openDevBundleRunnerModal } from '../modals/index.js';
 import { ensureAdminAuthenticated } from '../modals/login-modal.js';
-import { getSelectedDevProject, setDevScanResult, state } from '../state.js';
+import { getSelectedDevProject, refreshDevBundles, setDevScanResult, state } from '../state.js';
 import { t } from '../utils/i18n.js';
 import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
@@ -510,19 +517,181 @@ function renderDependenciesTabHtml(scan) {
   `;
 }
 
-function renderBundlesPlaceholderTabHtml() {
+function renderBundlesListHtml(project, scan) {
+  const ws = state.devWorkspace;
+  const detectedManagers = Array.isArray(scan?.managers) ? scan.managers : [];
+  const allBundles = Array.isArray(state.devBundles) ? state.devBundles : [];
+  const filtered = filterDevBundlesForProject(allBundles, {
+    detectedManagers,
+    showAllManagers: Boolean(ws.bundlesShowAllManagers),
+    query: ws.bundlesQuery,
+  });
+
+  if (allBundles.length === 0) {
+    return `
+      <div class="dev-empty">
+        <div class="dev-empty-icon">🧺</div>
+        <h3>${escapeHTML(t('dev.bundles.emptyTitle'))}</h3>
+        <p class="muted">${escapeHTML(t('dev.bundles.emptyDesc'))}</p>
+      </div>
+    `;
+  }
+
+  if (filtered.length === 0) {
+    return `
+      <div class="dev-empty">
+        <h3>${escapeHTML(t('dev.bundles.noMatchesTitle'))}</h3>
+        <p class="muted">${escapeHTML(t('dev.bundles.noMatchesDesc'))}</p>
+      </div>
+    `;
+  }
+
+  const projectBusy =
+    isProjectActionBusy(project.id) || project.isAvailable === false || state.isDevBundleInstallRunning;
+
+  const cardsHtml = filtered
+    .map((bundle) => {
+      const mgrMeta = getDevManagerMeta(bundle.manager);
+      const evaluation = evaluateDevBundleForProject(bundle, scan, { t });
+      const { packages, summary } = evaluation;
+      const pct = summary.total > 0 ? Math.round((summary.presentCount / summary.total) * 100) : 0;
+
+      const previewPkgs = packages.slice(0, 6);
+      const remainingCount = Math.max(0, packages.length - previewPkgs.length);
+      const previewHtml = previewPkgs
+        .map((pkg) => {
+          const icon = pkg.status === 'installed' ? '✅' : pkg.status === 'outdated' ? '⬆️' : '⬇️';
+          const scopeTag = pkg.isDev ? t('dev.workspace.scopeBadgeDev') : t('dev.workspace.scopeBadgeProd');
+          return `<span class="bundle-preview-chip" title="${escapeHTML(pkg.statusLabel)}">${icon} ${escapeHTML(pkg.name)} <span class="dev-bundle-pkg-scope">${escapeHTML(scopeTag)}</span></span>`;
+        })
+        .join('');
+
+      return `
+        <article class="bundle-card dev-bundle-card" data-dev-bundle-id="${escapeHTML(bundle.id)}">
+          <div class="bundle-card-head">
+            <div class="bundle-card-title-row">
+              <span class="bundle-card-icon">${escapeHTML(bundle.icon || '🧺')}</span>
+              <div class="bundle-card-title-text">
+                <h3>${escapeHTML(bundle.name)}</h3>
+                <span class="bundle-card-counts">
+                  <span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>
+                  <span>${escapeHTML(t('bundles.packageCount', { count: summary.total }))}</span>
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs"
+              data-dev-ws-action="bundle-export"
+              data-dev-bundle-id="${escapeHTML(bundle.id)}"
+              title="${escapeHTML(t('dev.bundles.exportTitle'))}"
+            >📤 ${escapeHTML(t('common.export'))}</button>
+          </div>
+
+          ${bundle.description ? `<p class="bundle-card-desc">${escapeHTML(bundle.description)}</p>` : ''}
+
+          <div class="bundle-progress-block">
+            <div class="bundle-progress-labels">
+              <strong>${escapeHTML(summary.statusText)}</strong>
+              <span class="muted">${pct}%</span>
+            </div>
+            <div class="bundle-progress-track">
+              <div class="bundle-progress-fill" style="width: ${pct}%"></div>
+            </div>
+            <div class="bundle-status-pills">
+              ${summary.installedCount > 0 ? `<span class="bundle-pill is-ok">✅ ${escapeHTML(t('dev.bundles.pillInstalled', { count: summary.installedCount }))}</span>` : ''}
+              ${summary.outdatedCount > 0 ? `<span class="bundle-pill is-outdated">⬆️ ${escapeHTML(t('dev.bundles.pillOutdated', { count: summary.outdatedCount }))}</span>` : ''}
+              ${summary.missingCount > 0 ? `<span class="bundle-pill is-missing">⬇️ ${escapeHTML(t('dev.bundles.pillMissing', { count: summary.missingCount }))}</span>` : ''}
+            </div>
+          </div>
+
+          <div class="bundle-preview-list">
+            ${previewHtml}
+            ${remainingCount > 0 ? `<span class="bundle-preview-more">${escapeHTML(t('bundles.moreItems', { count: remainingCount }))}</span>` : ''}
+          </div>
+
+          <div class="bundle-card-actions">
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-dev-ws-action="bundle-install"
+              data-dev-bundle-id="${escapeHTML(bundle.id)}"
+              ${summary.total === 0 || projectBusy ? 'disabled' : ''}
+            >🚀 ${escapeHTML(t('dev.bundles.btnInstallInProject'))}</button>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-dev-ws-action="bundle-edit"
+              data-dev-bundle-id="${escapeHTML(bundle.id)}"
+            >✏️ ${escapeHTML(t('common.edit'))}</button>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              data-dev-ws-action="bundle-duplicate"
+              data-dev-bundle-id="${escapeHTML(bundle.id)}"
+            >📋 ${escapeHTML(t('bundles.duplicate'))}</button>
+            <button
+              type="button"
+              class="btn btn-danger"
+              data-dev-ws-action="bundle-delete"
+              data-dev-bundle-id="${escapeHTML(bundle.id)}"
+            >🗑️ ${escapeHTML(t('common.delete'))}</button>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  return `<div class="bundles-grid">${cardsHtml}</div>`;
+}
+
+function renderBundlesTabHtml(project, scan) {
+  const ws = state.devWorkspace;
+  const detectedManagers = Array.isArray(scan?.managers) ? scan.managers : [];
+  const allBundles = Array.isArray(state.devBundles) ? state.devBundles : [];
+  const filtered = filterDevBundlesForProject(allBundles, {
+    detectedManagers,
+    showAllManagers: Boolean(ws.bundlesShowAllManagers),
+    query: ws.bundlesQuery,
+  });
+  const hasSnapshotPkgs = Array.isArray(scan?.installed) && scan.installed.length > 0;
+  const ipcNoticeHtml = state.devBundlesIpcUnavailable
+    ? `<div class="discover-notice">⚠️ ${escapeHTML(t('dev.bundles.ipcUnavailableNotice'))}</div>`
+    : '';
+
   return `
-    <div class="dev-bundles-placeholder">
-      <div class="dev-empty-icon">🧺</div>
-      <span class="dev-soon-badge">${escapeHTML(t('dev.workspace.bundlesBadgeSoon'))}</span>
-      <h3>${escapeHTML(t('dev.workspace.bundlesTitle'))}</h3>
-      <p class="muted">${escapeHTML(t('dev.workspace.bundlesDesc'))}</p>
-      <div class="dev-bundles-preview-chips">
-        <span class="card-chip">📋 ${escapeHTML(t('dev.workspace.bundlesFeatureTemplates'))}</span>
-        <span class="card-chip">📸 ${escapeHTML(t('dev.workspace.bundlesFeatureSnapshot'))}</span>
-        <span class="card-chip">🚀 ${escapeHTML(t('dev.workspace.bundlesFeatureInstall'))}</span>
+    <div class="dev-bundles-toolbar">
+      <div class="dev-bundles-actions">
+        <button type="button" class="btn btn-primary" data-dev-ws-action="bundle-new">➕ ${escapeHTML(t('dev.bundles.btnNew'))}</button>
+        <button
+          type="button"
+          class="btn btn-local"
+          data-dev-ws-action="bundle-snapshot"
+          ${hasSnapshotPkgs ? '' : 'disabled'}
+          title="${escapeHTML(hasSnapshotPkgs ? t('dev.bundles.btnSnapshotTitle') : t('dev.bundles.btnSnapshotDisabledTitle'))}"
+        >📸 ${escapeHTML(t('dev.bundles.btnSnapshot'))}</button>
+        <button type="button" class="btn btn-ghost" data-dev-ws-action="bundle-import">📥 ${escapeHTML(t('dev.bundles.btnImport'))}</button>
+      </div>
+      <div class="dev-ws-controls">
+        <div class="dev-search-box">
+          <input
+            type="text"
+            id="devBundlesSearchInput"
+            value="${escapeHTML(ws.bundlesQuery)}"
+            placeholder="${escapeHTML(t('dev.bundles.searchPlaceholder'))}"
+            autocomplete="off"
+          >
+          <button type="button" id="clearDevBundlesSearchBtn" class="clear-btn" title="${escapeHTML(t('toolbar.clearSearch'))}" ${ws.bundlesQuery ? '' : 'hidden'}>✕</button>
+        </div>
+        <label class="dev-bundles-toggle">
+          <input type="checkbox" id="chkDevBundlesAllManagers" ${ws.bundlesShowAllManagers ? 'checked' : ''}>
+          <span>${escapeHTML(t('dev.bundles.showAllManagers'))}</span>
+        </label>
+        <span id="devBundlesCountEl" class="muted">${escapeHTML(t('dev.bundles.countSummary', { shown: filtered.length, total: allBundles.length }))}</span>
       </div>
     </div>
+    ${ipcNoticeHtml}
+    <div id="devWsListHost">${renderBundlesListHtml(project, scan)}</div>
   `;
 }
 
@@ -687,6 +856,14 @@ export function renderDevWorkspace(container, project) {
   const updatesCount = Array.isArray(scan?.updates) ? scan.updates.length : 0;
   const installedCount = Array.isArray(scan?.installed) ? scan.installed.length : 0;
   const depsCount = Array.isArray(scan?.dependencies) ? scan.dependencies.length : 0;
+  const matchingBundlesCount = filterDevBundlesForProject(state.devBundles || [], {
+    detectedManagers: managers,
+    showAllManagers: Boolean(ws.bundlesShowAllManagers),
+    query: '',
+  }).length;
+  const projectBusy = isProjectActionBusy(project.id) || project.isAvailable === false;
+  const isSyncBusy = state.devBusyActionKeys.has(`${project.id}:sync`);
+  const auditManagers = managers.filter((m) => AUDIT_SUPPORTED_MANAGERS.includes(String(m || '').toLowerCase()));
 
   let managerBarHtml = '';
   if (managers.length > 1) {
@@ -724,7 +901,7 @@ export function renderDevWorkspace(container, project) {
     },
     { id: 'installed', icon: '📦', label: t('dev.workspace.tabInstalled'), count: installedCount, highlight: false },
     { id: 'dependencies', icon: '🌳', label: t('dev.workspace.tabDependencies'), count: depsCount, highlight: false },
-    { id: 'bundles', icon: '🧺', label: t('dev.workspace.tabBundles'), count: null, highlight: false },
+    { id: 'bundles', icon: '🧺', label: t('dev.workspace.tabBundles'), count: matchingBundlesCount, highlight: false },
     { id: 'discover', icon: '🛍️', label: t('dev.workspace.tabDiscover'), count: null, highlight: false },
   ];
 
@@ -732,7 +909,7 @@ export function renderDevWorkspace(container, project) {
   if (ws.activeSubTab === 'updates') activeBodyHtml = renderUpdatesTabHtml(project, scan);
   else if (ws.activeSubTab === 'installed') activeBodyHtml = renderInstalledTabHtml(project, scan);
   else if (ws.activeSubTab === 'dependencies') activeBodyHtml = renderDependenciesTabHtml(scan);
-  else if (ws.activeSubTab === 'bundles') activeBodyHtml = renderBundlesPlaceholderTabHtml();
+  else if (ws.activeSubTab === 'bundles') activeBodyHtml = renderBundlesTabHtml(project, scan);
   else activeBodyHtml = renderDiscoverTabHtml(project, scan);
 
   container.innerHTML = `
@@ -755,6 +932,20 @@ export function renderDevWorkspace(container, project) {
             data-dev-ws-action="scan-project"
             ${project.isAvailable === false || isScanning ? 'disabled' : ''}
           >🔄 ${escapeHTML(isScanning ? t('dev.workspace.checkingUpdates') : t('dev.workspace.checkUpdates'))}</button>
+          <button
+            type="button"
+            class="btn btn-local"
+            data-dev-ws-action="sync-project"
+            title="${escapeHTML(managers.length === 0 ? t('dev.workspace.syncNoManagerTitle') : t('dev.workspace.syncTitle'))}"
+            ${projectBusy || managers.length === 0 ? 'disabled' : ''}
+          >${isSyncBusy ? '⏳' : '🔄'} ${escapeHTML(isSyncBusy ? t('dev.workspace.syncingBtn') : t('dev.workspace.syncBtn'))}</button>
+          <button
+            type="button"
+            class="btn btn-ghost"
+            data-dev-ws-action="audit-project"
+            title="${escapeHTML(auditManagers.length === 0 ? t('dev.audit.unsupportedDesc') : t('dev.workspace.auditTitle'))}"
+            ${project.isAvailable === false || auditManagers.length === 0 ? 'disabled' : ''}
+          >🛡️ ${escapeHTML(t('dev.workspace.auditBtn'))}</button>
           <button
             type="button"
             class="btn btn-ghost"
@@ -983,6 +1174,21 @@ export function handleDevWorkspaceInput(e) {
     ws.discoverQuery = target.value;
     const clr = document.getElementById('clearDevDiscoverSearchBtn');
     if (clr) clr.hidden = ws.discoverQuery.length === 0;
+  } else if (target.id === 'devBundlesSearchInput') {
+    ws.bundlesQuery = target.value;
+    const clr = document.getElementById('clearDevBundlesSearchBtn');
+    if (clr) clr.hidden = ws.bundlesQuery.length === 0;
+    if (listHost) listHost.innerHTML = renderBundlesListHtml(project, scan);
+    const countEl = document.getElementById('devBundlesCountEl');
+    if (countEl) {
+      const allBundles = Array.isArray(state.devBundles) ? state.devBundles : [];
+      const filtered = filterDevBundlesForProject(allBundles, {
+        detectedManagers: Array.isArray(scan?.managers) ? scan.managers : [],
+        showAllManagers: Boolean(ws.bundlesShowAllManagers),
+        query: ws.bundlesQuery,
+      });
+      countEl.textContent = t('dev.bundles.countSummary', { shown: filtered.length, total: allBundles.length });
+    }
   }
 }
 
@@ -1007,6 +1213,23 @@ export function handleDevWorkspaceChange(e) {
     }
     const listHost = document.getElementById('devWsListHost');
     if (listHost) listHost.innerHTML = renderUpdatesListHtml(project, scan);
+    return;
+  }
+
+  if (target.id === 'chkDevBundlesAllManagers') {
+    ws.bundlesShowAllManagers = target.checked;
+    const listHost = document.getElementById('devWsListHost');
+    if (listHost) listHost.innerHTML = renderBundlesListHtml(project, scan);
+    const countEl = document.getElementById('devBundlesCountEl');
+    if (countEl) {
+      const allBundles = Array.isArray(state.devBundles) ? state.devBundles : [];
+      const filtered = filterDevBundlesForProject(allBundles, {
+        detectedManagers: Array.isArray(scan?.managers) ? scan.managers : [],
+        showAllManagers: Boolean(ws.bundlesShowAllManagers),
+        query: ws.bundlesQuery,
+      });
+      countEl.textContent = t('dev.bundles.countSummary', { shown: filtered.length, total: allBundles.length });
+    }
     return;
   }
 
@@ -1063,6 +1286,12 @@ export async function handleDevWorkspaceClick(e, callbacks) {
     ws.discoverError = '';
     callbacks.onRerender();
     document.getElementById('devDiscoverSearchInput')?.focus();
+    return;
+  }
+  if (target.id === 'clearDevBundlesSearchBtn') {
+    ws.bundlesQuery = '';
+    callbacks.onRerender();
+    document.getElementById('devBundlesSearchInput')?.focus();
     return;
   }
 
@@ -1140,6 +1369,179 @@ export async function handleDevWorkspaceClick(e, callbacks) {
     await callbacks.onEditProject(project);
   } else if (action === 'scan-project') {
     await callbacks.onScanProject(project.id, { useJob: true, checkUpdates: true });
+  } else if (action === 'sync-project') {
+    const managers = Array.isArray(scan?.managers) ? scan.managers : [];
+    const activeFilter = getEffectiveManagerFilter(scan);
+    const targetManagers = activeFilter !== 'all' ? [activeFilter] : managers;
+    if (targetManagers.length === 0) return;
+
+    const ok = await ensureAdminAuthenticated({
+      reason: t('dev.authReasonSyncProject', { project: project.name }),
+    });
+    if (!ok) return;
+
+    const busyKey = `${project.id}:sync`;
+    state.devBusyActionKeys.add(busyKey);
+    callbacks.onRerender();
+    try {
+      let lastRes = null;
+      for (let i = 0; i < targetManagers.length; i++) {
+        const mgr = targetManagers[i];
+        const res = await window.electronAPI.devSyncProject(project.id, mgr, {
+          checkUpdates: i === targetManagers.length - 1,
+        });
+        lastRes = res;
+        if (res?.canceled) {
+          showToast(t('dev.toastActionCanceled'), { type: 'info' });
+          return;
+        }
+        if (res?.alreadyRunning) {
+          showToast(t('dev.toastActionAlreadyRunning'), { type: 'info' });
+          return;
+        }
+        if (!res?.success) {
+          showToast(t('dev.toastActionFailed', { error: res?.error || t('common.unknownError') }), {
+            type: 'error',
+            duration: 6000,
+          });
+          return;
+        }
+      }
+      if (lastRes?.scan && (lastRes.scan.success || lastRes.scan.unavailable)) {
+        setDevScanResult(project.id, lastRes.scan, { checkedUpdates: Boolean(lastRes.scan.success) });
+      }
+      callbacks.onUpdateNavCounts();
+      showToast(t('dev.toastSyncDone', { project: project.name }), { type: 'success' });
+    } finally {
+      state.devBusyActionKeys.delete(busyKey);
+      callbacks.onRerender();
+    }
+  } else if (action === 'audit-project') {
+    openDevAuditModal({
+      project,
+      onScanUpdated: () => {
+        callbacks.onUpdateNavCounts();
+        callbacks.onRerender();
+      },
+    });
+  } else if (action === 'bundle-new') {
+    const detected = Array.isArray(scan?.managers) ? scan.managers : [];
+    await openDevBundleEditorModal({
+      project,
+      projectScan: scan,
+      defaultManager: detected[0] === 'yarn' ? 'npm' : detected[0] || 'npm',
+      onSaved: () => callbacks.onRerender(),
+    });
+  } else if (action === 'bundle-snapshot') {
+    const snapshot = buildDevBundleDraftFromProject({ project, scan, t });
+    if (snapshot.totalCount === 0) {
+      showToast(t('dev.bundles.snapshotEmptyToast'), { type: 'warn' });
+      return;
+    }
+    await openDevBundleEditorModal({
+      snapshotDraft: snapshot.draft,
+      snapshotStats: snapshot,
+      project,
+      projectScan: scan,
+      onSaved: () => callbacks.onRerender(),
+    });
+  } else if (action === 'bundle-import') {
+    const ok = await ensureAdminAuthenticated({
+      reason: t('toasts.authReasonImportBundle'),
+    });
+    if (!ok) return;
+    const res = await window.electronAPI.importDevBundle();
+    if (res?.success) {
+      await refreshDevBundles();
+      callbacks.onRerender();
+      const msg =
+        res.importedCount > 1
+          ? t('dev.bundles.importedManyToast', { count: res.importedCount })
+          : t('dev.bundles.importedOneToast', { name: res.bundle?.name || t('toasts.bundleImportDefault') });
+      showToast(msg, { type: 'success' });
+    } else if (res?.error && !res.canceled) {
+      showToast(t('toasts.bundleImportFailed', { error: res.error }), { type: 'error', duration: 6000 });
+    }
+  } else if (action === 'bundle-install') {
+    const bundleId = actionBtn.dataset.devBundleId || '';
+    const bundle = (state.devBundles || []).find((b) => b.id === bundleId);
+    if (!bundle) return;
+    openDevBundleRunnerModal({
+      project,
+      bundle,
+      scan,
+      onInstalled: () => {
+        callbacks.onUpdateNavCounts();
+        callbacks.onRerender();
+      },
+    });
+  } else if (action === 'bundle-edit') {
+    const bundleId = actionBtn.dataset.devBundleId || '';
+    const bundle = (state.devBundles || []).find((b) => b.id === bundleId);
+    if (!bundle) return;
+    await openDevBundleEditorModal({
+      bundle,
+      project,
+      projectScan: scan,
+      onSaved: () => callbacks.onRerender(),
+    });
+  } else if (action === 'bundle-duplicate') {
+    const bundleId = actionBtn.dataset.devBundleId || '';
+    if (!bundleId) return;
+    const ok = await ensureAdminAuthenticated({
+      reason: t('toasts.authReasonDuplicateBundle'),
+    });
+    if (!ok) return;
+    const res = await window.electronAPI.duplicateDevBundle(bundleId);
+    if (res?.success) {
+      await refreshDevBundles();
+      callbacks.onRerender();
+      showToast(t('toasts.bundleCreated', { name: res.bundle?.name || t('toasts.bundleCopyDefault') }), {
+        type: 'success',
+      });
+    } else {
+      showToast(res?.error || t('toasts.bundleDuplicateFailed'), { type: 'error' });
+    }
+  } else if (action === 'bundle-export') {
+    const bundleId = actionBtn.dataset.devBundleId || '';
+    if (!bundleId) return;
+    const res = await window.electronAPI.exportDevBundle(bundleId);
+    if (res?.success) {
+      showToast(t('toasts.bundleExported'), { type: 'success' });
+    } else if (res?.error && !res.canceled) {
+      showToast(t('toasts.bundleExportFailed', { error: res.error }), { type: 'error' });
+    }
+  } else if (action === 'bundle-delete' && actionBtn instanceof HTMLButtonElement) {
+    if (actionBtn.dataset.armed !== 'true') {
+      actionBtn.dataset.armed = 'true';
+      actionBtn.dataset.origText = actionBtn.textContent || '';
+      actionBtn.textContent = `⚠️ ${t('common.confirmRemoveArmed')}`;
+      setTimeout(() => {
+        if (actionBtn.isConnected && actionBtn.dataset.armed === 'true') {
+          actionBtn.dataset.armed = 'false';
+          actionBtn.textContent = actionBtn.dataset.origText || `🗑️ ${t('common.delete')}`;
+        }
+      }, 4000);
+      return;
+    }
+    actionBtn.dataset.armed = 'false';
+    const bundleId = actionBtn.dataset.devBundleId || '';
+    const bundle = (state.devBundles || []).find((b) => b.id === bundleId);
+    if (!bundleId) return;
+
+    const ok = await ensureAdminAuthenticated({
+      reason: t('toasts.authReasonDeleteBundle'),
+    });
+    if (!ok) return;
+
+    const res = await window.electronAPI.deleteDevBundle(bundleId);
+    if (res?.success) {
+      await refreshDevBundles();
+      callbacks.onRerender();
+      showToast(t('toasts.bundleDeleted', { name: bundle?.name || '' }), { type: 'success' });
+    } else {
+      showToast(res?.error || t('toasts.bundleDeleteFailed'), { type: 'error' });
+    }
   } else if (action === 'show-more-deps') {
     ws.depsRenderLimit = (ws.depsRenderLimit || 150) + 150;
     callbacks.onRerender();

@@ -1,11 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  AUDIT_SUPPORTED_MANAGERS,
+  mergeDevAuditReports,
+  parseComposerAuditJson,
+  parseNpmAuditJson,
+} from '../../shared/dev-bundles-logic.js';
+import {
+  buildDevAuditCommand,
+  buildDevAuditFixCommand,
+  buildDevBatchInstallSteps,
   buildDevInstallCommand,
   buildDevSyncCommand,
   buildDevToggleScopeSteps,
   buildDevUninstallCommand,
   buildDevUpdateCommand,
+  detectProjectManagersFromFiles,
   isValidDevPackageName,
   isValidDevVersionSpec,
   parseCargoTomlDirect,
@@ -539,6 +549,259 @@ export function createDevActions(deps = {}) {
     }
   }
 
+  /**
+   * Installiert oder aktualisiert mehrere Pakete eines Managers gebuendelt im richtigen Scope (`prod` vs. `dev`).
+   * @param {string} projectId
+   * @param {{
+   *   manager?: string,
+   *   packages?: Array<{ name?: string, version?: string, isDev?: boolean, action?: 'install' | 'update' }>,
+   *   jobType?: string,
+   *   jobTitle?: string,
+   * }} [payload]
+   * @param {{ signal?: AbortSignal | null, useJob?: boolean, checkUpdates?: boolean }} [opts]
+   */
+  async function devInstallPackagesBatch(
+    projectId,
+    { manager = '', packages = [], jobType = 'dev-bundle-install', jobTitle = '' } = {},
+    opts = {}
+  ) {
+    const check = validateProjectAndManager(projectId, manager);
+    if (!check.ok) {
+      return { success: false, error: check.error, unavailable: check.unavailable, notFound: check.notFound };
+    }
+
+    const rawList = Array.isArray(packages) ? packages : [];
+    const validatedPackages = [];
+    for (const entry of rawList) {
+      const cleanPkg = String(entry?.name || '').trim();
+      if (!isValidDevPackageName(check.manager, cleanPkg)) {
+        return { success: false, error: `Ungueltiger Paketname fuer ${check.manager}: "${entry?.name || ''}".` };
+      }
+      const cleanVer = String(entry?.version || '').trim();
+      if (!isValidDevVersionSpec(cleanVer)) {
+        return { success: false, error: `Ungueltige Versionsangabe fuer "${cleanPkg}".` };
+      }
+      validatedPackages.push({
+        name: cleanPkg,
+        version: cleanVer,
+        isDev: Boolean(entry?.isDev),
+        action: entry?.action === 'update' ? 'update' : 'install',
+      });
+    }
+
+    const plan = buildDevBatchInstallSteps({ manager: check.manager, packages: validatedPackages });
+    if (plan.steps.length === 0) {
+      return { success: true, skipped: true, prodCount: 0, devCount: 0, scan: null };
+    }
+
+    const title =
+      jobTitle || `${check.project.name}: Installiere ${validatedPackages.length} Paket(e) (${check.manager})`;
+    const res = await executeWithJobAndRescan({
+      projectId: check.projectId,
+      project: check.project,
+      manager: check.manager,
+      jobType,
+      jobTitle: title,
+      steps: plan.steps,
+      signal: opts.signal || null,
+      useJob: opts.useJob !== false,
+      checkUpdates: opts.checkUpdates !== false,
+    });
+
+    return {
+      ...res,
+      prodCount: plan.prodCount,
+      devCount: plan.devCount,
+    };
+  }
+
+  /**
+   * Fuehrt `npm audit --json` / `pnpm audit --json` / `composer audit --format=json` im Projektordner aus.
+   * @param {string} projectId
+   * @param {{ manager?: string }} [payload]
+   * @param {{ signal?: AbortSignal | null, useJob?: boolean }} [opts]
+   */
+  async function devAuditProject(projectId, { manager = '' } = {}, opts = {}) {
+    const cleanId = String(projectId || '').trim();
+    const project = getProjectFn(cleanId);
+    if (!project) {
+      return { success: false, notFound: true, error: 'Entwicklungsprojekt nicht gefunden.' };
+    }
+    if (!project.isAvailable) {
+      return { success: false, unavailable: true, error: `Projektordner ist nicht erreichbar: ${project.path}` };
+    }
+
+    const requestedMgr = String(manager || '')
+      .trim()
+      .toLowerCase();
+    /** @type {string[]} */
+    let targetManagers = [];
+
+    if (requestedMgr) {
+      if (!AUDIT_SUPPORTED_MANAGERS.includes(requestedMgr)) {
+        return {
+          success: true,
+          unsupported: true,
+          managers: [],
+          counts: { critical: 0, high: 0, moderate: 0, low: 0, total: 0 },
+          vulnerabilities: [],
+          abandoned: [],
+          fixableManagers: [],
+          canAutoFix: false,
+          warnings: [`Sicherheits-Audit wird fuer "${requestedMgr}" nicht unterstuetzt.`],
+        };
+      }
+      targetManagers = [requestedMgr];
+    } else {
+      try {
+        const entries = await fs.promises.readdir(project.path);
+        let hasUvToolConfig = false;
+        const pyprojectName = entries.find((f) => f.toLowerCase() === 'pyproject.toml');
+        if (pyprojectName) {
+          const pyRaw = await fs.promises.readFile(path.join(project.path, pyprojectName), 'utf-8');
+          hasUvToolConfig = parsePyprojectTomlDirect(pyRaw).hasUvToolConfig;
+        }
+        const detected = detectProjectManagersFromFiles(entries, { hasUvToolConfig });
+        targetManagers = detected.managers.filter((m) => AUDIT_SUPPORTED_MANAGERS.includes(m));
+      } catch (err) {
+        return { success: false, error: err?.message || 'Projektordner konnte nicht gelesen werden.' };
+      }
+    }
+
+    if (targetManagers.length === 0) {
+      return {
+        success: true,
+        unsupported: true,
+        managers: [],
+        counts: { critical: 0, high: 0, moderate: 0, low: 0, total: 0 },
+        vulnerabilities: [],
+        abandoned: [],
+        fixableManagers: [],
+        canAutoFix: false,
+        warnings: [],
+      };
+    }
+
+    let job = null;
+    if (opts.useJob !== false && createJobFn) {
+      job = createJobFn({
+        type: 'dev-audit',
+        title: `${project.name}: Sicherheits-Check`,
+        dedupeKey: `dev-audit:${cleanId}`,
+        cancelable: true,
+      });
+      if (!job) {
+        return {
+          success: false,
+          alreadyRunning: true,
+          error: 'In diesem Projekt laeuft bereits ein Sicherheits-Check.',
+        };
+      }
+      job.update(10, `Pruefe ${targetManagers.join(', ')}...`);
+    }
+
+    const activeSignal = job ? job.signal : opts.signal || null;
+    const reports = [];
+    const warnings = [];
+
+    try {
+      for (let i = 0; i < targetManagers.length; i++) {
+        if (activeSignal?.aborted) {
+          job?.finish('canceled', 'Sicherheits-Check abgebrochen.', { autoRemoveMs: 3000 });
+          return { success: false, canceled: true };
+        }
+        const mgr = targetManagers[i];
+        const cmd = buildDevAuditCommand(mgr);
+        if (!cmd.supported) continue;
+
+        job?.update(15 + Math.round((i / targetManagers.length) * 70), `Fuehre ${mgr} audit aus...`);
+        const res = await runManagerCliFn(mgr, cmd.args, {
+          projectPath: project.path,
+          signal: activeSignal,
+          timeoutMs: 90000,
+        });
+
+        if (activeSignal?.aborted || res.aborted) {
+          job?.finish('canceled', 'Sicherheits-Check abgebrochen.', { autoRemoveMs: 3000 });
+          return { success: false, canceled: true };
+        }
+        if (res.notFound) {
+          warnings.push(res.error || `${mgr} ist auf diesem PC nicht verfuegbar.`);
+          continue;
+        }
+
+        // Hinweis: npm/pnpm/composer audit liefern Exit-Code != 0 sobald Schwachstellen gefunden werden!
+        const parsed =
+          mgr === 'composer' ? parseComposerAuditJson(res.stdout) : parseNpmAuditJson(res.stdout, { manager: mgr });
+        if (parsed.valid) {
+          reports.push(parsed);
+        } else {
+          const errText = (
+            res.stderr ||
+            res.stdout ||
+            res.error ||
+            `${mgr} audit fehlgeschlagen (Code ${res.code})`
+          ).trim();
+          warnings.push(errText);
+        }
+      }
+
+      const merged = mergeDevAuditReports(reports);
+      if (merged.managers.length === 0 && warnings.length > 0) {
+        job?.finish('error', warnings[0].slice(0, 180), { autoRemoveMs: 6000 });
+        return {
+          success: false,
+          error: warnings.join(' | '),
+          warnings,
+        };
+      }
+
+      job?.finish('done', `${merged.counts.total} Schwachstelle(n)`, { autoRemoveMs: 3500 });
+      return {
+        success: true,
+        unsupported: false,
+        ...merged,
+        warnings,
+      };
+    } catch (err) {
+      if (activeSignal?.aborted || err?.name === 'AbortError') {
+        job?.finish('canceled', 'Sicherheits-Check abgebrochen.', { autoRemoveMs: 3000 });
+        return { success: false, canceled: true };
+      }
+      const msg = err?.message || 'Sicherheits-Check fehlgeschlagen.';
+      job?.finish('error', msg.slice(0, 180), { autoRemoveMs: 6000 });
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Fuehrt `npm audit fix` bzw. `composer update ...` im Projektordner aus und scannt neu.
+   * @param {string} projectId
+   * @param {{ manager?: string, packages?: string[] }} [payload]
+   * @param {{ signal?: AbortSignal | null, useJob?: boolean, checkUpdates?: boolean }} [opts]
+   */
+  async function devAuditFixProject(projectId, { manager = '', packages = [] } = {}, opts = {}) {
+    const check = validateProjectAndManager(projectId, manager);
+    if (!check.ok) {
+      return { success: false, error: check.error, unavailable: check.unavailable, notFound: check.notFound };
+    }
+    const cmd = buildDevAuditFixCommand(check.manager, packages);
+    if (!cmd.supported) {
+      return { success: false, error: `Automatischer Fix wird fuer "${check.manager}" nicht unterstuetzt.` };
+    }
+    return executeWithJobAndRescan({
+      projectId: check.projectId,
+      project: check.project,
+      manager: check.manager,
+      jobType: 'dev-audit-fix',
+      jobTitle: `${check.project.name}: Security-Fix (${check.manager})`,
+      steps: [cmd.args],
+      signal: opts.signal || null,
+      useJob: opts.useJob !== false,
+      checkUpdates: opts.checkUpdates !== false,
+    });
+  }
+
   return {
     configure,
     devInstallPackage,
@@ -547,6 +810,9 @@ export function createDevActions(deps = {}) {
     devToggleScope,
     devSyncProject,
     devSearchPackages,
+    devInstallPackagesBatch,
+    devAuditProject,
+    devAuditFixProject,
   };
 }
 
@@ -561,3 +827,8 @@ export const devUninstallPackage = (projectId, payload, opts) =>
 export const devToggleScope = (projectId, payload, opts) => defaultActions.devToggleScope(projectId, payload, opts);
 export const devSyncProject = (projectId, manager, opts) => defaultActions.devSyncProject(projectId, manager, opts);
 export const devSearchPackages = (manager, query, opts) => defaultActions.devSearchPackages(manager, query, opts);
+export const devInstallPackagesBatch = (projectId, payload, opts) =>
+  defaultActions.devInstallPackagesBatch(projectId, payload, opts);
+export const devAuditProject = (projectId, payload, opts) => defaultActions.devAuditProject(projectId, payload, opts);
+export const devAuditFixProject = (projectId, payload, opts) =>
+  defaultActions.devAuditFixProject(projectId, payload, opts);

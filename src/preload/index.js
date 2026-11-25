@@ -133,6 +133,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('dev-projects-toggle-scope', projectId, payload, opts),
   devSyncProject: (projectId, manager, opts) => ipcRenderer.invoke('dev-projects-sync', projectId, manager, opts),
   devSearchPackages: (manager, query, opts) => ipcRenderer.invoke('dev-projects-search-packages', manager, query, opts),
+  devAuditProject: (projectId, opts) => ipcRenderer.invoke('dev-projects-audit', projectId, opts),
+  devAuditFixProject: (projectId, payload, opts) =>
+    ipcRenderer.invoke('dev-projects-audit-fix', projectId, payload, opts),
+  loadDevBundles: () => ipcRenderer.invoke('dev-bundles-load'),
+  saveDevBundle: (bundle) => ipcRenderer.invoke('dev-bundles-save', bundle),
+  deleteDevBundle: (bundleId) => ipcRenderer.invoke('dev-bundles-delete', bundleId),
+  duplicateDevBundle: (bundleId) => ipcRenderer.invoke('dev-bundles-duplicate', bundleId),
+  exportDevBundle: (bundleId) => ipcRenderer.invoke('dev-bundles-export', bundleId),
+  importDevBundle: () => ipcRenderer.invoke('dev-bundles-import'),
+  installDevBundle: (projectId, bundleId, selectedPackages, opts) =>
+    ipcRenderer.invoke('dev-bundles-install', projectId, bundleId, selectedPackages, opts),
 
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),

@@ -2565,3 +2565,165 @@ export function buildDevToggleScopeSteps({ manager, packageName, currentRange = 
       };
   }
 }
+
+function formatBatchPkgSpec(manager, name, version = '', action = 'install') {
+  const pkg = String(name || '').trim();
+  const ver = String(version || '').trim();
+  switch (manager) {
+    case 'npm':
+    case 'pnpm':
+    case 'bun':
+    case 'yarn':
+      if (ver) return `${pkg}@${ver}`;
+      return action === 'update' ? `${pkg}@latest` : pkg;
+    case 'composer':
+      return ver ? `${pkg}:${ver}` : pkg;
+    case 'uv':
+    case 'pip':
+      return ver ? `${pkg}==${ver}` : pkg;
+    case 'cargo':
+      return ver ? `${pkg}@${ver}` : pkg;
+    default:
+      return pkg;
+  }
+}
+
+/**
+ * Erzeugt gebuendelte CLI-Schritte fuer `prod`- und `dev`-Pakete eines Dev-Buendels.
+ * @param {{
+ *   manager: string,
+ *   packages?: Array<{ name: string, version?: string, isDev?: boolean, action?: 'install' | 'update' }>,
+ * }} params
+ * @returns {{ steps: string[][], prodCount: number, devCount: number }}
+ */
+export function buildDevBatchInstallSteps({ manager, packages = [] }) {
+  const mgr = String(manager || '')
+    .trim()
+    .toLowerCase();
+  if (!SUPPORTED_MANAGER_SET.has(mgr)) {
+    throw new Error(`Nicht unterstuetzter Paketmanager: ${mgr}`);
+  }
+
+  const supportsDev = !['pip', 'dotnet', 'vcpkg'].includes(mgr);
+  const prodList = [];
+  const devList = [];
+
+  for (const entry of Array.isArray(packages) ? packages : []) {
+    const cleanName = String(entry?.name || '').trim();
+    if (!cleanName || !isValidDevPackageName(mgr, cleanName)) continue;
+    const rawVer = String(entry?.version || '').trim();
+    const ver = rawVer && isValidDevVersionSpec(rawVer) ? rawVer : '';
+    const action = entry?.action === 'update' ? 'update' : 'install';
+    const isDev = supportsDev && Boolean(entry?.isDev);
+    const normalized = { name: cleanName, version: ver, isDev, action };
+    if (isDev) devList.push(normalized);
+    else prodList.push(normalized);
+  }
+
+  /** @type {string[][]} */
+  const steps = [];
+
+  if (mgr === 'dotnet') {
+    for (const p of prodList) {
+      steps.push(['add', 'package', p.name, ...(p.version ? ['--version', p.version] : [])]);
+    }
+    return { steps, prodCount: prodList.length, devCount: 0 };
+  }
+
+  if (mgr === 'vcpkg') {
+    for (const p of prodList) {
+      steps.push(['add', 'port', p.name]);
+    }
+    return { steps, prodCount: prodList.length, devCount: 0 };
+  }
+
+  if (mgr === 'pip') {
+    if (prodList.length > 0) {
+      const hasUpdate = prodList.some((p) => p.action === 'update');
+      const specs = prodList.map((p) => formatBatchPkgSpec(mgr, p.name, p.version, p.action));
+      steps.push(['install', ...(hasUpdate ? ['--upgrade'] : []), ...specs]);
+    }
+    return { steps, prodCount: prodList.length, devCount: 0 };
+  }
+
+  const buildScopedStep = (list, isDevGroup) => {
+    if (list.length === 0) return null;
+    const specs = list.map((p) => formatBatchPkgSpec(mgr, p.name, p.version, p.action));
+    switch (mgr) {
+      case 'npm':
+        return ['install', ...(isDevGroup ? ['-D'] : []), ...specs];
+      case 'pnpm':
+      case 'yarn':
+        return ['add', ...(isDevGroup ? ['-D'] : []), ...specs];
+      case 'bun':
+        return ['add', ...(isDevGroup ? ['-d'] : []), ...specs];
+      case 'composer':
+        return ['require', ...(isDevGroup ? ['--dev'] : []), ...specs];
+      case 'uv':
+      case 'cargo':
+        return ['add', ...(isDevGroup ? ['--dev'] : []), ...specs];
+      default:
+        return null;
+    }
+  };
+
+  const prodStep = buildScopedStep(prodList, false);
+  if (prodStep) steps.push(prodStep);
+  const devStep = buildScopedStep(devList, true);
+  if (devStep) steps.push(devStep);
+
+  return { steps, prodCount: prodList.length, devCount: devList.length };
+}
+
+/**
+ * Erzeugt das Audit-Kommando fuer den Sicherheits-Check im Projektordner.
+ * @param {string} manager
+ * @returns {{ supported: boolean, args: string[], canAutoFix: boolean }}
+ */
+export function buildDevAuditCommand(manager) {
+  const mgr = String(manager || '')
+    .trim()
+    .toLowerCase();
+  switch (mgr) {
+    case 'npm':
+      return { supported: true, args: ['audit', '--json'], canAutoFix: true };
+    case 'pnpm':
+      return { supported: true, args: ['audit', '--json'], canAutoFix: false };
+    case 'composer':
+      return { supported: true, args: ['audit', '--format=json'], canAutoFix: true };
+    default:
+      return { supported: false, args: [], canAutoFix: false };
+  }
+}
+
+/**
+ * Erzeugt das sichere Fix-Kommando fuer gefundene Sicherheitsluecken.
+ * @param {string} manager
+ * @param {string[]} [packageNames]
+ * @returns {{ supported: boolean, args: string[] }}
+ */
+export function buildDevAuditFixCommand(manager, packageNames = []) {
+  const mgr = String(manager || '')
+    .trim()
+    .toLowerCase();
+  if (mgr === 'npm') {
+    return { supported: true, args: ['audit', 'fix'] };
+  }
+  if (mgr === 'composer') {
+    const validPkgs = [
+      ...new Set(
+        (Array.isArray(packageNames) ? packageNames : [])
+          .map((n) => String(n || '').trim())
+          .filter((n) => isValidComposerPackageName(n))
+      ),
+    ];
+    return {
+      supported: true,
+      args:
+        validPkgs.length > 0
+          ? ['update', ...validPkgs, '--with-all-dependencies']
+          : ['update', '--with-all-dependencies'],
+    };
+  }
+  return { supported: false, args: [] };
+}

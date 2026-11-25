@@ -5,6 +5,9 @@ import { renderBundleEditorModal } from './bundle-editor-modal.js';
 import { renderBundleRunnerModal } from './bundle-runner-modal.js';
 import { renderCleanupModal } from './cleanup-modal.js';
 import { renderDetailModal, renderRemoteDetailModal } from './detail-modal.js';
+import { renderDevAuditModal } from './dev-audit-modal.js';
+import { renderDevBundleEditorModal } from './dev-bundle-editor-modal.js';
+import { renderDevBundleRunnerModal } from './dev-bundle-runner-modal.js';
 import { renderEditModal } from './edit-modal.js';
 import { renderIgnoreListModal } from './ignore-list-modal.js';
 import { ensureAdminAuthenticated } from './login-modal.js';
@@ -43,7 +46,14 @@ export function resetModalContent() {
   content.ondragend = null;
 }
 
-const ADMIN_MODAL_KINDS = new Set(['settings', 'edit', 'winget-matcher', 'cleanup', 'bundle-editor']);
+const ADMIN_MODAL_KINDS = new Set([
+  'settings',
+  'edit',
+  'winget-matcher',
+  'cleanup',
+  'bundle-editor',
+  'dev-bundle-editor',
+]);
 
 export function closeModal() {
   const overlay = document.getElementById('modalOverlay');
@@ -146,4 +156,23 @@ export async function openBundleEditorModal(options = {}) {
 export function openBundleRunnerModal(bundleId, options = {}) {
   state.currentModalKind = 'bundle-runner';
   return renderBundleRunnerModal(bundleId, options);
+}
+
+export async function openDevBundleEditorModal(options = {}) {
+  const ok = await ensureAdminAuthenticated({
+    reason: t('modals.authReasonDevBundleEditor'),
+  });
+  if (!ok) return false;
+  state.currentModalKind = 'dev-bundle-editor';
+  return renderDevBundleEditorModal(options);
+}
+
+export function openDevBundleRunnerModal(options) {
+  state.currentModalKind = 'dev-bundle-runner';
+  return renderDevBundleRunnerModal(options);
+}
+
+export function openDevAuditModal(options) {
+  state.currentModalKind = 'dev-audit';
+  return renderDevAuditModal(options);
 }

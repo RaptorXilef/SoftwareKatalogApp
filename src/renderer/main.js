@@ -50,6 +50,7 @@ import {
   refreshAuthStatus,
   refreshBundles,
   refreshCatalogData,
+  refreshDevBundles,
   refreshDevProjects,
   refreshIgnoredUpdates,
   refreshProviders,
@@ -148,6 +149,7 @@ async function reloadUI({
     refreshProviders(),
     refreshBundles(),
     refreshDevProjects(),
+    refreshDevBundles(),
     refreshIgnoredUpdates(),
     refreshAuthStatus(),
   ]);
@@ -672,7 +674,9 @@ function setupKeyboardShortcuts() {
                 ? 'devInstalledSearchInput'
                 : sub === 'dependencies'
                   ? 'devDepsSearchInput'
-                  : 'devDiscoverSearchInput';
+                  : sub === 'bundles'
+                    ? 'devBundlesSearchInput'
+                    : 'devDiscoverSearchInput';
           document.getElementById(targetId)?.focus();
         } else {
           document.getElementById('devProjectSearchInput')?.focus();

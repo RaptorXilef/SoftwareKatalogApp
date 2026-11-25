@@ -63,6 +63,9 @@ export const state = {
   bundlesIpcUnavailable: false,
   devProjects: [],
   devProjectsIpcUnavailable: false,
+  devBundles: [],
+  devBundlesIpcUnavailable: false,
+  isDevBundleInstallRunning: false,
   devSelectedProjectId: null,
   devProjectSearchQuery: '',
   devScanByProjectId: {},
@@ -79,6 +82,8 @@ export const state = {
     depsDirectFilter: 'all',
     depsQuery: '',
     depsRenderLimit: 150,
+    bundlesShowAllManagers: false,
+    bundlesQuery: '',
     discoverManager: '',
     discoverQuery: '',
     discoverIsDev: false,
@@ -335,6 +340,8 @@ export function resetDevWorkspaceForProject(projectId) {
     depsDirectFilter: 'all',
     depsQuery: '',
     depsRenderLimit: 150,
+    bundlesShowAllManagers: false,
+    bundlesQuery: '',
     discoverManager: '',
     discoverQuery: '',
     discoverIsDev: false,
@@ -598,6 +605,40 @@ export async function refreshDevProjects() {
         console.error('Fehler beim Laden der DEV-Projekte:', err);
       }
       state.devProjects = [];
+      return;
+    }
+  }
+}
+
+export async function refreshDevBundles() {
+  if (typeof window.electronAPI?.loadDevBundles !== 'function') {
+    state.devBundlesIpcUnavailable = true;
+    state.devBundles = [];
+    return;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await window.electronAPI.loadDevBundles();
+      state.devBundlesIpcUnavailable = false;
+      if (res?.success === false && res.error) {
+        console.error('Fehler beim Laden der Dev-Bündel:', res.error);
+      }
+      state.devBundles = Array.isArray(res?.bundles) ? res.bundles : [];
+      return;
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (/No handler registered/i.test(msg)) {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+        state.devBundlesIpcUnavailable = true;
+      } else {
+        state.devBundlesIpcUnavailable = false;
+        console.error('Fehler beim Laden der Dev-Bündel:', err);
+      }
+      state.devBundles = [];
       return;
     }
   }
