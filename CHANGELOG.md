@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.30.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.29.0...v1.30.0) (2026-11-25)
+
+### 🚀 Features
+
+* **dev-projects:** add backend for local dev project and package management ([c0834d5](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c0834d5cc6116c01785fa94d33f16c48bb503c44))
+* **dev:** Add DEV main tab, project overview cards, and 5-tab project workspace UI ([f1b7e53](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f1b7e53575cdf33311c6789d60d43cd9bbc4e796))
+* **dev:** add DEV main tab, project overview cards, and workspace UI ([f9eae82](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f9eae82d6cb2717daed37cd5568370a8eaa17243))
+* **dev:** add project-local dev bundles and header quick actions ([9f9c4aa](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9f9c4aaf04dc00ca9758e618365407f746d5356d))
+
 ## [1.29.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.28.1...v1.29.0) (2026-11-24)
 
 ### 🚀 Features
