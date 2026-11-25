@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.31.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.0...v1.31.1) (2026-11-25)
+
+### 🐛 Bug Fixes
+
+* **deps:** Resolve minimatch vulnerability via overrides and upgrade electron-builder ([69ffb7b](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/69ffb7bf00763a0722b18a3d73bf97c63603914b))
+
 ## [1.31.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.30.0...v1.31.0) (2026-11-25)
 
 ### 🚀 Features
