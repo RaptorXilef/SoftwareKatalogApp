@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.31.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.1...v1.31.2) (2026-11-25)
+
+### 📚 Dokumentation
+
+* **readme,license:** Overhaul documentation and adopt PolyForm Noncommercial dual-licensing ([00528da](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/00528da4ac5c32beb41e0f4cc747e8a566416ac4))
+
 ## [1.31.1](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.0...v1.31.1) (2026-11-25)
 
 ### 🐛 Bug Fixes
