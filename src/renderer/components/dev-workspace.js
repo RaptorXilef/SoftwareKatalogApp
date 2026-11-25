@@ -5,6 +5,8 @@ import {
   filterDevBundlesForProject,
 } from '../../shared/dev-bundles-logic.js';
 import {
+  buildDevDependencyGraph,
+  buildDevDependencyTree,
   buildDevUpdateKey,
   filterDevDependencies,
   filterDevInstalled,
@@ -23,6 +25,38 @@ import { escapeHTML } from '../utils/sanitize.js';
 import { showToast } from './toast.js';
 
 let discoverSearchSeq = 0;
+let suppressNextGraphClick = false;
+
+function getSemverTierOptions(upd) {
+  const opts = upd?.semverOptions;
+  if (!opts || typeof opts !== 'object') return [];
+  const tiers = [];
+  if (opts.patch) {
+    tiers.push({
+      tier: 'patch',
+      version: opts.patch,
+      isMajor: false,
+      label: t('dev.workspace.tierPatch', { version: opts.patch }),
+    });
+  }
+  if (opts.minor) {
+    tiers.push({
+      tier: 'minor',
+      version: opts.minor,
+      isMajor: false,
+      label: t('dev.workspace.tierMinor', { version: opts.minor }),
+    });
+  }
+  if (opts.major) {
+    tiers.push({
+      tier: 'major',
+      version: opts.major,
+      isMajor: true,
+      label: t('dev.workspace.tierMajor', { version: opts.major }),
+    });
+  }
+  return tiers;
+}
 
 function getProjectScan(projectId) {
   return state.devScanByProjectId[projectId] || null;
@@ -155,6 +189,81 @@ function renderUpdatesListHtml(project, scan) {
       const isChecked = compatible && ws.selectedUpdateKeys.has(key);
       const isItemBusy = state.devBusyActionKeys.has(`${project.id}:update:${key}`);
       const showMajorBtn = upd.isMajor || !compatible || (upd.latest && upd.latest !== upd.wanted);
+      const tierOptions = getSemverTierOptions(upd);
+      const defaultTier =
+        tierOptions.find((o) => o.tier === 'minor')?.tier ||
+        tierOptions.find((o) => o.tier === 'patch')?.tier ||
+        tierOptions[0]?.tier ||
+        '';
+      const activeTierId = ws.selectedUpdateTierByKey?.[key] || defaultTier;
+      const chosenTier = tierOptions.find((o) => o.tier === activeTierId) || tierOptions[0] || null;
+
+      let actionsHtml = '';
+      if (tierOptions.length > 0 && chosenTier) {
+        actionsHtml = `
+          <div class="dev-tier-controls">
+            <select
+              class="dev-tier-select"
+              data-dev-tier-select="${escapeHTML(key)}"
+              aria-label="${escapeHTML(t('dev.workspace.tierSelectLabel'))}"
+              ${projectBusy ? 'disabled' : ''}
+            >
+              ${tierOptions
+                .map(
+                  (opt) =>
+                    `<option value="${escapeHTML(opt.tier)}" ${opt.tier === chosenTier.tier ? 'selected' : ''}>${escapeHTML(opt.label)}</option>`
+                )
+                .join('')}
+            </select>
+            <button
+              type="button"
+              class="btn ${chosenTier.isMajor ? 'btn-archive' : 'btn-primary'} btn-xs"
+              data-dev-ws-action="update-pkg"
+              data-dev-manager="${escapeHTML(upd.manager)}"
+              data-dev-pkg="${escapeHTML(upd.name)}"
+              data-dev-target-ver="${escapeHTML(chosenTier.version)}"
+              data-dev-scope="${escapeHTML(upd.scope || 'prod')}"
+              data-dev-major="${chosenTier.isMajor ? 'true' : 'false'}"
+              data-dev-exact-target="true"
+              ${projectBusy ? 'disabled' : ''}
+            >${isItemBusy ? '⏳' : chosenTier.isMajor ? '⚠️' : '⬆️'} ${escapeHTML(t('dev.workspace.btnUpdateVersion', { version: chosenTier.version }))}</button>
+          </div>
+        `;
+      } else {
+        actionsHtml = `
+          ${
+            compatible
+              ? `<button
+                  type="button"
+                  class="btn btn-primary btn-xs"
+                  data-dev-ws-action="update-pkg"
+                  data-dev-manager="${escapeHTML(upd.manager)}"
+                  data-dev-pkg="${escapeHTML(upd.name)}"
+                  data-dev-target-ver="${escapeHTML(upd.wanted)}"
+                  data-dev-scope="${escapeHTML(upd.scope || 'prod')}"
+                  data-dev-major="false"
+                  ${projectBusy ? 'disabled' : ''}
+                >${isItemBusy ? '⏳' : '⬆️'} ${escapeHTML(t('dev.workspace.btnUpdateCompatible', { version: upd.wanted }))}</button>`
+              : ''
+          }
+          ${
+            showMajorBtn
+              ? `<button
+                  type="button"
+                  class="btn ${upd.isMajor ? 'btn-archive' : 'btn-ghost'} btn-xs"
+                  data-dev-ws-action="update-pkg"
+                  data-dev-manager="${escapeHTML(upd.manager)}"
+                  data-dev-pkg="${escapeHTML(upd.name)}"
+                  data-dev-target-ver="${escapeHTML(upd.latest || upd.wanted)}"
+                  data-dev-scope="${escapeHTML(upd.scope || 'prod')}"
+                  data-dev-major="true"
+                  title="${escapeHTML(t('dev.workspace.btnUpdateMajorTitle', { version: upd.latest || upd.wanted }))}"
+                  ${projectBusy ? 'disabled' : ''}
+                >${isItemBusy ? '⏳' : upd.isMajor ? '⚠️' : '⚡'} ${escapeHTML(t('dev.workspace.btnUpdateMajor', { version: upd.latest || upd.wanted }))}</button>`
+              : ''
+          }
+        `;
+      }
 
       return `
         <article class="dev-pkg-row ${upd.isMajor ? 'is-major' : 'is-compatible'}">
@@ -198,39 +307,7 @@ function renderUpdatesListHtml(project, scan) {
             </div>
           </div>
 
-          <div class="dev-pkg-actions">
-            ${
-              compatible
-                ? `<button
-                    type="button"
-                    class="btn btn-primary btn-xs"
-                    data-dev-ws-action="update-pkg"
-                    data-dev-manager="${escapeHTML(upd.manager)}"
-                    data-dev-pkg="${escapeHTML(upd.name)}"
-                    data-dev-target-ver="${escapeHTML(upd.wanted)}"
-                    data-dev-scope="${escapeHTML(upd.scope || 'prod')}"
-                    data-dev-major="false"
-                    ${projectBusy ? 'disabled' : ''}
-                  >${isItemBusy ? '⏳' : '⬆️'} ${escapeHTML(t('dev.workspace.btnUpdateCompatible', { version: upd.wanted }))}</button>`
-                : ''
-            }
-            ${
-              showMajorBtn
-                ? `<button
-                    type="button"
-                    class="btn ${upd.isMajor ? 'btn-archive' : 'btn-ghost'} btn-xs"
-                    data-dev-ws-action="update-pkg"
-                    data-dev-manager="${escapeHTML(upd.manager)}"
-                    data-dev-pkg="${escapeHTML(upd.name)}"
-                    data-dev-target-ver="${escapeHTML(upd.latest || upd.wanted)}"
-                    data-dev-scope="${escapeHTML(upd.scope || 'prod')}"
-                    data-dev-major="true"
-                    title="${escapeHTML(t('dev.workspace.btnUpdateMajorTitle', { version: upd.latest || upd.wanted }))}"
-                    ${projectBusy ? 'disabled' : ''}
-                  >${isItemBusy ? '⏳' : upd.isMajor ? '⚠️' : '⚡'} ${escapeHTML(t('dev.workspace.btnUpdateMajor', { version: upd.latest || upd.wanted }))}</button>`
-                : ''
-            }
-          </div>
+          <div class="dev-pkg-actions">${actionsHtml}</div>
         </article>
       `;
     })
@@ -387,7 +464,7 @@ function renderInstalledTabHtml(project, scan) {
   `;
 }
 
-function renderDependenciesListHtml(scan) {
+function renderDependenciesListHtml(scan, viewMode = 'list') {
   const ws = state.devWorkspace;
   const managerFilter = getEffectiveManagerFilter(scan);
   const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
@@ -413,28 +490,53 @@ function renderDependenciesListHtml(scan) {
   const limit = ws.depsRenderLimit || 150;
   const visible = filtered.slice(0, limit);
   const remaining = Math.max(0, filtered.length - visible.length);
+  const highlightKey = String(ws.depsHighlightPkg || '')
+    .trim()
+    .toLowerCase();
 
   const rowsHtml = visible
     .map((dep) => {
       const mgrMeta = getDevManagerMeta(dep.manager);
+      const isHighlighted = highlightKey && `${dep.manager}:${dep.name}`.toLowerCase() === highlightKey;
       const reqBy = Array.isArray(dep.requiredBy) ? dep.requiredBy : [];
-      const shownReqs = reqBy.slice(0, 4);
-      const hiddenReqCount = Math.max(0, reqBy.length - shownReqs.length);
+      const reqs = Array.isArray(dep.requires) ? dep.requires : [];
 
-      let requiredByHtml = '';
-      if (reqBy.length > 0) {
-        const chips = shownReqs.map((r) => `<code class="dev-req-chip">${escapeHTML(r)}</code>`).join('');
-        const more =
-          hiddenReqCount > 0
-            ? `<span class="dev-req-more" title="${escapeHTML(reqBy.join(', '))}">${escapeHTML(t('dev.workspace.requiredByMore', { count: hiddenReqCount }))}</span>`
-            : '';
-        requiredByHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.requiredByLabel'))}:</span> ${chips}${more}</div>`;
-      } else if (dep.direct) {
-        requiredByHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.directProjectDep'))}</span></div>`;
+      let relationHtml = '';
+      if (viewMode === 'requires') {
+        if (reqs.length > 0) {
+          const shown = reqs.slice(0, 12);
+          const hiddenCount = Math.max(0, reqs.length - shown.length);
+          const chips = shown
+            .map(
+              (r) =>
+                `<button type="button" class="dev-req-chip is-clickable" data-dev-deps-jump="${escapeHTML(r)}" data-dev-deps-manager="${escapeHTML(dep.manager)}" title="${escapeHTML(t('dev.workspace.depsJumpTitle', { name: r }))}">${escapeHTML(r)}</button>`
+            )
+            .join('');
+          const more =
+            hiddenCount > 0
+              ? `<span class="dev-req-more" title="${escapeHTML(reqs.join(', '))}">${escapeHTML(t('dev.workspace.requiredByMore', { count: hiddenCount }))}</span>`
+              : '';
+          relationHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.requiresLabel'))}:</span> ${chips}${more}</div>`;
+        } else {
+          relationHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.noOutgoingDeps'))}</span></div>`;
+        }
+      } else {
+        const shownReqs = reqBy.slice(0, 4);
+        const hiddenReqCount = Math.max(0, reqBy.length - shownReqs.length);
+        if (reqBy.length > 0) {
+          const chips = shownReqs.map((r) => `<code class="dev-req-chip">${escapeHTML(r)}</code>`).join('');
+          const more =
+            hiddenReqCount > 0
+              ? `<span class="dev-req-more" title="${escapeHTML(reqBy.join(', '))}">${escapeHTML(t('dev.workspace.requiredByMore', { count: hiddenReqCount }))}</span>`
+              : '';
+          relationHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.requiredByLabel'))}:</span> ${chips}${more}</div>`;
+        } else if (dep.direct) {
+          relationHtml = `<div class="dev-dep-required-by"><span class="muted">${escapeHTML(t('dev.workspace.directProjectDep'))}</span></div>`;
+        }
       }
 
       return `
-        <article class="dev-pkg-row is-dependency">
+        <article class="dev-pkg-row is-dependency ${isHighlighted ? 'is-jump-highlighted' : ''}" data-dep-row-key="${escapeHTML(`${dep.manager}:${dep.name}`.toLowerCase())}">
           <div class="dev-pkg-main">
             <div class="dev-pkg-title-row">
               <strong class="dev-pkg-name">${escapeHTML(dep.name)}</strong>
@@ -444,7 +546,7 @@ function renderDependenciesListHtml(scan) {
               ${renderScopeBadgeHtml(dep.scope)}
               ${dep.license ? `<span class="dev-license-badge" title="${escapeHTML(t('dev.workspace.licenseLabel'))}">${escapeHTML(dep.license)}</span>` : ''}
             </div>
-            ${requiredByHtml}
+            ${relationHtml}
           </div>
           ${
             dep.homepage
@@ -475,7 +577,427 @@ function renderDependenciesListHtml(scan) {
   return `<div class="dev-pkg-list">${rowsHtml}</div>${showMoreHtml}`;
 }
 
-function renderDependenciesTabHtml(scan) {
+function collectAllTreeExpandKeys(nodes, acc = []) {
+  for (const node of nodes) {
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      acc.push(node.pathKey);
+      collectAllTreeExpandKeys(node.children, acc);
+    }
+  }
+  return acc;
+}
+
+function renderDependenciesTreeHtml(project, scan) {
+  const ws = state.devWorkspace;
+  const managerFilter = getEffectiveManagerFilter(scan);
+  const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
+
+  if (allDeps.length === 0) {
+    return `
+      <div class="dev-empty">
+        <h3>${escapeHTML(t('dev.workspace.depsEmptyTitle'))}</h3>
+        <p class="muted">${escapeHTML(t('dev.workspace.depsEmptyDesc'))}</p>
+      </div>
+    `;
+  }
+
+  const tree = buildDevDependencyTree(allDeps, {
+    managerFilter,
+    directFilter: ws.depsDirectFilter,
+    query: ws.depsQuery,
+  });
+
+  if (tree.roots.length === 0) {
+    return `<div class="dev-empty"><p class="muted">${escapeHTML(t('dev.workspace.depsNoMatches'))}</p></div>`;
+  }
+
+  const forceExpandForSearch = Boolean(String(ws.depsQuery || '').trim());
+  const rows = [];
+
+  const renderNodes = (nodeList, ancestorPrefix, isRootLevel) => {
+    nodeList.forEach((node, idx) => {
+      const isLast = idx === nodeList.length - 1;
+      const connector = isRootLevel ? (isLast ? '└── ' : '├── ') : isLast ? '└── ' : '├── ';
+      const nextAncestorPrefix = `${ancestorPrefix}${isLast ? '    ' : '│   '}`;
+      const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+      const isExpanded = hasChildren && (forceExpandForSearch || ws.depsTreeExpanded.has(node.pathKey));
+      const mgrMeta = getDevManagerMeta(node.manager);
+
+      rows.push(`
+        <div class="dev-tree-row">
+          <span class="dev-tree-prefix">${escapeHTML(`${ancestorPrefix}${connector}`)}</span>
+          ${
+            hasChildren
+              ? `<button type="button" class="dev-tree-toggle" data-dev-tree-toggle="${escapeHTML(node.pathKey)}" aria-expanded="${isExpanded ? 'true' : 'false'}">${isExpanded ? '-' : '+'}</button>`
+              : '<span class="dev-tree-leaf-spacer"></span>'
+          }
+          <span class="dev-tree-pkg-name ${node.matched ? 'is-match' : ''}">${escapeHTML(node.name)}</span>
+          ${node.version ? `<span class="dev-tree-ver">v${escapeHTML(node.version)}</span>` : ''}
+          <span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>
+          ${node.cyclic ? `<span class="dev-tree-cyclic">↻ (${escapeHTML(t('dev.workspace.cyclicLabel'))})</span>` : ''}
+          ${node.missing ? `<span class="dev-tree-missing">(${escapeHTML(t('dev.workspace.treeNotInLockfile'))})</span>` : ''}
+        </div>
+      `);
+
+      if (hasChildren && isExpanded) {
+        renderNodes(node.children, nextAncestorPrefix, false);
+      }
+    });
+  };
+
+  renderNodes(tree.roots, '', true);
+
+  return `
+    <div class="dev-tree-toolbar">
+      <div class="dev-tree-actions">
+        <button type="button" class="btn btn-ghost btn-xs" data-dev-ws-action="deps-tree-expand-all">
+          📂 ${escapeHTML(t('dev.workspace.treeExpandAll'))}
+        </button>
+        <button type="button" class="btn btn-ghost btn-xs" data-dev-ws-action="deps-tree-collapse-all">
+          📁 ${escapeHTML(t('dev.workspace.treeCollapseAll'))}
+        </button>
+      </div>
+      <span class="muted">${escapeHTML(project.name)}${tree.truncated ? ` · ${escapeHTML(t('dev.workspace.treeTruncatedHint'))}` : ''}</span>
+    </div>
+    <div class="dev-tree-box" role="tree">${rows.join('')}</div>
+  `;
+}
+
+function applyGraphTransformDom() {
+  const g = document.getElementById('devGraphTransformGroup');
+  if (!g) return;
+  const tr = state.devWorkspace.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+  g.setAttribute('transform', `translate(${tr.x} ${tr.y}) scale(${tr.scale})`);
+}
+
+function applyGraphNodeHighlightDom(activeId) {
+  const svg = document.getElementById('devGraphSvg');
+  if (!svg) return;
+  const cleanId = String(activeId || '').trim();
+  const pinnedId = state.devWorkspace.depsGraphSelectedId || '';
+  const related = new Set();
+
+  if (cleanId) {
+    related.add(cleanId);
+    for (const edge of svg.querySelectorAll('.dev-graph-edge')) {
+      const from = edge.getAttribute('data-from') || '';
+      const to = edge.getAttribute('data-to') || '';
+      if (from === cleanId) related.add(to);
+      if (to === cleanId) related.add(from);
+    }
+  }
+
+  for (const edge of svg.querySelectorAll('.dev-graph-edge')) {
+    const from = edge.getAttribute('data-from') || '';
+    const to = edge.getAttribute('data-to') || '';
+    const active = Boolean(cleanId && (from === cleanId || to === cleanId));
+    edge.classList.toggle('is-highlighted', active);
+    edge.classList.toggle('is-dimmed', Boolean(cleanId && !active));
+    edge.setAttribute('marker-end', active ? 'url(#devGraphArrowActive)' : 'url(#devGraphArrow)');
+  }
+
+  let activeNodeEl = null;
+  for (const nodeEl of svg.querySelectorAll('.dev-graph-node')) {
+    const nid = nodeEl.getAttribute('data-graph-node-id') || '';
+    if (nid === cleanId) activeNodeEl = nodeEl;
+    nodeEl.classList.toggle('is-selected', Boolean(pinnedId && nid === pinnedId));
+    nodeEl.classList.toggle('is-highlighted', Boolean(cleanId && related.has(nid)));
+    nodeEl.classList.toggle('is-dimmed', Boolean(cleanId && !related.has(nid)));
+  }
+
+  const infoBar = document.getElementById('devGraphInfoBar');
+  if (infoBar) {
+    if (activeNodeEl) {
+      infoBar.innerHTML = buildGraphNodeInfoHtml({
+        id: cleanId,
+        kind: activeNodeEl.getAttribute('data-graph-node-kind') || 'package',
+        name: activeNodeEl.getAttribute('data-graph-node-name') || cleanId,
+        version: activeNodeEl.getAttribute('data-graph-node-ver') || '',
+        manager: activeNodeEl.getAttribute('data-graph-node-mgr') || '',
+        license: activeNodeEl.getAttribute('data-graph-node-lic') || '',
+        requiredBy: Array(Number(activeNodeEl.getAttribute('data-graph-reqby-count') || 0)),
+        requires: Array(Number(activeNodeEl.getAttribute('data-graph-req-count') || 0)),
+      });
+    } else {
+      infoBar.innerHTML = buildGraphNodeInfoHtml(null);
+    }
+  }
+}
+
+export function setupDevWorkspaceGraphInteractions(container) {
+  if (!(container instanceof HTMLElement)) return;
+  let dragState = null;
+
+  container.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || !(e.target instanceof Element)) return;
+    const viewport = e.target.closest('.dev-graph-viewport');
+    if (!(viewport instanceof HTMLElement)) return;
+    const tr = state.devWorkspace.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+    dragState = {
+      viewport,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: tr.x,
+      origY: tr.y,
+      moved: false,
+    };
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragState) return;
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+    if (!dragState.moved && Math.hypot(dx, dy) > 3) {
+      dragState.moved = true;
+      dragState.viewport.classList.add('is-panning');
+    }
+    if (!dragState.moved) return;
+    const svg = document.getElementById('devGraphSvg');
+    let ratio = 1;
+    if (svg instanceof SVGSVGElement) {
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox?.baseVal;
+      if (vb?.width && rect.width) {
+        ratio = Math.max(vb.width / rect.width, vb.height / rect.height);
+      }
+    }
+    const prev = state.devWorkspace.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+    state.devWorkspace.depsGraphTransform = {
+      ...prev,
+      x: Math.round(dragState.origX + dx * ratio),
+      y: Math.round(dragState.origY + dy * ratio),
+    };
+    applyGraphTransformDom();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragState) return;
+    dragState.viewport.classList.remove('is-panning');
+    if (dragState.moved) {
+      suppressNextGraphClick = true;
+      setTimeout(() => {
+        suppressNextGraphClick = false;
+      }, 0);
+    }
+    dragState = null;
+  });
+
+  container.addEventListener(
+    'wheel',
+    (e) => {
+      if (!(e.target instanceof Element)) return;
+      const viewport = e.target.closest('.dev-graph-viewport');
+      if (!(viewport instanceof HTMLElement)) return;
+      e.preventDefault();
+      const prev = state.devWorkspace.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      const nextScale = Math.max(0.25, Math.min(3, Number((prev.scale * factor).toFixed(3))));
+      state.devWorkspace.depsGraphTransform = { ...prev, scale: nextScale };
+      applyGraphTransformDom();
+    },
+    { passive: false }
+  );
+
+  container.addEventListener('mouseover', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const nodeEl = e.target.closest('[data-graph-node-id]');
+    if (!nodeEl || !e.target.closest('.dev-graph-viewport')) return;
+    const nid = nodeEl.getAttribute('data-graph-node-id') || '';
+    if (nid) applyGraphNodeHighlightDom(nid);
+  });
+
+  container.addEventListener('mouseout', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const nodeEl = e.target.closest('[data-graph-node-id]');
+    if (!nodeEl || !e.target.closest('.dev-graph-viewport')) return;
+    const related = e.relatedTarget instanceof Element ? e.relatedTarget.closest('[data-graph-node-id]') : null;
+    if (related === nodeEl) return;
+    applyGraphNodeHighlightDom(state.devWorkspace.depsGraphSelectedId || '');
+  });
+}
+
+function buildGraphNodeInfoHtml(node) {
+  if (!node) {
+    return `<span class="muted">${escapeHTML(t('dev.workspace.graphInfoHint'))}</span>`;
+  }
+  const mgrMeta = node.manager ? getDevManagerMeta(node.manager) : null;
+  const reqByCount = Array.isArray(node.requiredBy) ? node.requiredBy.length : 0;
+  const reqCount = Array.isArray(node.requires) ? node.requires.length : 0;
+  return `
+    <div class="dev-graph-info-meta">
+      <strong>${escapeHTML(node.name)}</strong>
+      ${node.version ? `<span class="card-chip">v${escapeHTML(node.version)}</span>` : ''}
+      ${mgrMeta ? `<span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>` : ''}
+      ${node.license ? `<span class="dev-license-badge">${escapeHTML(node.license)}</span>` : ''}
+    </div>
+    <span class="muted">
+      ${
+        node.kind === 'project'
+          ? escapeHTML(t('dev.workspace.graphProjectRoot'))
+          : escapeHTML(t('dev.workspace.graphNodeRelations', { requiredBy: reqByCount, requires: reqCount }))
+      }
+    </span>
+  `;
+}
+
+function truncateGraphText(text, maxLen = 22) {
+  const s = String(text || '');
+  return s.length > maxLen ? `${s.slice(0, maxLen - 3)}...` : s;
+}
+
+function renderDependenciesGraphHtml(project, scan) {
+  const ws = state.devWorkspace;
+  const managerFilter = getEffectiveManagerFilter(scan);
+  const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
+
+  if (allDeps.length === 0) {
+    return `
+      <div class="dev-empty">
+        <h3>${escapeHTML(t('dev.workspace.depsEmptyTitle'))}</h3>
+        <p class="muted">${escapeHTML(t('dev.workspace.depsEmptyDesc'))}</p>
+      </div>
+    `;
+  }
+
+  const graph = buildDevDependencyGraph(allDeps, {
+    projectName: project.name,
+    managerFilter,
+    directFilter: ws.depsDirectFilter,
+    query: ws.depsQuery,
+    focusNodeKey: ws.depsGraphFocusKey,
+    maxNodes: 80,
+  });
+
+  if (graph.nodes.length <= 1) {
+    return `<div class="dev-empty"><p class="muted">${escapeHTML(t('dev.workspace.depsNoMatches'))}</p></div>`;
+  }
+
+  const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
+  const selectedId = ws.depsGraphSelectedId && nodeMap.has(ws.depsGraphSelectedId) ? ws.depsGraphSelectedId : '';
+  const selectedNode = selectedId ? nodeMap.get(selectedId) : null;
+
+  const relatedIds = new Set();
+  if (selectedId) {
+    relatedIds.add(selectedId);
+    for (const edge of graph.edges) {
+      if (edge.from === selectedId) relatedIds.add(edge.to);
+      if (edge.to === selectedId) relatedIds.add(edge.from);
+    }
+  }
+
+  const tr = ws.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+  const edgesSvg = graph.edges
+    .map((edge) => {
+      const fromNode = nodeMap.get(edge.from);
+      const toNode = nodeMap.get(edge.to);
+      if (!fromNode || !toNode) return '';
+      const x1 = fromNode.x + fromNode.w;
+      const y1 = fromNode.y + Math.round(fromNode.h / 2);
+      const x2 = toNode.x;
+      const y2 = toNode.y + Math.round(toNode.h / 2);
+      const dx = Math.max(40, Math.abs(x2 - x1) * 0.5);
+      const pathD = edge.cyclic
+        ? `M ${x1} ${y1} C ${x1 + 50} ${y1 - 60}, ${x2 - 50} ${y2 - 60}, ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+
+      const isEdgeActive = selectedId && (edge.from === selectedId || edge.to === selectedId);
+      const cls = ['dev-graph-edge', edge.cyclic ? 'is-cyclic' : ''];
+      if (selectedId) cls.push(isEdgeActive ? 'is-highlighted' : 'is-dimmed');
+
+      return `<path class="${cls.filter(Boolean).join(' ')}" data-from="${escapeHTML(edge.from)}" data-to="${escapeHTML(edge.to)}" d="${pathD}" marker-end="${isEdgeActive ? 'url(#devGraphArrowActive)' : 'url(#devGraphArrow)'}"></path>`;
+    })
+    .join('');
+
+  const nodesSvg = graph.nodes
+    .map((node) => {
+      const cls = ['dev-graph-node', `is-${node.kind}`, node.direct ? 'is-direct' : ''];
+      if (selectedId) {
+        if (node.id === selectedId) cls.push('is-selected', 'is-highlighted');
+        else if (relatedIds.has(node.id)) cls.push('is-highlighted');
+        else cls.push('is-dimmed');
+      }
+      const subtitle =
+        node.kind === 'project'
+          ? t('dev.workspace.graphProjectRoot')
+          : `${node.version ? `v${node.version}` : ''}${node.manager ? ` · ${node.manager}` : ''}`;
+
+      return `
+        <g
+          class="${cls.filter(Boolean).join(' ')}"
+          data-graph-node-id="${escapeHTML(node.id)}"
+          data-graph-node-name="${escapeHTML(node.name)}"
+          data-graph-node-ver="${escapeHTML(node.version || '')}"
+          data-graph-node-mgr="${escapeHTML(node.manager || '')}"
+          data-graph-node-lic="${escapeHTML(node.license || '')}"
+          data-graph-node-kind="${escapeHTML(node.kind)}"
+          data-graph-reqby-count="${String(node.requiredBy.length)}"
+          data-graph-req-count="${String(node.requires.length)}"
+          transform="translate(${node.x}, ${node.y})"
+        >
+          <title>${escapeHTML(`${node.name}${node.version ? ` v${node.version}` : ''}${node.license ? ` (${node.license})` : ''}`)}</title>
+          <rect width="${node.w}" height="${node.h}" rx="8"></rect>
+          <text class="dev-graph-node-title" x="10" y="20">${escapeHTML(truncateGraphText(node.name, 22))}</text>
+          <text class="dev-graph-node-sub" x="10" y="36">${escapeHTML(truncateGraphText(subtitle, 26))}</text>
+        </g>
+      `;
+    })
+    .join('');
+
+  const focusOptionsHtml = [
+    `<option value="">${escapeHTML(t('dev.workspace.graphFocusAll'))}</option>`,
+    ...graph.focusOptions.map(
+      (opt) =>
+        `<option value="${escapeHTML(opt.nodeKey)}" ${graph.focusNodeKey === opt.nodeKey ? 'selected' : ''}>${escapeHTML(opt.name)}${opt.version ? ` (v${escapeHTML(opt.version)})` : ''}</option>`
+    ),
+  ].join('');
+
+  return `
+    <div class="dev-graph-wrap">
+      <div class="dev-graph-toolbar">
+        <div class="dev-graph-focus-group">
+          <label for="devGraphFocusSelect">${escapeHTML(t('dev.workspace.graphFocusLabel'))}:</label>
+          <select id="devGraphFocusSelect" class="dev-graph-focus-select">${focusOptionsHtml}</select>
+          ${
+            graph.truncated
+              ? `<span class="muted">${escapeHTML(t('dev.workspace.graphTruncatedHint', { shown: graph.nodes.length - 1, total: graph.totalFilteredCount }))}</span>`
+              : ''
+          }
+        </div>
+        <div class="dev-graph-zoom-group">
+          <button type="button" class="btn btn-ghost btn-xs" data-dev-ws-action="graph-zoom-out" title="${escapeHTML(t('dev.workspace.graphZoomOut'))}">-</button>
+          <button type="button" class="btn btn-ghost btn-xs" data-dev-ws-action="graph-zoom-in" title="${escapeHTML(t('dev.workspace.graphZoomIn'))}">+</button>
+          <button type="button" class="btn btn-ghost btn-xs" data-dev-ws-action="graph-zoom-reset">${escapeHTML(t('dev.workspace.graphZoomReset'))}</button>
+        </div>
+      </div>
+      <div class="dev-graph-viewport" id="devGraphViewport">
+        <svg class="dev-graph-svg" id="devGraphSvg" viewBox="0 0 ${graph.width} ${graph.height}" role="img" aria-label="${escapeHTML(t('dev.workspace.graphAriaLabel'))}">
+          <defs>
+            <marker id="devGraphArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor" opacity="0.55"></path>
+            </marker>
+            <marker id="devGraphArrowActive" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+          <g id="devGraphTransformGroup" transform="translate(${tr.x} ${tr.y}) scale(${tr.scale})">
+            <g class="dev-graph-edges">${edgesSvg}</g>
+            <g class="dev-graph-nodes">${nodesSvg}</g>
+          </g>
+        </svg>
+      </div>
+      <div class="dev-graph-info-bar" id="devGraphInfoBar">${buildGraphNodeInfoHtml(selectedNode)}</div>
+    </div>
+  `;
+}
+
+function renderDependenciesContentHtml(project, scan) {
+  const mode = state.devWorkspace.depsViewMode || 'list';
+  if (mode === 'tree') return renderDependenciesTreeHtml(project, scan);
+  if (mode === 'graph') return renderDependenciesGraphHtml(project, scan);
+  return renderDependenciesListHtml(scan, mode);
+}
+
+function renderDependenciesTabHtml(project, scan) {
   const ws = state.devWorkspace;
   const managerFilter = getEffectiveManagerFilter(scan);
   const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
@@ -491,7 +1013,24 @@ function renderDependenciesTabHtml(scan) {
     { id: 'transitive', label: t('dev.workspace.depsTransitiveOnly') },
   ];
 
+  const viewModes = [
+    { id: 'list', icon: '📋', label: t('dev.workspace.depsViewList') },
+    { id: 'requires', icon: '📦', label: t('dev.workspace.depsViewRequires') },
+    { id: 'tree', icon: '🌲', label: t('dev.workspace.depsViewTree') },
+    { id: 'graph', icon: '🕸️', label: t('dev.workspace.depsViewGraph') },
+  ];
+
   return `
+    <div class="dev-deps-view-bar">
+      <div class="dev-deps-view-switch" role="tablist">
+        ${viewModes
+          .map(
+            (v) =>
+              `<button type="button" role="tab" aria-selected="${ws.depsViewMode === v.id ? 'true' : 'false'}" class="dev-deps-view-btn ${ws.depsViewMode === v.id ? 'active' : ''}" data-dev-deps-view="${v.id}">${v.icon} ${escapeHTML(v.label)}</button>`
+          )
+          .join('')}
+      </div>
+    </div>
     <div class="dev-ws-controls">
       <div class="dev-search-box">
         <input
@@ -513,7 +1052,7 @@ function renderDependenciesTabHtml(scan) {
       </div>
       <span id="devDepsCountEl" class="muted">${escapeHTML(t('dev.workspace.countShown', { shown: filtered.length, total: allDeps.length }))}</span>
     </div>
-    <div id="devWsListHost">${renderDependenciesListHtml(scan)}</div>
+    <div id="devWsListHost">${renderDependenciesContentHtml(project, scan)}</div>
   `;
 }
 
@@ -908,7 +1447,7 @@ export function renderDevWorkspace(container, project) {
   let activeBodyHtml = '';
   if (ws.activeSubTab === 'updates') activeBodyHtml = renderUpdatesTabHtml(project, scan);
   else if (ws.activeSubTab === 'installed') activeBodyHtml = renderInstalledTabHtml(project, scan);
-  else if (ws.activeSubTab === 'dependencies') activeBodyHtml = renderDependenciesTabHtml(scan);
+  else if (ws.activeSubTab === 'dependencies') activeBodyHtml = renderDependenciesTabHtml(project, scan);
   else if (ws.activeSubTab === 'bundles') activeBodyHtml = renderBundlesTabHtml(project, scan);
   else activeBodyHtml = renderDiscoverTabHtml(project, scan);
 
@@ -1159,7 +1698,7 @@ export function handleDevWorkspaceInput(e) {
     ws.depsRenderLimit = 150;
     const clr = document.getElementById('clearDevDepsSearchBtn');
     if (clr) clr.hidden = ws.depsQuery.length === 0;
-    if (listHost) listHost.innerHTML = renderDependenciesListHtml(scan);
+    if (listHost) listHost.innerHTML = renderDependenciesContentHtml(project, scan);
     const countEl = document.getElementById('devDepsCountEl');
     if (countEl) {
       const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
@@ -1198,6 +1737,29 @@ export function handleDevWorkspaceChange(e) {
   const scan = getProjectScan(project.id);
   const ws = state.devWorkspace;
   const target = e.target;
+
+  if (target instanceof HTMLSelectElement) {
+    const tierKey = target.dataset.devTierSelect || '';
+    if (tierKey) {
+      if (!ws.selectedUpdateTierByKey || typeof ws.selectedUpdateTierByKey !== 'object') {
+        ws.selectedUpdateTierByKey = {};
+      }
+      ws.selectedUpdateTierByKey[tierKey] = target.value;
+      const listHost = document.getElementById('devWsListHost');
+      if (listHost) listHost.innerHTML = renderUpdatesListHtml(project, scan);
+      return;
+    }
+    if (target.id === 'devGraphFocusSelect') {
+      ws.depsGraphFocusKey = target.value || '';
+      ws.depsGraphSelectedId = ws.depsGraphFocusKey;
+      ws.depsGraphTransform = { x: 0, y: 0, scale: 1 };
+      const listHost = document.getElementById('devWsListHost');
+      if (listHost) listHost.innerHTML = renderDependenciesContentHtml(project, scan);
+      return;
+    }
+    return;
+  }
+
   if (!(target instanceof HTMLInputElement)) return;
 
   if (target.id === 'chkDevSelectAllUpdates') {
@@ -1321,6 +1883,74 @@ export async function handleDevWorkspaceClick(e, callbacks) {
     ws.depsDirectFilter = directChip.dataset.devDepsDirect || 'all';
     ws.depsRenderLimit = 150;
     callbacks.onRerender();
+    return;
+  }
+
+  const viewBtn = target.closest('[data-dev-deps-view]');
+  if (viewBtn instanceof HTMLElement) {
+    const nextView = viewBtn.dataset.devDepsView || 'list';
+    if (nextView !== ws.depsViewMode) {
+      ws.depsViewMode = nextView;
+      ws.depsHighlightPkg = '';
+      callbacks.onRerender();
+    }
+    return;
+  }
+
+  const treeToggleBtn = target.closest('[data-dev-tree-toggle]');
+  if (treeToggleBtn instanceof HTMLElement) {
+    const pathKey = treeToggleBtn.dataset.devTreeToggle || '';
+    if (pathKey) {
+      if (ws.depsTreeExpanded.has(pathKey)) {
+        ws.depsTreeExpanded.delete(pathKey);
+      } else {
+        ws.depsTreeExpanded.add(pathKey);
+      }
+      const listHost = document.getElementById('devWsListHost');
+      if (listHost) listHost.innerHTML = renderDependenciesContentHtml(project, scan);
+    }
+    return;
+  }
+
+  const jumpBtn = target.closest('[data-dev-deps-jump]');
+  if (jumpBtn instanceof HTMLElement) {
+    const pkgName = jumpBtn.dataset.devDepsJump || '';
+    const mgr = jumpBtn.dataset.devDepsManager || '';
+    if (pkgName) {
+      const targetKey = `${mgr}:${pkgName}`.toLowerCase();
+      ws.depsDirectFilter = 'all';
+      ws.depsQuery = '';
+      ws.depsHighlightPkg = targetKey;
+      const allDeps = Array.isArray(scan?.dependencies) ? scan.dependencies : [];
+      const filtered = filterDevDependencies(allDeps, {
+        managerFilter: getEffectiveManagerFilter(scan),
+        directFilter: 'all',
+        query: '',
+      });
+      const targetIdx = filtered.findIndex((d) => `${d.manager}:${d.name}`.toLowerCase() === targetKey);
+      if (targetIdx >= 0 && targetIdx >= (ws.depsRenderLimit || 150)) {
+        ws.depsRenderLimit = targetIdx + 50;
+      }
+      callbacks.onRerender();
+      requestAnimationFrame(() => {
+        const row = document.querySelector(`[data-dep-row-key="${CSS.escape(targetKey)}"]`);
+        if (row instanceof HTMLElement) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
+    return;
+  }
+
+  if (target.closest('.dev-graph-viewport')) {
+    if (suppressNextGraphClick) {
+      suppressNextGraphClick = false;
+      return;
+    }
+    const graphNodeEl = target.closest('[data-graph-node-id]');
+    const nextSelectedId = graphNodeEl instanceof Element ? graphNodeEl.getAttribute('data-graph-node-id') || '' : '';
+    ws.depsGraphSelectedId = nextSelectedId === ws.depsGraphSelectedId ? '' : nextSelectedId;
+    applyGraphNodeHighlightDom(ws.depsGraphSelectedId);
     return;
   }
 
@@ -1545,6 +2175,32 @@ export async function handleDevWorkspaceClick(e, callbacks) {
   } else if (action === 'show-more-deps') {
     ws.depsRenderLimit = (ws.depsRenderLimit || 150) + 150;
     callbacks.onRerender();
+  } else if (action === 'deps-tree-expand-all') {
+    const tree = buildDevDependencyTree(scan?.dependencies || [], {
+      managerFilter: getEffectiveManagerFilter(scan),
+      directFilter: ws.depsDirectFilter,
+      query: ws.depsQuery,
+    });
+    ws.depsTreeExpandAll = true;
+    ws.depsTreeExpanded = new Set(collectAllTreeExpandKeys(tree.roots));
+    const listHost = document.getElementById('devWsListHost');
+    if (listHost) listHost.innerHTML = renderDependenciesContentHtml(project, scan);
+  } else if (action === 'deps-tree-collapse-all') {
+    ws.depsTreeExpandAll = false;
+    ws.depsTreeExpanded.clear();
+    const listHost = document.getElementById('devWsListHost');
+    if (listHost) listHost.innerHTML = renderDependenciesContentHtml(project, scan);
+  } else if (action === 'graph-zoom-in') {
+    const tr = ws.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+    ws.depsGraphTransform = { ...tr, scale: Math.min(3, Number((tr.scale * 1.2).toFixed(3))) };
+    applyGraphTransformDom();
+  } else if (action === 'graph-zoom-out') {
+    const tr = ws.depsGraphTransform || { x: 0, y: 0, scale: 1 };
+    ws.depsGraphTransform = { ...tr, scale: Math.max(0.25, Number((tr.scale / 1.2).toFixed(3))) };
+    applyGraphTransformDom();
+  } else if (action === 'graph-zoom-reset') {
+    ws.depsGraphTransform = { x: 0, y: 0, scale: 1 };
+    applyGraphTransformDom();
   } else if (action === 'discover-search') {
     await runDiscoverSearch(project, callbacks);
   } else if (action === 'batch-update-compatible') {
@@ -1554,6 +2210,7 @@ export async function handleDevWorkspaceClick(e, callbacks) {
     const packageName = actionBtn.dataset.devPkg || '';
     const targetVersion = actionBtn.dataset.devTargetVer || '';
     const allowMajor = actionBtn.dataset.devMajor === 'true';
+    const exactTarget = actionBtn.dataset.devExactTarget === 'true';
     const isDev = actionBtn.dataset.devScope === 'dev';
     if (!manager || !packageName) return;
 
@@ -1572,6 +2229,7 @@ export async function handleDevWorkspaceClick(e, callbacks) {
         packageName,
         targetVersion,
         allowMajor,
+        exactTarget,
         isDev,
       });
       await handleActionResult(

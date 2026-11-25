@@ -11,7 +11,6 @@ import { renderDevBundleRunnerModal } from './dev-bundle-runner-modal.js';
 import { renderEditModal } from './edit-modal.js';
 import { renderIgnoreListModal } from './ignore-list-modal.js';
 import { ensureAdminAuthenticated } from './login-modal.js';
-import { openProviderSourcesModal } from './provider-sources-modal.js';
 import { renderSettingsModal } from './settings-modal.js';
 import { renderWingetMatcherModal } from './winget-matcher-modal.js';
 
@@ -118,8 +117,6 @@ export async function openArchiveLinkModal(pkg, options = {}) {
     onLinked: options.onLinked || null,
   });
 }
-
-export { openProviderSourcesModal };
 
 export async function openWingetMatcherModal() {
   const ok = await ensureAdminAuthenticated({

@@ -74,17 +74,17 @@ select {
     border-color 0.15s ease,
     transform 0.1s ease;
 
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   &:hover:not(:disabled) {
     filter: brightness(1.08);
   }
 
   &:active:not(:disabled) {
     transform: translateY(1px);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 }
 

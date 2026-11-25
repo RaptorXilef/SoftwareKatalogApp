@@ -98,6 +98,7 @@ export const chocoProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -224,6 +225,40 @@ export const chocoProvider = {
       updatedAt: res.updatedAt,
       error: res.error,
     };
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const cleanId = String(packageId || '').trim();
+    if (!isValidChocoPackageId(cleanId)) {
+      return { success: false, versions: [], error: 'Ungültige Chocolatey-Paket-ID angegeben.' };
+    }
+    const cacheKey = `chocolatey:versions:${cleanId.toLowerCase()}`;
+    const cache = getWingetCache();
+    if (!forceRefresh) {
+      const cached = cache.get(cacheKey);
+      if (cached?.data && Array.isArray(cached.data) && Date.now() - Number(cached.updatedAt || 0) < 15 * 60 * 1000) {
+        return { success: true, versions: cached.data, fromCache: true };
+      }
+    }
+    const res = await runChoco(['search', cleanId, '--exact', '--all-versions', '--limit-output'], { signal });
+    if (res.aborted) return { success: false, versions: [], canceled: true };
+    if (res.notFound || (res.code !== 0 && !res.stdout)) {
+      return { success: false, versions: [], error: res.error || res.stderr || 'Chocolatey-Versionen nicht abrufbar.' };
+    }
+    const versions = [];
+    const seen = new Set();
+    for (const line of String(res.stdout || '').split(/\r?\n/)) {
+      const [idPart, verPart] = line.trim().split('|');
+      if (idPart?.trim().toLowerCase() === cleanId.toLowerCase() && verPart?.trim()) {
+        const ver = verPart.trim();
+        if (!seen.has(ver.toLowerCase())) {
+          seen.add(ver.toLowerCase());
+          versions.push(ver);
+        }
+      }
+    }
+    if (versions.length > 0) cache.set(cacheKey, versions);
+    return { success: true, versions, fromCache: false };
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {

@@ -134,7 +134,7 @@ export function flattenMessages(dict, prefix = '') {
  * @param {string} key
  * @returns {string | null}
  */
-export function getNestedValue(dict, key) {
+function getNestedValue(dict, key) {
   if (!dict || typeof dict !== 'object' || typeof key !== 'string' || !key) {
     return null;
   }

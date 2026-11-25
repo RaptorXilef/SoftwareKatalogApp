@@ -71,6 +71,7 @@ export const bunProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -164,6 +165,15 @@ export const bunProvider = {
       forceRefresh,
       signal,
       registryUrl: getPrimaryCustomRegistryUrl('bun'),
+    });
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const { listNpmRegistryVersions } = await import('./npm-registry-client.js');
+    return listNpmRegistryVersions(packageId, {
+      registryUrl: getPrimaryCustomRegistryUrl('bun'),
+      forceRefresh,
+      signal,
     });
   },
 

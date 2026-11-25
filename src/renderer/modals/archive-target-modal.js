@@ -270,6 +270,7 @@ export async function executeArchiveLink(pkg, targetSpec, { downloadSetup = true
       saveMode: currentSaveMode,
       collisionMode: currentCollisionMode,
       downloadSetup: Boolean(downloadSetup && packageId),
+      version: String(pkg?.selectedVersion || '').trim(),
       metadata: pkg,
     });
 

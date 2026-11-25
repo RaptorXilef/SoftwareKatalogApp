@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/knip/schema.json",
-  "entry": ["src/renderer/main.js", "tests/**/*.test.mjs"],
+  "entry": ["src/renderer/main.js", "src/main/elevated-worker.mjs", "tests/**/*.test.mjs"],
   "project": ["src/**/*.js", "src/**/*.mjs"],
   "ignoreDependencies": ["conventional-changelog-conventionalcommits"],
-  "ignoreBinaries": ["winget"]
+  "ignoreBinaries": []
 }

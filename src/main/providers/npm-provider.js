@@ -71,6 +71,7 @@ export const npmProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -189,6 +190,15 @@ export const npmProvider = {
       forceRefresh,
       signal,
       registryUrl: getPrimaryCustomRegistryUrl('npm'),
+    });
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const { listNpmRegistryVersions } = await import('./npm-registry-client.js');
+    return listNpmRegistryVersions(packageId, {
+      registryUrl: getPrimaryCustomRegistryUrl('npm'),
+      forceRefresh,
+      signal,
     });
   },
 

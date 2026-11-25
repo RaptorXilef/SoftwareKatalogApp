@@ -291,12 +291,19 @@ export function createDevActions(deps = {}) {
   /**
    * Aktualisiert ein Paket projekt-lokal (unterscheidet `wanted` innerhalb Range vs `latest`/Major-Sprung).
    * @param {string} projectId
-   * @param {{ manager?: string, packageName?: string, targetVersion?: string, allowMajor?: boolean, isDev?: boolean }} [payload]
+   * @param {{ manager?: string, packageName?: string, targetVersion?: string, allowMajor?: boolean, exactTarget?: boolean, isDev?: boolean }} [payload]
    * @param {{ signal?: AbortSignal | null, useJob?: boolean, checkUpdates?: boolean }} [opts]
    */
   async function devUpdatePackage(
     projectId,
-    { manager = '', packageName = '', targetVersion = '', allowMajor = false, isDev = undefined } = {},
+    {
+      manager = '',
+      packageName = '',
+      targetVersion = '',
+      allowMajor = false,
+      exactTarget = false,
+      isDev = undefined,
+    } = {},
     opts = {}
   ) {
     const check = validateProjectAndManager(projectId, manager);
@@ -323,6 +330,7 @@ export function createDevActions(deps = {}) {
       packageName: cleanPkg,
       targetVersion: cleanVer,
       allowMajor: Boolean(allowMajor),
+      exactTarget: Boolean(exactTarget),
       isDev: Boolean(effectiveIsDev),
     });
 

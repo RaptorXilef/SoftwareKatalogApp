@@ -136,6 +136,7 @@ describe('provider-registry', () => {
       search: true,
       listInstalled: false,
       listUpgrades: false,
+      listVersions: false,
       show: false,
       install: true,
       uninstall: false,

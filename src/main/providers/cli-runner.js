@@ -10,7 +10,7 @@ import {
   runPowerShellElevated,
 } from '../elevated-helper.js';
 
-export const DEFAULT_CLI_TIMEOUT_MS = 45000;
+const DEFAULT_CLI_TIMEOUT_MS = 45000;
 
 function stripBom(text) {
   return text.startsWith('\uFEFF') ? text.slice(1) : text;

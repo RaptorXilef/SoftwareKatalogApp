@@ -5,6 +5,7 @@ import { isValidDotnetToolId } from './dotnet-parser.js';
 import { isValidNpmPackageName } from './npm-parser.js';
 import { isValidPythonPackageName, normalizePythonPackageName } from './python-parser.js';
 import { isValidVcpkgPortName } from './vcpkg-parser.js';
+import { compareVersions } from './version.js';
 import { cleanCliLines } from './winget-parser.js';
 
 export const SUPPORTED_DEV_MANAGERS = Object.freeze([
@@ -37,7 +38,7 @@ function hasControlChars(str) {
  * @param {unknown} rawPath
  * @returns {string}
  */
-export function normalizeProjectPath(rawPath) {
+function normalizeProjectPath(rawPath) {
   if (typeof rawPath !== 'string') return '';
   const cleaned = rawPath.replace(/[\r\n\0]/g, '').trim();
   if (!cleaned) return '';
@@ -408,6 +409,8 @@ export function parsePackageLockJson(rawText, directList = [], manager = 'npm') 
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Map<string, any>} */
   const packageByKey = new Map();
   /** @type {Record<string, string>} */
@@ -417,11 +420,15 @@ export function parsePackageLockJson(rawText, directList = [], manager = 'npm') 
 
   const addRequiredBy = (depName, parentName) => {
     const cleanDep = String(depName || '').trim();
+    const cleanParent = String(parentName || '').trim();
     if (!cleanDep) return;
     const key = cleanDep.toLowerCase();
     if (!requiredByMap.has(key)) requiredByMap.set(key, new Set());
-    if (parentName) {
-      requiredByMap.get(key).add(parentName);
+    if (cleanParent && cleanParent.toLowerCase() !== key) {
+      requiredByMap.get(key).add(cleanParent);
+      const parentKey = cleanParent.toLowerCase();
+      if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+      requiresMap.get(parentKey).add(cleanDep);
     }
   };
 
@@ -525,6 +532,7 @@ export function parsePackageLockJson(rawText, directList = [], manager = 'npm') 
   const dependencies = [];
   for (const [key, entry] of packageByKey.entries()) {
     const requiredBy = [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b));
+    const requires = [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b));
     dependencies.push({
       manager,
       name: entry.name,
@@ -532,6 +540,7 @@ export function parsePackageLockJson(rawText, directList = [], manager = 'npm') 
       direct: Boolean(entry.direct),
       scope: entry.scope,
       requiredBy,
+      requires,
       license: entry.license,
       homepage: entry.homepage,
     });
@@ -590,6 +599,8 @@ export function parsePnpmLockYaml(rawText, directList = []) {
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Map<string, { name: string, version: string, scope: string }>} */
   const pkgMap = new Map();
 
@@ -698,18 +709,23 @@ export function parsePnpmLockYaml(rawText, directList = []) {
           const depName = unquoteYamlScalar(trimmed.slice(0, colonIdx)).trim();
           if (depName) {
             const depKey = depName.toLowerCase();
-            if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
-            requiredByMap.get(depKey).add(currentPkgName);
+            const parentKey = currentPkgName.toLowerCase();
+            if (depKey !== parentKey) {
+              if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
+              requiredByMap.get(depKey).add(currentPkgName);
+              if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+              requiresMap.get(parentKey).add(depName);
+            }
           }
         }
       }
     }
   }
 
-  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'pnpm');
+  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'pnpm', requiresMap);
 }
 
-function finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, manager) {
+function finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, manager, requiresMap = new Map()) {
   const dependencies = [];
   /** @type {Record<string, string>} */
   const versionByName = {};
@@ -718,6 +734,7 @@ function finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, manager) {
 
   for (const [key, entry] of pkgMap.entries()) {
     const requiredBy = [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b));
+    const requires = [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b));
     const homepage = `https://www.npmjs.com/package/${entry.name}`;
     dependencies.push({
       manager,
@@ -726,6 +743,7 @@ function finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, manager) {
       direct: directScopeMap.has(key),
       scope: directScopeMap.get(key) || entry.scope || 'prod',
       requiredBy,
+      requires,
       license: '',
       homepage,
     });
@@ -767,6 +785,8 @@ export function parseYarnLock(rawText, directList = []) {
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Map<string, { name: string, version: string, scope: string }>} */
   const pkgMap = new Map();
 
@@ -818,13 +838,18 @@ export function parseYarnLock(rawText, directList = []) {
       if (depMatch) {
         const depName = depMatch[1];
         const depKey = depName.toLowerCase();
-        if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
-        requiredByMap.get(depKey).add(currentName);
+        const parentKey = currentName.toLowerCase();
+        if (depKey !== parentKey) {
+          if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
+          requiredByMap.get(depKey).add(currentName);
+          if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+          requiresMap.get(parentKey).add(depName);
+        }
       }
     }
   }
 
-  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'yarn');
+  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'yarn', requiresMap);
 }
 
 function stripJsoncCommentsAndTrailingCommas(rawText) {
@@ -914,6 +939,8 @@ export function parseBunLock(rawText, directList = []) {
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Map<string, { name: string, version: string, scope: string }>} */
   const pkgMap = new Map();
 
@@ -926,13 +953,19 @@ export function parseBunLock(rawText, directList = []) {
     if (!pkgName) continue;
 
     const meta = tuple[2] && typeof tuple[2] === 'object' ? tuple[2] : {};
+    const parentKey = pkgName.toLowerCase();
     for (const depField of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
       const depsObj = meta[depField];
       if (depsObj && typeof depsObj === 'object') {
         for (const depName of Object.keys(depsObj)) {
-          const depKey = String(depName).toLowerCase();
-          if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
-          requiredByMap.get(depKey).add(pkgName);
+          const cleanDep = String(depName).trim();
+          const depKey = cleanDep.toLowerCase();
+          if (cleanDep && depKey !== parentKey) {
+            if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
+            requiredByMap.get(depKey).add(pkgName);
+            if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+            requiresMap.get(parentKey).add(cleanDep);
+          }
         }
       }
     }
@@ -947,7 +980,7 @@ export function parseBunLock(rawText, directList = []) {
     }
   }
 
-  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'bun');
+  return finalizeNodeLockMap(pkgMap, directScopeMap, requiredByMap, 'bun', requiresMap);
 }
 
 /**
@@ -1007,6 +1040,8 @@ export function parseComposerLock(rawText, directList = []) {
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Array<{ pkg: Record<string, any>, defaultScope: 'prod' | 'dev' }>} */
   const rawEntries = [];
 
@@ -1024,18 +1059,22 @@ export function parseComposerLock(rawText, directList = []) {
   /** @type {Record<string, { version: string, description: string, license: string, homepage: string }>} */
   const metaByName = {};
 
-  // 1. Reverse-Graph fuer requiredBy aufbauen
+  // 1. Graph fuer requiredBy und requires aufbauen
   for (const { pkg } of rawEntries) {
     if (!pkg || typeof pkg !== 'object') continue;
     const parentName = String(pkg.name || '').trim();
     if (!parentName) continue;
+    const parentKey = parentName.toLowerCase();
     const reqMap = pkg.require && typeof pkg.require === 'object' ? pkg.require : {};
     for (const depName of Object.keys(reqMap)) {
       const cleanDep = String(depName || '').trim();
       if (!cleanDep?.includes('/')) continue;
       const depKey = cleanDep.toLowerCase();
+      if (depKey === parentKey) continue;
       if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
       requiredByMap.get(depKey).add(parentName);
+      if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+      requiresMap.get(parentKey).add(cleanDep);
     }
   }
 
@@ -1067,6 +1106,7 @@ export function parseComposerLock(rawText, directList = []) {
       direct,
       scope,
       requiredBy: [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
+      requires: [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
       license,
       homepage,
     });
@@ -1368,15 +1408,20 @@ export function parseUvLock(rawText, directList = []) {
 
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   for (const pkg of packages) {
     if (!pkg.name) continue;
-    const isVirtualRoot =
-      /virtual\s*=|editable\s*=/.test(pkg.source) && !directScopeMap.has(normalizePythonPackageName(pkg.name));
+    const parentKey = normalizePythonPackageName(pkg.name);
+    const isVirtualRoot = /virtual\s*=|editable\s*=/.test(pkg.source) && !directScopeMap.has(parentKey);
     if (isVirtualRoot) continue;
     for (const dep of pkg.deps) {
       const depKey = normalizePythonPackageName(dep);
+      if (!depKey || depKey === parentKey) continue;
       if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
       requiredByMap.get(depKey).add(pkg.name);
+      if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+      requiresMap.get(parentKey).add(dep);
     }
   }
 
@@ -1402,6 +1447,7 @@ export function parseUvLock(rawText, directList = []) {
       direct: directScopeMap.has(key),
       scope: directScopeMap.get(key) || 'prod',
       requiredBy: [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
+      requires: [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
       license: '',
       homepage,
     });
@@ -1564,14 +1610,20 @@ export function parseCargoLock(rawText, directList = [], rootPackageName = '') {
 
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   for (const pkg of rawPackages) {
     if (!pkg.name) continue;
-    const isRoot = !pkg.source && rootLower && pkg.name.toLowerCase() === rootLower;
+    const parentKey = pkg.name.toLowerCase();
+    const isRoot = !pkg.source && rootLower && parentKey === rootLower;
     if (isRoot) continue;
     for (const dep of pkg.deps) {
       const depKey = dep.toLowerCase();
+      if (!depKey || depKey === parentKey) continue;
       if (!requiredByMap.has(depKey)) requiredByMap.set(depKey, new Set());
       requiredByMap.get(depKey).add(pkg.name);
+      if (!requiresMap.has(parentKey)) requiresMap.set(parentKey, new Set());
+      requiresMap.get(parentKey).add(dep);
     }
   }
 
@@ -1597,6 +1649,7 @@ export function parseCargoLock(rawText, directList = [], rootPackageName = '') {
       direct: directScopeMap.has(key),
       scope: directScopeMap.get(key) || 'prod',
       requiredBy: [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
+      requires: [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
       license: '',
       homepage,
     });
@@ -1667,6 +1720,8 @@ export function parseDotnetPackagesLockJson(rawText, directList = []) {
   const directScopeMap = buildDirectScopeMap(directList);
   /** @type {Map<string, Set<string>>} */
   const requiredByMap = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const requiresMap = new Map();
   /** @type {Map<string, { name: string, version: string, direct: boolean, scope: string }>} */
   const pkgMap = new Map();
 
@@ -1686,9 +1741,13 @@ export function parseDotnetPackagesLockJson(rawText, directList = []) {
 
       if (info.dependencies && typeof info.dependencies === 'object') {
         for (const childName of Object.keys(info.dependencies)) {
-          const childKey = String(childName).trim().toLowerCase();
+          const cleanChild = String(childName).trim();
+          const childKey = cleanChild.toLowerCase();
+          if (!cleanChild || childKey === key) continue;
           if (!requiredByMap.has(childKey)) requiredByMap.set(childKey, new Set());
           requiredByMap.get(childKey).add(cleanName);
+          if (!requiresMap.has(key)) requiresMap.set(key, new Set());
+          requiresMap.get(key).add(cleanChild);
         }
       }
 
@@ -1718,6 +1777,7 @@ export function parseDotnetPackagesLockJson(rawText, directList = []) {
       direct: entry.direct,
       scope: entry.scope,
       requiredBy: [...(requiredByMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
+      requires: [...(requiresMap.get(key) || [])].sort((a, b) => a.localeCompare(b)),
       license: '',
       homepage,
     });
@@ -1806,7 +1866,7 @@ export function mergeInstalledWithLockMeta(
  * @param {unknown} version
  * @returns {[number, number, number] | null}
  */
-export function parseSemverParts(version) {
+function parseSemverParts(version) {
   const clean = cleanVersion(version);
   if (!clean) return null;
   const match = clean.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
@@ -1825,6 +1885,80 @@ export function isMajorUpgrade(currentVersion, targetVersion) {
   const tgt = parseSemverParts(targetVersion);
   if (!cur || !tgt) return false;
   return tgt[0] > cur[0];
+}
+
+function parseSemverDetail(rawVersion) {
+  const clean = cleanVersion(rawVersion);
+  if (!clean) return null;
+  const match = clean.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[.-]?([0-9A-Za-z._+-]+))?$/);
+  if (!match) return null;
+  const suffix = String(match[4] || '').trim();
+  const isPrerelease = Boolean(
+    suffix && (clean.includes('-') || /^(?:alpha|beta|rc|dev|preview|pre|snapshot|nightly|a\d+|b\d+)/i.test(suffix))
+  );
+  return {
+    raw: clean,
+    major: Number(match[1]),
+    minor: Number(match[2] || 0),
+    patch: Number(match[3] || 0),
+    suffix,
+    isPrerelease,
+  };
+}
+
+function compareSemverDetails(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  if (a.patch !== b.patch) return a.patch - b.patch;
+  if (a.isPrerelease !== b.isPrerelease) return a.isPrerelease ? -1 : 1;
+  if (!a.suffix && !b.suffix) return 0;
+  return compareVersions(a.raw, b.raw, 0);
+}
+
+/**
+ * Klassifiziert verfuegbare Registry-Versionen getrennt in die jeweils hoechste
+ * Patch-, Minor- und Major-Zielversion relativ zu `currentVersion`.
+ * Pre-Releases werden ignoriert, sofern `currentVersion` selbst kein Pre-Release ist.
+ * @param {unknown} currentVersion
+ * @param {unknown[]} availableVersions
+ * @returns {{ patch: string, minor: string, major: string }}
+ */
+export function classifySemverUpdates(currentVersion, availableVersions = []) {
+  const result = { patch: '', minor: '', major: '' };
+  const cur = parseSemverDetail(currentVersion);
+  if (!cur || !Array.isArray(availableVersions) || availableVersions.length === 0) {
+    return result;
+  }
+
+  let bestPatch = null;
+  let bestMinor = null;
+  let bestMajor = null;
+
+  for (const rawCandidate of availableVersions) {
+    const cand = parseSemverDetail(rawCandidate);
+    if (!cand) continue;
+    if (!cur.isPrerelease && cand.isPrerelease) continue;
+    if (compareSemverDetails(cand, cur) <= 0) continue;
+
+    if (cand.major === cur.major && cand.minor === cur.minor && cand.patch > cur.patch) {
+      if (!bestPatch || compareSemverDetails(cand, bestPatch) > 0) {
+        bestPatch = cand;
+      }
+    } else if (cand.major === cur.major && cand.minor > cur.minor) {
+      if (!bestMinor || compareSemverDetails(cand, bestMinor) > 0) {
+        bestMinor = cand;
+      }
+    } else if (cand.major > cur.major) {
+      if (!bestMajor || compareSemverDetails(cand, bestMajor) > 0) {
+        bestMajor = cand;
+      }
+    }
+  }
+
+  result.patch = bestPatch ? bestPatch.raw : '';
+  result.minor = bestMinor ? bestMinor.raw : '';
+  result.major = bestMajor ? bestMajor.raw : '';
+  return result;
 }
 
 function resolveScope(rawType, fallback = 'prod') {
@@ -2286,16 +2420,77 @@ export function buildDevInstallCommand({ manager, packageName, version = '', isD
 }
 
 /**
- * Erzeugt Argumente fuer `devUpdatePackage` (unterscheidet `wanted` vs `latest` / Major-Sprung).
- * @param {{ manager: string, packageName: string, targetVersion?: string, allowMajor?: boolean, isDev?: boolean }} params
+ * Erzeugt Argumente fuer `devUpdatePackage` (unterscheidet `wanted` vs `latest` / Major-Sprung / exakte Zielversion).
+ * @param {{ manager: string, packageName: string, targetVersion?: string, allowMajor?: boolean, exactTarget?: boolean, isDev?: boolean }} params
  * @returns {{ args: string[], description: string }}
  */
-export function buildDevUpdateCommand({ manager, packageName, targetVersion = '', allowMajor = false, isDev = false }) {
+export function buildDevUpdateCommand({
+  manager,
+  packageName,
+  targetVersion = '',
+  allowMajor = false,
+  exactTarget = false,
+  isDev = false,
+}) {
   const mgr = String(manager || '')
     .trim()
     .toLowerCase();
   const pkg = String(packageName || '').trim();
   const ver = cleanVersion(targetVersion);
+
+  if (exactTarget && ver) {
+    switch (mgr) {
+      case 'npm':
+        return {
+          args: ['install', ...(isDev ? ['-D'] : []), `${pkg}@${ver}`],
+          description: `npm install ${isDev ? '-D ' : ''}${pkg}@${ver}`,
+        };
+      case 'pnpm':
+        return {
+          args: ['add', ...(isDev ? ['-D'] : []), `${pkg}@${ver}`],
+          description: `pnpm add ${isDev ? '-D ' : ''}${pkg}@${ver}`,
+        };
+      case 'bun':
+        return {
+          args: ['add', ...(isDev ? ['-d'] : []), `${pkg}@${ver}`],
+          description: `bun add ${isDev ? '-d ' : ''}${pkg}@${ver}`,
+        };
+      case 'yarn':
+        return {
+          args: ['add', ...(isDev ? ['-D'] : []), `${pkg}@${ver}`],
+          description: `yarn add ${isDev ? '-D ' : ''}${pkg}@${ver}`,
+        };
+      case 'composer':
+        return {
+          args: ['require', ...(isDev ? ['--dev'] : []), `${pkg}:${ver}`, '--with-all-dependencies'],
+          description: `composer require ${isDev ? '--dev ' : ''}${pkg}:${ver} --with-all-dependencies`,
+        };
+      case 'uv':
+        return {
+          args: ['add', ...(isDev ? ['--dev'] : []), `${pkg}==${ver}`, '--upgrade-package', pkg],
+          description: `uv add ${isDev ? '--dev ' : ''}${pkg}==${ver}`,
+        };
+      case 'pip':
+        return {
+          args: ['install', '--upgrade', `${pkg}==${ver}`],
+          description: `pip install --upgrade ${pkg}==${ver}`,
+        };
+      case 'cargo':
+        return {
+          args: ['add', ...(isDev ? ['--dev'] : []), `${pkg}@=${ver}`],
+          description: `cargo add ${isDev ? '--dev ' : ''}${pkg}@=${ver}`,
+        };
+      case 'dotnet':
+        return {
+          args: ['add', 'package', pkg, '--version', ver],
+          description: `dotnet add package ${pkg} --version ${ver}`,
+        };
+      case 'vcpkg':
+        return { args: ['x-update-baseline'], description: 'vcpkg x-update-baseline' };
+      default:
+        throw new Error(`Nicht unterstuetzter Paketmanager: ${mgr}`);
+    }
+  }
 
   if (!allowMajor) {
     switch (mgr) {

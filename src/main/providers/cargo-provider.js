@@ -95,6 +95,7 @@ export const cargoProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -248,6 +249,35 @@ export const cargoProvider = {
       updatedAt: res.updatedAt,
       error: res.error,
     };
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const cleanId = String(packageId || '').trim();
+    if (!isValidCargoCrateName(cleanId)) {
+      return { success: false, versions: [], error: 'Ungueltiger Cargo-Crate-Name angegeben.' };
+    }
+    const cacheKey = `cargo:versions:${cleanId.toLowerCase()}`;
+    const cache = getWingetCache();
+    if (!forceRefresh) {
+      const cached = cache.get(cacheKey);
+      if (cached?.data && Array.isArray(cached.data) && Date.now() - Number(cached.updatedAt || 0) < 15 * 60 * 1000) {
+        return { success: true, versions: cached.data, fromCache: true };
+      }
+    }
+    try {
+      const data = await fetchCratesIoJson(`${CRATES_API_BASE}/crates/${encodeURIComponent(cleanId)}`, { signal });
+      const versions = Array.isArray(data?.versions)
+        ? data.versions
+            .filter((v) => !v?.yanked)
+            .map((v) => String(v?.num || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => compareVersions(b, a, 0) || b.localeCompare(a, 'en', { numeric: true }))
+        : [];
+      if (versions.length > 0) cache.set(cacheKey, versions);
+      return { success: true, versions, fromCache: false };
+    } catch (err) {
+      return { success: false, versions: [], error: err?.message || 'Crate-Versionen konnten nicht geladen werden.' };
+    }
   },
 
   async install(packageId, { upgrade = false, version = '', itemName = '', signal = null, useJob = true } = {}) {

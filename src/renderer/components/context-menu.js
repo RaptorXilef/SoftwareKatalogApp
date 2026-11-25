@@ -28,7 +28,7 @@ function getEnabledMenuButtons(root) {
   return /** @type {HTMLButtonElement[]} */ ([...root.querySelectorAll('[role="menuitem"]:not(:disabled)')]);
 }
 
-export function isContextMenuOpen() {
+function isContextMenuOpen() {
   return Boolean(menuEl && !menuEl.hidden);
 }
 

@@ -480,10 +480,6 @@
     font-weight: 600;
     color: var(--text-muted);
     user-select: none;
-
-    &:hover {
-      color: var(--accent);
-    }
   }
 }
 
@@ -1311,10 +1307,6 @@
     font-weight: 600;
     color: var(--text);
     user-select: none;
-
-    &:hover {
-      color: var(--accent);
-    }
   }
 }
 
@@ -1546,10 +1538,6 @@
     background-color 0.15s ease,
     color 0.15s ease;
 
-  &:hover:not(:disabled) {
-    color: var(--text);
-  }
-
   &.active {
     background: color-mix(in srgb, var(--accent) 22%, var(--surface));
     color: var(--accent);
@@ -1558,6 +1546,10 @@
   &:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text);
   }
 }
 
@@ -2185,6 +2177,12 @@
     color: var(--color-ok);
     user-select: none;
   }
+}
+
+.detail-tech-drawer summary:hover,
+.advanced-box summary:hover,
+.detail-changelog-drawer summary:hover {
+  color: var(--accent);
 }
 
 .cleanup-protected-list {
@@ -3051,6 +3049,11 @@
     background-color 0.12s ease,
     color 0.12s ease;
 
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   &:hover:not(:disabled),
   &:focus-visible:not(:disabled) {
     outline: none;
@@ -3062,11 +3065,6 @@
   &.is-danger:focus-visible:not(:disabled) {
     background: color-mix(in srgb, var(--color-danger) 16%, transparent);
     color: var(--color-danger);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 }
 
@@ -3523,10 +3521,6 @@
   padding: 6px 11px;
   cursor: pointer;
 
-  &:hover:not(:disabled) {
-    color: var(--text);
-  }
-
   &.active {
     background: color-mix(in srgb, var(--accent) 20%, var(--bg));
     color: var(--accent);
@@ -3535,6 +3529,10 @@
   &:disabled {
     opacity: 0.55;
     cursor: not-allowed;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text);
   }
 }
 
@@ -4000,4 +3998,23 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.detail-version-bar,
+.detail-provider-version-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.detail-version-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
 }

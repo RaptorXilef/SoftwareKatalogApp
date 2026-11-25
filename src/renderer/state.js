@@ -77,11 +77,19 @@ export const state = {
     managerFilter: 'all',
     updatesQuery: '',
     selectedUpdateKeys: new Set(),
+    selectedUpdateTierByKey: {},
     installedScopeFilter: 'all',
     installedQuery: '',
     depsDirectFilter: 'all',
     depsQuery: '',
     depsRenderLimit: 150,
+    depsViewMode: 'list',
+    depsTreeExpanded: new Set(),
+    depsTreeExpandAll: false,
+    depsHighlightPkg: '',
+    depsGraphFocusKey: '',
+    depsGraphSelectedId: '',
+    depsGraphTransform: { x: 0, y: 0, scale: 1 },
     bundlesShowAllManagers: false,
     bundlesQuery: '',
     discoverManager: '',
@@ -175,11 +183,11 @@ function getVisibleTabPackages() {
   });
 }
 
-export function isAdminAuthenticated() {
+function isAdminAuthenticated() {
   return Boolean(state.authStatus?.enabled && state.authStatus?.isAuthenticated);
 }
 
-export function getAccessPolicy() {
+function getAccessPolicy() {
   return state.authStatus?.accessPolicy || createDefaultAccessPolicy();
 }
 
@@ -335,11 +343,19 @@ export function resetDevWorkspaceForProject(projectId) {
     managerFilter: 'all',
     updatesQuery: '',
     selectedUpdateKeys: new Set(),
+    selectedUpdateTierByKey: {},
     installedScopeFilter: 'all',
     installedQuery: '',
     depsDirectFilter: 'all',
     depsQuery: '',
     depsRenderLimit: 150,
+    depsViewMode: 'list',
+    depsTreeExpanded: new Set(),
+    depsTreeExpandAll: false,
+    depsHighlightPkg: '',
+    depsGraphFocusKey: '',
+    depsGraphSelectedId: '',
+    depsGraphTransform: { x: 0, y: 0, scale: 1 },
     bundlesShowAllManagers: false,
     bundlesQuery: '',
     discoverManager: '',

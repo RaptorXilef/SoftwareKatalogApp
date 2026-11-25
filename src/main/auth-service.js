@@ -998,7 +998,6 @@ const defaultAuthService = createAuthService();
 
 export const configureAuthService = (options) => defaultAuthService.configure(options);
 export const initAuthService = () => defaultAuthService.init();
-export const refreshAuthPolicy = () => defaultAuthService.refreshHklmAndPolicy();
 export const getAuthStatus = (opts) => defaultAuthService.getStatus(opts);
 export const checkAdminIpcAccess = (channel) => defaultAuthService.checkAdminIpcAccess(channel);
 export const loginAuth = (username, password) => defaultAuthService.login(username, password);

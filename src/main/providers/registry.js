@@ -25,6 +25,7 @@ const CAPABILITY_KEYS = [
   'search',
   'listInstalled',
   'listUpgrades',
+  'listVersions',
   'show',
   'install',
   'uninstall',
@@ -303,6 +304,18 @@ export async function showPackage(providerId, packageId, opts = {}) {
     return { success: false, error: `Provider "${providerId}" unterstützt kein Paket-Details-Abrufen.` };
   }
   return provider.show(packageId, opts);
+}
+
+export async function listPackageVersions(providerId, packageId, opts = {}) {
+  const provider = getProvider(providerId);
+  if (!provider?.capabilities.listVersions || typeof provider.listVersions !== 'function') {
+    return {
+      success: false,
+      versions: [],
+      error: `Provider "${providerId}" unterstützt kein Auflisten älterer Paketversionen.`,
+    };
+  }
+  return provider.listVersions(packageId, opts);
 }
 
 export async function listUpgradesAcrossProviders({ providerIds = null, signal = null } = {}) {

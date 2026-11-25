@@ -180,6 +180,45 @@ export async function showPyPiPackage(
 }
 
 /**
+ * Laedt verfuegbare Versionen eines Python-Pakets von PyPI (absteigend sortiert).
+ * @param {string} packageId
+ * @param {{ indexUrl?: string, forceRefresh?: boolean, signal?: AbortSignal | null }} [options]
+ */
+export async function listPyPiPackageVersions(packageId, { indexUrl = '', forceRefresh = false, signal = null } = {}) {
+  const cleanId = String(packageId || '').trim();
+  if (!isValidPythonPackageName(cleanId)) {
+    return { success: false, versions: [], error: `Ungueltiger Python-Paketname: "${cleanId}".` };
+  }
+
+  const { apiBase } = resolvePyPiUrls(indexUrl);
+  const cacheKey = `pypi:versions:${apiBase.toLowerCase()}:${cleanId.toLowerCase()}`;
+  const cache = getWingetCache();
+  if (!forceRefresh) {
+    const cached = cache.get(cacheKey);
+    if (cached?.data && Array.isArray(cached.data) && Date.now() - Number(cached.updatedAt || 0) < 15 * 60 * 1000) {
+      return { success: true, versions: cached.data, fromCache: true };
+    }
+  }
+
+  try {
+    const payload = await fetchRegistryJson(`${apiBase}/pypi/${encodeURIComponent(cleanId)}/json`, {
+      signal,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
+    const releases = payload?.releases && typeof payload.releases === 'object' ? payload.releases : {};
+    const versions = Object.entries(releases)
+      .filter(([, files]) => !Array.isArray(files) || files.length === 0 || files.some((f) => !f?.yanked))
+      .map(([ver]) => String(ver).trim())
+      .filter(Boolean)
+      .sort((a, b) => compareVersions(b, a, 0) || b.localeCompare(a, 'en', { numeric: true }));
+    if (versions.length > 0) cache.set(cacheKey, versions);
+    return { success: true, versions, fromCache: false };
+  } catch (err) {
+    return { success: false, versions: [], error: err?.message || 'PyPI-Versionen konnten nicht geladen werden.' };
+  }
+}
+
+/**
  * Durchsucht PyPI ueber direkte Paketpruefung + PyPI-Suche mit PEP-503-Simple-Fallback.
  * @param {string} query
  * @param {{ limit?: number, signal?: AbortSignal | null, packageManager?: string, indexUrl?: string }} [options]

@@ -129,6 +129,7 @@ import {
   getProviderCacheStats,
   initDefaultProviders,
   installPackage,
+  listPackageVersions,
   listProviderSources,
   listProvidersInfo,
   listUpgradesAcrossProviders,
@@ -143,7 +144,7 @@ import {
   destroyTrayService,
   initTrayService,
   isTrayActive,
-  resolveTrayIconPath,
+  resolveAppIconPath,
   updateTrayState,
 } from './tray-service.js';
 import { cancelAllQueue, cancelQueueItem, enqueueUpdates, getQueueState, reorderQueue } from './update-queue.js';
@@ -160,9 +161,11 @@ import {
 import {
   autoDetectAllMissingPaths,
   autoDetectPath,
+  clearIconCache,
   executeAndVerifyInstaller,
   extractCachedAppIcon,
   extractExeIcon,
+  getIconCacheStats,
   getInstalledApps,
   recordInnoInfFile,
   scanInstalledSoftware,
@@ -178,12 +181,6 @@ app.commandLine.appendSwitch('disable-features', 'DawnGraphiteCache');
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-direct-composition');
-
-const APP_USER_MODEL_ID = 'io.github.raptorxilef.softwarekatalogapp';
-
-if (process.platform === 'win32') {
-  app.setAppUserModelId(APP_USER_MODEL_ID);
-}
 
 // Muss VOR app.whenReady() registriert werden
 registerMediaScheme();
@@ -215,7 +212,7 @@ function createWindow({ showOnReady = true } = {}) {
     },
   };
 
-  const iconPath = resolveTrayIconPath();
+  const iconPath = resolveAppIconPath();
   const windowIcon = iconPath ? nativeImage.createFromPath(iconPath) : null;
   const effectiveIcon = windowIcon && !windowIcon.isEmpty() ? windowIcon : iconPath;
   if (effectiveIcon) {
@@ -226,14 +223,6 @@ function createWindow({ showOnReady = true } = {}) {
 
   if (effectiveIcon) {
     mainWindow.setIcon(effectiveIcon);
-  }
-  if (process.platform === 'win32' && iconPath && typeof mainWindow.setAppDetails === 'function') {
-    mainWindow.setAppDetails({
-      appId: APP_USER_MODEL_ID,
-      appIconPath: iconPath,
-      appIconIndex: 0,
-      relaunchDisplayName: 'Software Katalog',
-    });
   }
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -447,6 +436,8 @@ function registerIpcHandlers() {
   handleIpc('scan-local-versions', (_e, opts) => scanLocalVersions(opts || {}));
   handleIpc('scan-installed-software', (_e, opts) => scanInstalledSoftware(opts || {}));
   handleIpc('extract-cached-app-icon', (_e, payload) => extractCachedAppIcon(payload || {}));
+  handleIpc('icon-cache-stats', () => getIconCacheStats());
+  handleIpc('icon-cache-clear', () => clearIconCache());
   handleIpc('uninstall-software', (_e, payload) => uninstallSoftware(payload || {}));
   handleIpc('auto-detect-path', (_e, names) => autoDetectPath(names));
   handleIpc('auto-detect-all', () => autoDetectAllMissingPaths(loadCatalogWithLiveStatus()));
@@ -464,6 +455,9 @@ function registerIpcHandlers() {
   handleIpc('providers-uninstall-manager', (_e, providerId) => uninstallProviderManager(providerId));
   handleIpc('providers-search', (_e, query, opts) => searchAcrossProviders(query, opts || {}));
   handleIpc('providers-show', (_e, providerId, packageId, opts) => showPackage(providerId, packageId, opts || {}));
+  handleIpc('providers-list-versions', (_e, providerId, packageId, opts) =>
+    listPackageVersions(providerId, packageId, opts || {})
+  );
   handleIpc('providers-list-upgrades', (_e, opts) => listUpgradesAcrossProviders(opts || {}));
   handleIpc('providers-install', (_e, providerId, packageId, opts) =>
     installPackage(providerId, packageId, opts || {})
@@ -767,6 +761,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.on('second-instance', () => {
     showMainWindow();
   });
+
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('io.github.raptorxilef.softwarekatalogapp');
+  }
 
   app.whenReady().then(async () => {
     try {

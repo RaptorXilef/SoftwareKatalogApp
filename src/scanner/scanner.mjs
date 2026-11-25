@@ -9,6 +9,7 @@ import {
   mergeMultiRootCatalogEntries,
   normalizeArchivePaths,
   normalizePathKey,
+  sortArchiveSetupFiles,
 } from '../shared/multi-archive-logic.js';
 import { resolveScannerAppDir } from '../shared/scanner-path-logic.js';
 
@@ -296,8 +297,8 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config, rootInfo) {
       const names = lEntries.filter((e) => e.isFile() && !e.name.endsWith('.part')).map((e) => e.name);
       if (names.length > 0) {
         hasPinnedLast = true;
-        names.sort((a, b) => b.localeCompare(a, 'de', { numeric: true, sensitivity: 'base' }));
-        lastFiles = names.map((e) => path.join(lastDir, e));
+        const sortedNames = sortArchiveSetupFiles(names);
+        lastFiles = sortedNames.map((e) => path.join(lastDir, e));
       }
     } catch (e) {
       console.error(`Fehler beim Lesen des _last Ordners in ${softwareDir}: ${e.message}`);
@@ -309,19 +310,21 @@ async function parseSoftwareMetadata(softwareDir, metaDir, config, rootInfo) {
     try {
       const rootEntries = await fs.readdir(softwareDir, { withFileTypes: true });
       const files = rootEntries.filter((e) => e.isFile() && !e.name.endsWith('.part')).map((e) => e.name);
-      const foundFiles = [];
-
-      for (const ext of config.autoExtensions) {
-        let extLower = ext.toLowerCase().trim();
-        if (extLower && !extLower.startsWith('.')) extLower = `.${extLower}`;
-        const matchingFiles = files.filter((f) => f.toLowerCase().endsWith(extLower));
-        if (matchingFiles.length > 0) {
-          matchingFiles.sort((a, b) => b.localeCompare(a, 'de', { numeric: true, sensitivity: 'base' }));
-          foundFiles.push(...matchingFiles);
-        }
-      }
-      if (foundFiles.length > 0) {
-        lastFiles.push(...foundFiles.map((f) => path.join(softwareDir, f)));
+      const allowedExts = config.autoExtensions
+        .map((ext) => {
+          const clean = String(ext || '')
+            .toLowerCase()
+            .trim();
+          return clean ? (clean.startsWith('.') ? clean : `.${clean}`) : '';
+        })
+        .filter(Boolean);
+      const matchingFiles = files.filter((f) => {
+        const lower = f.toLowerCase();
+        return allowedExts.some((extLower) => lower.endsWith(extLower));
+      });
+      if (matchingFiles.length > 0) {
+        const sortedFiles = sortArchiveSetupFiles(matchingFiles);
+        lastFiles.push(...sortedFiles.map((f) => path.join(softwareDir, f)));
       }
     } catch (e) {
       console.error(`Fehler beim Suchen nach Setup-Dateien in ${softwareDir}: ${e.message}`);

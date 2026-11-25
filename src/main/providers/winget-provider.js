@@ -18,6 +18,7 @@ import {
   parseWingetSearchOutput,
   parseWingetShowOutput,
   parseWingetUpgradeOutput,
+  parseWingetVersionsOutput,
 } from '../../shared/winget-parser.js';
 import { isAdminSessionActive } from '../elevated-helper.js';
 import { createJob } from '../jobs.js';
@@ -25,6 +26,7 @@ import { findBinaryPath, runCli, runElevatedPowerShell } from './cli-runner.js';
 
 const DEFAULT_TIMEOUT_MS = 45000;
 const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
+const VERSIONS_CACHE_TTL_MS = 15 * 60 * 1000;
 
 let cacheInstance = null;
 
@@ -94,13 +96,18 @@ async function runWingetWithUacFallback(args, { signal = null } = {}) {
   return { success: false, error: errMsg };
 }
 
-async function fetchShowFresh(packageId, { preferGerman = true, signal = null } = {}) {
+async function fetchShowFresh(packageId, { preferGerman = true, version = '', signal = null } = {}) {
   const cleanId = String(packageId || '').trim();
   if (!cleanId) {
     throw new Error('Keine Winget-Paket-ID angegeben.');
   }
+  const cleanVersion = String(version || '').trim();
 
-  const baseArgs = ['show', '--id', cleanId, '--exact', '--source', 'winget', '--accept-source-agreements'];
+  const baseArgs = ['show', '--id', cleanId, '--exact'];
+  if (cleanVersion) {
+    baseArgs.push('--version', cleanVersion);
+  }
+  baseArgs.push('--source', 'winget', '--accept-source-agreements');
   let deParsed = null;
 
   if (preferGerman) {
@@ -147,6 +154,7 @@ export const wingetProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -281,7 +289,7 @@ export const wingetProvider = {
     return { success: true, upgrades };
   },
 
-  async show(packageId, { preferGerman = true, forceRefresh = false, signal = null } = {}) {
+  async show(packageId, { preferGerman = true, version = '', forceRefresh = false, signal = null } = {}) {
     const cleanId = String(packageId || '').trim();
     if (!cleanId) {
       return {
@@ -294,11 +302,18 @@ export const wingetProvider = {
       };
     }
 
-    const cacheKey = `winget:show:${cleanId.toLowerCase()}`;
+    const cleanVer = String(version || '').trim();
+    const cacheKey = cleanVer
+      ? `winget:show:${cleanId.toLowerCase()}@${cleanVer.toLowerCase()}`
+      : `winget:show:${cleanId.toLowerCase()}`;
     const cache = getWingetCache();
-    const res = await cache.getOrFetch(cacheKey, () => fetchShowFresh(cleanId, { preferGerman, signal }), {
-      forceRefresh,
-    });
+    const res = await cache.getOrFetch(
+      cacheKey,
+      () => fetchShowFresh(cleanId, { preferGerman, version: cleanVer, signal }),
+      {
+        forceRefresh,
+      }
+    );
 
     if (!res.data) {
       return {
@@ -321,15 +336,62 @@ export const wingetProvider = {
     };
   },
 
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const cleanId = String(packageId || '').trim();
+    if (!cleanId) {
+      return { success: false, versions: [], error: 'Keine Winget-Paket-ID angegeben.' };
+    }
+
+    const cacheKey = `winget:versions:${cleanId.toLowerCase()}`;
+    const cache = getWingetCache();
+    if (!forceRefresh) {
+      const cached = cache.get(cacheKey);
+      if (
+        cached?.data &&
+        Array.isArray(cached.data) &&
+        Date.now() - Number(cached.updatedAt || 0) < VERSIONS_CACHE_TTL_MS
+      ) {
+        return { success: true, versions: cached.data, fromCache: true };
+      }
+    }
+
+    const res = await runWinget(
+      ['show', '--id', cleanId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements'],
+      { signal, timeoutMs: DEFAULT_TIMEOUT_MS }
+    );
+    if (signal?.aborted || res.aborted) {
+      return { success: false, versions: [], canceled: true };
+    }
+    if (res.notFound || (res.code !== 0 && !res.stdout)) {
+      const fallback = cache.get(cacheKey);
+      if (fallback?.data && Array.isArray(fallback.data)) {
+        return { success: true, versions: fallback.data, fromCache: true, isStale: true };
+      }
+      return {
+        success: false,
+        versions: [],
+        error: res.error || res.stderr || `Versionen fuer "${cleanId}" konnten nicht geladen werden.`,
+      };
+    }
+
+    const versions = parseWingetVersionsOutput(res.stdout);
+    if (versions.length > 0) {
+      cache.set(cacheKey, versions);
+    }
+    return { success: true, versions, fromCache: false };
+  },
+
   async install(
     packageId,
-    { silent = false, version = '', scope = '', itemName = '', signal = null, useJob = true } = {}
+    { silent = false, version = '', upgrade = false, scope = '', itemName = '', signal = null, useJob = true } = {}
   ) {
     const cleanId = String(packageId || '').trim();
     if (!cleanId) return { success: false, error: 'Keine Winget-Paket-ID angegeben.' };
+    const cleanVer = String(version || '').trim();
+    const actionCmd = upgrade ? 'upgrade' : 'install';
 
     const args = [
-      'install',
+      actionCmd,
       '--id',
       cleanId,
       '--exact',
@@ -340,14 +402,14 @@ export const wingetProvider = {
       // Silent-Install ist IMMER opt-in (Standard bleibt interaktiv)
       silent === true ? '--silent' : '--interactive',
     ];
-    if (version) args.push('--version', String(version).trim());
+    if (cleanVer) args.push('--version', cleanVer);
     if (scope === 'user' || scope === 'machine') args.push('--scope', scope);
 
     let job = null;
     if (useJob) {
       job = createJob({
-        type: 'winget-install',
-        title: `Winget-Installation: ${itemName || cleanId}`,
+        type: upgrade ? 'winget-upgrade' : 'winget-install',
+        title: `Winget-${upgrade ? 'Update' : 'Installation'}: ${itemName || cleanId}`,
         dedupeKey: `winget-install:${cleanId.toLowerCase()}`,
         cancelable: true,
       });
@@ -387,6 +449,10 @@ export const wingetProvider = {
     const errMsg = (stderr || stdout || `Winget-Fehlercode ${code}`).trim();
     job?.finish('error', errMsg.slice(0, 180), { autoRemoveMs: 6000 });
     return { success: false, exitCode: code, error: errMsg };
+  },
+
+  async upgrade(packageId, opts = {}) {
+    return this.install(packageId, { ...opts, upgrade: true });
   },
 
   async uninstall(packageId, { silent = false, itemName = '', signal = null, useJob = true } = {}) {

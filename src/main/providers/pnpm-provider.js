@@ -55,6 +55,7 @@ export const pnpmProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -139,6 +140,15 @@ export const pnpmProvider = {
       forceRefresh,
       signal,
       registryUrl: getPrimaryCustomRegistryUrl('pnpm'),
+    });
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const { listNpmRegistryVersions } = await import('./npm-registry-client.js');
+    return listNpmRegistryVersions(packageId, {
+      registryUrl: getPrimaryCustomRegistryUrl('pnpm'),
+      forceRefresh,
+      signal,
     });
   },
 

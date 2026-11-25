@@ -1,14 +1,14 @@
 import { compareVersions } from './version.js';
 
 export const IGNORE_EXPORT_FORMAT = 'software-katalog-ignored-updates';
-export const IGNORE_EXPORT_VERSION = 1;
+const IGNORE_EXPORT_VERSION = 1;
 
 /**
  * Normalisiert den Ignorier-Modus auf 'version' oder 'all'.
  * @param {unknown} mode
  * @returns {'version' | 'all'}
  */
-export function normalizeIgnoreMode(mode) {
+function normalizeIgnoreMode(mode) {
   return String(mode || '')
     .trim()
     .toLowerCase() === 'all'
@@ -21,7 +21,7 @@ export function normalizeIgnoreMode(mode) {
  * @param {unknown} version
  * @returns {string}
  */
-export function normalizeIgnoreVersion(version) {
+function normalizeIgnoreVersion(version) {
   return String(version || '')
     .trim()
     .replace(/^v(?=\d)/i, '');
@@ -58,7 +58,7 @@ export function getIgnorePackageKey(item) {
  * @param {Record<string, any> | null | undefined} item
  * @returns {Set<string>}
  */
-export function getIgnoreMatchKeys(item) {
+function getIgnoreMatchKeys(item) {
   const keys = new Set();
   if (!item || typeof item !== 'object') return keys;
 

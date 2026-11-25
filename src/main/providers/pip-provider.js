@@ -133,6 +133,7 @@ export const pipProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -234,6 +235,15 @@ export const pipProvider = {
       forceRefresh,
       signal,
       indexUrl: getPrimaryCustomRegistryUrl('pip'),
+    });
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const { listPyPiPackageVersions } = await import('./pypi-client.js');
+    return listPyPiPackageVersions(packageId, {
+      indexUrl: getPrimaryCustomRegistryUrl('pip'),
+      forceRefresh,
+      signal,
     });
   },
 

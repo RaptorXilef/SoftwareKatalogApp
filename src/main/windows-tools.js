@@ -3,7 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, net, shell } from 'electron';
+import { buildPersistentIconIndexKeys, createIconCacheIndex } from '../shared/icon-cache-store.js';
 import {
   buildIconCacheKey,
   deriveGitHubAvatarUrl,
@@ -969,7 +970,7 @@ let appxInventoryPromise = null;
  * Liest installierte AppX-/MS-Store-Apps inkl. StartApps-Anzeigenamen und `AppxManifest.xml`-Metadaten.
  * @param {AbortSignal | null} [signal]
  */
-export async function getInstalledAppxInventory(signal = null) {
+async function getInstalledAppxInventory(signal = null) {
   if (appxInventoryCache) return appxInventoryCache;
   if (appxInventoryPromise) return appxInventoryPromise;
 
@@ -1458,6 +1459,29 @@ const ICON_FETCH_HEADERS = {
 let startMenuShortcutsCache = null;
 let startMenuShortcutsPromise = null;
 const failedIconKeys = new Set();
+let iconCacheIndexInstance = null;
+let iconCacheIndexDir = '';
+
+function getIconCacheIndex() {
+  const cacheDir = getIconCacheDir();
+  if (!iconCacheIndexInstance || iconCacheIndexDir !== cacheDir) {
+    iconCacheIndexDir = cacheDir;
+    iconCacheIndexInstance = createIconCacheIndex({
+      cacheDir,
+      isOnline: () => (typeof net?.isOnline === 'function' ? net.isOnline() : true),
+    });
+  }
+  return iconCacheIndexInstance;
+}
+
+export function getIconCacheStats() {
+  return getIconCacheIndex().getStats();
+}
+
+export function clearIconCache() {
+  failedIconKeys.clear();
+  return getIconCacheIndex().clear();
+}
 
 function normalizeDirPath(rawDir) {
   const expanded = expandWindowsEnvVars(String(rawDir || ''), process.env)
@@ -2012,13 +2036,34 @@ export async function extractCachedAppIcon({
   if (!id) return { success: false, error: 'Keine Programm-ID für Icon-Cache angegeben.' };
 
   const appKey = String(id).trim();
-  const failFingerprint = `${appKey}|${displayIcon}|${installLocation}|${executablePath}|${packageId}|${appxPackageFamilyName}|${homepage}`;
-  if (failedIconKeys.has(failFingerprint)) {
-    return { success: false, error: 'Icon für diesen Eintrag in dieser Sitzung nicht gefunden.' };
-  }
+  const baseIndexKeys = buildPersistentIconIndexKeys({
+    id: appKey,
+    packageManager,
+    packageId,
+    homepage,
+    webVersionUrl,
+    links,
+  });
 
   try {
     const cacheDir = getIconCacheDir();
+    const iconIndex = getIconCacheIndex();
+    const indexLookup = iconIndex.lookup(baseIndexKeys);
+    if (indexLookup.status === 'hit' && indexLookup.filePath) {
+      return { success: true, iconPath: indexLookup.filePath, fromCache: true };
+    }
+
+    const staleFallbackPath = indexLookup.status === 'stale' ? indexLookup.filePath : '';
+    const onlineNegativelyCached = indexLookup.status === 'miss';
+    const failFingerprint = `${appKey}|${displayIcon}|${installLocation}|${executablePath}|${packageId}|${appxPackageFamilyName}|${homepage}`;
+    if (failedIconKeys.has(failFingerprint) && !staleFallbackPath) {
+      return { success: false, error: 'Icon für diesen Eintrag in dieser Sitzung nicht gefunden.' };
+    }
+
+    const returnLocalHit = (stageRes, sourceType) => {
+      iconIndex.recordHit(baseIndexKeys, stageRes.iconPath, sourceType);
+      return stageRes;
+    };
 
     // Stufe 1: Registry DisplayIcon (bereinigt von Anführungszeichen, ,0 / ,-101 & %ENV%)
     const parsedDisplay = parseDisplayIcon(displayIcon, process.env);
@@ -2030,7 +2075,7 @@ export async function extractCachedAppIcon({
         iconIndex: parsedDisplay.index,
         cacheDir,
       });
-      if (stage1?.success) return stage1;
+      if (stage1?.success) return returnLocalHit(stage1, 'display-icon');
     }
 
     // Stufe 1.5: AppX-/MS-Store-Logo aus `AppxManifest.xml` extrahieren
@@ -2066,7 +2111,7 @@ export async function extractCachedAppIcon({
             sourcePath: logoPath,
             cacheDir,
           });
-          if (stageAppx?.success) return stageAppx;
+          if (stageAppx?.success) return returnLocalHit(stageAppx, 'appx-logo');
         }
       }
     }
@@ -2082,7 +2127,7 @@ export async function extractCachedAppIcon({
           iconIndex: parsedExe.index,
           cacheDir,
         });
-        if (stage2a?.success) return stage2a;
+        if (stage2a?.success) return returnLocalHit(stage2a, 'executable');
       }
     }
 
@@ -2122,7 +2167,7 @@ export async function extractCachedAppIcon({
           iconIndex: best.iconIndex,
           cacheDir,
         });
-        if (stage2b?.success) return stage2b;
+        if (stage2b?.success) return returnLocalHit(stage2b, 'install-dir');
       }
     }
 
@@ -2139,11 +2184,11 @@ export async function extractCachedAppIcon({
         iconIndex: shortcutCandidate.iconIndex,
         cacheDir,
       });
-      if (stage2c?.success) return stage2c;
+      if (stage2c?.success) return returnLocalHit(stage2c, 'shortcut');
     }
 
     // Stufe 3: Optionaler Online-Favicon-Fallback (aus Provider-Cache, show() oder hinterlegten URLs)
-    if (allowOnlineFallback) {
+    if (allowOnlineFallback && !onlineNegativelyCached) {
       const effectivePm = cleanPm || (packageId ? 'winget' : '');
       let cachedPkg = null;
       if (packageId && effectivePm) {
@@ -2184,12 +2229,42 @@ export async function extractCachedAppIcon({
         }
       }
 
-      const stage3 = await fetchOnlineFaviconToCache({
-        appKey,
-        homepageUrls,
-        cacheDir,
+      const enrichedIndexKeys = buildPersistentIconIndexKeys({
+        id: appKey,
+        packageManager: effectivePm || packageManager,
+        packageId,
+        homepage: homepage || cachedPkg?.homepage || '',
+        repositoryUrl: cachedPkg?.repositoryUrl || '',
+        publisherUrl: cachedPkg?.publisherUrl || '',
+        webVersionUrl,
+        links,
       });
-      if (stage3?.success) return stage3;
+      const enrichedLookup = iconIndex.lookup(enrichedIndexKeys);
+      if (enrichedLookup.status === 'hit' && enrichedLookup.filePath) {
+        iconIndex.recordHit(enrichedIndexKeys, enrichedLookup.filePath, enrichedLookup.sourceType || 'online-favicon');
+        return { success: true, iconPath: enrichedLookup.filePath, fromCache: true };
+      }
+
+      if (enrichedLookup.status !== 'miss') {
+        const stage3 = await fetchOnlineFaviconToCache({
+          appKey,
+          homepageUrls,
+          cacheDir,
+        });
+        if (stage3?.success) {
+          iconIndex.recordHit(enrichedIndexKeys, stage3.iconPath, 'online-favicon');
+          return stage3;
+        }
+        if (staleFallbackPath) {
+          iconIndex.recordHit(enrichedIndexKeys, staleFallbackPath, 'online-favicon');
+          return { success: true, iconPath: staleFallbackPath, fromCache: true };
+        }
+        iconIndex.recordMiss(enrichedIndexKeys.length > 0 ? enrichedIndexKeys : baseIndexKeys);
+      }
+    }
+
+    if (staleFallbackPath) {
+      return { success: true, iconPath: staleFallbackPath, fromCache: true };
     }
 
     failedIconKeys.add(failFingerprint);

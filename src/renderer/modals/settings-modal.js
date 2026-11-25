@@ -106,6 +106,7 @@ export async function renderSettingsModal(initialTab = 'general') {
     info,
     providersInfo,
     cacheStats,
+    iconCacheStats,
     initialAdminStatus,
     initialAuthStatus,
     initialAutostartStatus,
@@ -116,6 +117,9 @@ export async function renderSettingsModal(initialTab = 'general') {
     window.electronAPI.getAppInfo(),
     window.electronAPI.listProviders(),
     window.electronAPI.getProviderCacheStats(),
+    typeof window.electronAPI?.getIconCacheStats === 'function'
+      ? window.electronAPI.getIconCacheStats()
+      : Promise.resolve({ entryCount: 0, hitCount: 0, missCount: 0, fileCount: 0, totalBytes: 0 }),
     typeof window.electronAPI?.getAdminSessionStatus === 'function'
       ? window.electronAPI.getAdminSessionStatus()
       : Promise.resolve(state.adminSession),
@@ -837,6 +841,16 @@ export async function renderSettingsModal(initialTab = 'general') {
 
   const totalCacheEntries = Number(cacheStats?.totalEntries) || 0;
   const expiredCacheEntries = Number(cacheStats?.expiredEntries) || 0;
+  const iconCacheEntries = Number(iconCacheStats?.entryCount) || 0;
+  const iconCacheFiles = Number(iconCacheStats?.fileCount) || 0;
+  const iconCacheBytes = Number(iconCacheStats?.totalBytes) || 0;
+  const formatIconCacheSize = (bytes) => {
+    if (!bytes || bytes <= 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+  const iconCacheEmpty = iconCacheEntries === 0 && iconCacheFiles === 0;
 
   const initialStatusMap = new Map(
     (Array.isArray(s.archiveRootsStatus) ? s.archiveRootsStatus : []).map((st) => [st.rawPath, st])
@@ -1537,6 +1551,17 @@ export async function renderSettingsModal(initialTab = 'general') {
             </div>
             <button type="button" class="btn btn-ghost btn-xs" id="btnClearProviderCache" data-settings-action="clear-provider-cache" ${totalCacheEntries === 0 ? 'disabled' : ''}>
               🧹 ${escapeHTML(t('settings.providers.cacheClearBtn'))}
+            </button>
+          </div>
+          <div class="cache-status-bar">
+            <div class="cache-status-text">
+              <strong>${escapeHTML(t('settings.providers.iconCacheSubtitle'))}</strong>
+              <span id="iconCacheCount" class="muted">
+                ${escapeHTML(t('settings.providers.iconCacheSummary', { entries: iconCacheEntries, files: iconCacheFiles, size: formatIconCacheSize(iconCacheBytes) }))}
+              </span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-xs" id="btnClearIconCache" data-settings-action="clear-icon-cache" ${iconCacheEmpty ? 'disabled' : ''}>
+              🖼️ ${escapeHTML(t('settings.providers.iconCacheClearBtn'))}
             </button>
           </div>
         </section>
@@ -2777,6 +2802,20 @@ export async function renderSettingsModal(initialTab = 'general') {
       } else {
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
         showToast(t('settings.providers.cacheClearFailedToast'), { type: 'error' });
+      }
+    } else if (act === 'clear-icon-cache') {
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      const res = await window.electronAPI.clearIconCache();
+      if (res?.success) {
+        state.pcIconCache?.clear?.();
+        state.pcIconTried?.clear?.();
+        state.pcIconPending?.clear?.();
+        const countEl = modal.querySelector('#iconCacheCount');
+        if (countEl) countEl.textContent = t('settings.providers.iconCacheClearedText');
+        showToast(t('settings.providers.iconCacheClearedToast'), { type: 'success' });
+      } else {
+        if (btn instanceof HTMLButtonElement) btn.disabled = false;
+        showToast(t('settings.providers.iconCacheClearFailedToast'), { type: 'error' });
       }
     } else if (act === 'backup-create') {
       const res = await window.electronAPI.createBackup();

@@ -79,10 +79,7 @@ export async function searchNpmRegistry(
  * @param {string} packageId
  * @param {{ signal?: AbortSignal | null, packageManager?: string, registryUrl?: string }} [options]
  */
-export async function fetchNpmPackageLatest(
-  packageId,
-  { signal = null, packageManager = 'npm', registryUrl = '' } = {}
-) {
+async function fetchNpmPackageLatest(packageId, { signal = null, packageManager = 'npm', registryUrl = '' } = {}) {
   const cleanId = String(packageId || '').trim();
   if (!isValidNpmPackageName(cleanId)) {
     throw new Error(`Ungültiger Paketname: "${cleanId}".`);
@@ -98,6 +95,50 @@ export async function fetchNpmPackageLatest(
     throw new Error(`Paket "${cleanId}" konnte nicht geparst werden.`);
   }
   return parsed;
+}
+
+/**
+ * Laedt verfuegbare Versionen eines Pakets aus der npm-Registry (absteigend sortiert).
+ * @param {string} packageId
+ * @param {{ registryUrl?: string, forceRefresh?: boolean, signal?: AbortSignal | null }} [options]
+ */
+export async function listNpmRegistryVersions(
+  packageId,
+  { registryUrl = '', forceRefresh = false, signal = null } = {}
+) {
+  const cleanId = String(packageId || '').trim();
+  if (!isValidNpmPackageName(cleanId)) {
+    return { success: false, versions: [], error: `Ungültiger Paketname: "${cleanId}".` };
+  }
+
+  const base = resolveRegistryBaseUrl(registryUrl);
+  const cacheKey = `npm-registry:versions:${base.toLowerCase()}:${cleanId.toLowerCase()}`;
+  const cache = getWingetCache();
+  if (!forceRefresh) {
+    const cached = cache.get(cacheKey);
+    if (cached?.data && Array.isArray(cached.data) && Date.now() - Number(cached.updatedAt || 0) < 15 * 60 * 1000) {
+      return { success: true, versions: cached.data, fromCache: true };
+    }
+  }
+
+  try {
+    const encoded = encodeURIComponent(cleanId);
+    const payload = await fetchRegistryJson(`${base}/${encoded}`, { signal });
+    const rawVersions = payload?.versions && typeof payload.versions === 'object' ? Object.keys(payload.versions) : [];
+    const stable = [];
+    const pre = [];
+    for (const v of rawVersions) {
+      if (v.includes('-')) pre.push(v);
+      else stable.push(v);
+    }
+    stable.sort((a, b) => compareVersions(b, a, 0) || b.localeCompare(a, 'en', { numeric: true }));
+    pre.sort((a, b) => compareVersions(b, a, 0) || b.localeCompare(a, 'en', { numeric: true }));
+    const versions = [...stable, ...pre];
+    if (versions.length > 0) cache.set(cacheKey, versions);
+    return { success: true, versions, fromCache: false };
+  } catch (err) {
+    return { success: false, versions: [], error: err?.message || 'Versionen konnten nicht abgerufen werden.' };
+  }
 }
 
 /**

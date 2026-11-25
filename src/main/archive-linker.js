@@ -112,6 +112,7 @@ export async function linkPackageToArchive({
   saveIntoLastFolder = false,
   keepAllVersions = false,
   downloadUseJob = true,
+  version = '',
   signal = null,
 }) {
   const cleanPid = String(packageId || '').trim();
@@ -236,6 +237,7 @@ export async function linkPackageToArchive({
     downloadResult = await downloadWebUpdate(linkedItem, {
       saveIntoLastFolder,
       useJob: downloadUseJob,
+      version: String(version || '').trim(),
       signal,
     });
     const refreshedItems = loadCatalogWithLiveStatus();

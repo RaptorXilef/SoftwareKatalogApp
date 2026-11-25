@@ -74,7 +74,7 @@ function isInsideWinDir(candidateDir, rootDir) {
  * @param {Record<string, string | undefined>} [env]
  * @returns {boolean}
  */
-export function isWindowsProgramFilesPath(dirPath, env = {}) {
+function isWindowsProgramFilesPath(dirPath, env = {}) {
   const clean = String(dirPath || '').trim();
   if (!clean) return false;
 
@@ -92,7 +92,7 @@ export function isWindowsProgramFilesPath(dirPath, env = {}) {
  * @param {Record<string, string | undefined>} [env]
  * @returns {boolean}
  */
-export function isWindowsLocalProgramsPath(dirPath, env = {}) {
+function isWindowsLocalProgramsPath(dirPath, env = {}) {
   const clean = String(dirPath || '').trim();
   if (!clean) return false;
 

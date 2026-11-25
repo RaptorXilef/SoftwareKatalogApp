@@ -6,9 +6,7 @@ export const DEFAULT_PROVIDER_SETTINGS = Object.freeze({
   vcpkgRoot: '',
 });
 
-export const PROVIDER_CATEGORIES = Object.freeze(['system', 'runtime', 'developer', 'archive']);
-
-export const PROVIDER_UI_GROUPS = Object.freeze([
+const PROVIDER_UI_GROUPS = Object.freeze([
   { id: 'system', label: 'System', categories: ['system'] },
   { id: 'developer', label: 'Sprachen & Entwickler', categories: ['runtime', 'developer'] },
   { id: 'archive', label: 'Archiv', categories: ['archive'] },

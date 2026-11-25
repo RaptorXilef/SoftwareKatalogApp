@@ -23,6 +23,7 @@ import {
   handleDevWorkspaceInput,
   handleDevWorkspaceKeydown,
   renderDevWorkspace,
+  setupDevWorkspaceGraphInteractions,
 } from './dev-workspace.js';
 import { showToast } from './toast.js';
 import { updateNavCounts } from './toolbar.js';
@@ -262,7 +263,7 @@ async function triggerAutoQuickScanForNewProjects() {
   }
 }
 
-export async function scanSingleDevProject(projectId, { useJob = true, checkUpdates = true, silent = false } = {}) {
+async function scanSingleDevProject(projectId, { useJob = true, checkUpdates = true, silent = false } = {}) {
   const cleanId = String(projectId || '').trim();
   if (!cleanId || typeof window.electronAPI?.scanDevProject !== 'function') return null;
   if (state.devScanningProjectIds.has(cleanId)) return null;
@@ -337,7 +338,7 @@ async function scanAllDevProjects() {
   }
 }
 
-export async function openDevProjectDialog({ project = null, initialPath = '' } = {}) {
+async function openDevProjectDialog({ project = null, initialPath = '' } = {}) {
   const isEdit = Boolean(project);
   const authOk = await ensureAdminAuthenticated({
     reason: t(isEdit ? 'dev.authReasonEditProject' : 'dev.authReasonAddProject'),
@@ -614,6 +615,8 @@ export function initDevView() {
 
   const container = document.getElementById('devView');
   if (!container) return;
+
+  setupDevWorkspaceGraphInteractions(container);
 
   container.addEventListener('input', (e) => {
     if (getSelectedDevProject()) {

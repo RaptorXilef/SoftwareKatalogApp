@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  classifySemverUpdates,
   detectProjectManagersFromFiles,
   isMajorUpgrade,
   mergeInstalledWithLockMeta,
@@ -34,7 +35,17 @@ import { runDevManagerCli } from './dev-cli.js';
 import { getDevProject, markDevProjectScanned } from './dev-projects-service.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 12000;
+const REGISTRY_VERSIONS_CACHE_TTL_MS = 5 * 60 * 1000;
 const CRATES_USER_AGENT = 'SoftwareKatalogApp (https://github.com/RaptorXilef/SoftwareKatalogApp)';
+
+function encodeNpmPackageNameForUrl(pkgName) {
+  const clean = String(pkgName || '').trim();
+  if (clean.startsWith('@') && clean.includes('/')) {
+    const slash = clean.indexOf('/');
+    return `@${encodeURIComponent(clean.slice(1, slash))}/${encodeURIComponent(clean.slice(slash + 1))}`;
+  }
+  return encodeURIComponent(clean);
+}
 
 async function defaultFetchJson(url, { signal = null, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, headers = {} } = {}) {
   if (signal?.aborted) {
@@ -178,6 +189,8 @@ export function createDevScanner(deps = {}) {
   let runManagerCliFn = typeof deps.runManagerCliFn === 'function' ? deps.runManagerCliFn : runDevManagerCli;
   let fetchJsonFn = typeof deps.fetchJsonFn === 'function' ? deps.fetchJsonFn : defaultFetchJson;
   let nowFn = typeof deps.nowFn === 'function' ? deps.nowFn : () => Date.now();
+  /** @type {Map<string, { versions: string[], fetchedAt: number }>} */
+  const registryVersionsCache = new Map();
 
   function configure(options = {}) {
     if (typeof options.getProjectFn === 'function') getProjectFn = options.getProjectFn;
@@ -186,6 +199,97 @@ export function createDevScanner(deps = {}) {
     if (typeof options.runManagerCliFn === 'function') runManagerCliFn = options.runManagerCliFn;
     if (typeof options.fetchJsonFn === 'function') fetchJsonFn = options.fetchJsonFn;
     if (typeof options.nowFn === 'function') nowFn = options.nowFn;
+  }
+
+  async function fetchRegistryVersionsForUpdate(manager, packageName, signal) {
+    const mgr = String(manager || '')
+      .trim()
+      .toLowerCase();
+    const pkg = String(packageName || '').trim();
+    if (!mgr || !pkg) return [];
+
+    const cacheKey = `${mgr}:${pkg.toLowerCase()}`;
+    const cached = registryVersionsCache.get(cacheKey);
+    const now = nowFn();
+    if (cached && now - cached.fetchedAt < REGISTRY_VERSIONS_CACHE_TTL_MS) {
+      return cached.versions;
+    }
+
+    /** @type {string[]} */
+    let versions = [];
+    try {
+      if (mgr === 'npm' || mgr === 'pnpm' || mgr === 'yarn' || mgr === 'bun') {
+        const url = `https://registry.npmjs.org/${encodeNpmPackageNameForUrl(pkg)}`;
+        const payload = await fetchJsonFn(url, {
+          signal,
+          headers: { Accept: 'application/vnd.npm.install-v1+json, application/json' },
+        });
+        if (payload?.versions && typeof payload.versions === 'object') {
+          versions = Object.keys(payload.versions);
+        } else if (payload?.version) {
+          versions = [String(payload.version)];
+        }
+      } else if (mgr === 'composer') {
+        const cleanComposer = pkg
+          .split('/')
+          .map((seg) => encodeURIComponent(seg))
+          .join('/');
+        const payload = await fetchJsonFn(`https://repo.packagist.org/p2/${cleanComposer}.json`, { signal });
+        const entries = payload?.packages?.[pkg] || Object.values(payload?.packages || {}).flat();
+        if (Array.isArray(entries)) {
+          versions = entries.map((entry) => String(entry?.version || '').trim()).filter(Boolean);
+        }
+      } else if (mgr === 'pip' || mgr === 'uv') {
+        const payload = await fetchJsonFn(`https://pypi.org/pypi/${encodeURIComponent(pkg)}/json`, { signal });
+        if (payload?.releases && typeof payload.releases === 'object') {
+          versions = Object.keys(payload.releases);
+        } else if (payload?.info?.version) {
+          versions = [String(payload.info.version)];
+        }
+      } else if (mgr === 'cargo') {
+        const payload = await fetchJsonFn(`https://crates.io/api/v1/crates/${encodeURIComponent(pkg)}`, { signal });
+        if (Array.isArray(payload?.versions)) {
+          versions = payload.versions
+            .filter((entry) => !entry?.yanked)
+            .map((entry) => String(entry?.num || '').trim())
+            .filter(Boolean);
+        }
+      } else if (mgr === 'dotnet') {
+        const payload = await fetchJsonFn(
+          `https://api.nuget.org/v3-flatcontainer/${encodeURIComponent(pkg.toLowerCase())}/index.json`,
+          { signal }
+        );
+        if (Array.isArray(payload?.versions)) {
+          versions = payload.versions.map((v) => String(v || '').trim()).filter(Boolean);
+        }
+      }
+    } catch {
+      return [];
+    }
+
+    if (versions.length > 0) {
+      if (registryVersionsCache.size > 400) {
+        const oldestKey = registryVersionsCache.keys().next().value;
+        if (oldestKey) registryVersionsCache.delete(oldestKey);
+      }
+      registryVersionsCache.set(cacheKey, { versions, fetchedAt: now });
+    }
+    return versions;
+  }
+
+  async function enrichUpdatesWithSemverTiers(updatesList, signal) {
+    await runWithConcurrency(
+      updatesList,
+      5,
+      async (upd) => {
+        if (!upd?.current || signal?.aborted) return;
+        const fetchedVersions = await fetchRegistryVersionsForUpdate(upd.manager, upd.name, signal);
+        const candidates = [...fetchedVersions, upd.wanted, upd.latest].filter(Boolean);
+        const tiers = classifySemverUpdates(upd.current, candidates);
+        upd.semverOptions = tiers;
+      },
+      signal
+    );
   }
 
   async function checkUpdatesViaNpmRegistry(manager, directPkgs, signal) {
@@ -712,6 +816,11 @@ export function createDevScanner(deps = {}) {
             });
           }
         }
+      }
+
+      if (updates.length > 0 && checkUpdates !== false && !activeSignal?.aborted) {
+        job?.update(88, 'Ermittle Patch-, Minor- & Major-Versionen...');
+        await enrichUpdatesWithSemverTiers(updates, activeSignal);
       }
 
       if (activeSignal?.aborted) {

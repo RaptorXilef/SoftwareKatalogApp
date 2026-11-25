@@ -241,14 +241,19 @@ export const scoopProvider = {
     };
   },
 
-  async install(packageId, { upgrade = false, bucket = '', itemName = '', signal = null, useJob = true } = {}) {
+  async install(
+    packageId,
+    { upgrade = false, version = '', bucket = '', itemName = '', signal = null, useJob = true } = {}
+  ) {
     const cleanId = String(packageId || '').trim();
+    const cleanVer = String(version || '').trim();
     const targetRef = normalizeScoopPackageRef(cleanId, bucket);
     if (!targetRef) {
       return { success: false, error: 'Ungültige Scoop-Paket-ID angegeben.' };
     }
 
-    const args = upgrade ? ['update', cleanId.split('/').pop() || cleanId] : ['install', targetRef];
+    const pkgSpec = cleanVer ? `${targetRef}@${cleanVer}` : targetRef;
+    const args = upgrade && !cleanVer ? ['update', cleanId.split('/').pop() || cleanId] : ['install', pkgSpec];
 
     let job = null;
     if (useJob) {

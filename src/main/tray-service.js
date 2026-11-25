@@ -22,12 +22,12 @@ let trayState = {
 };
 
 /**
- * Loest den Pfad zum App-Icon fuer Tray und Benachrichtigungen auf.
+ * Loest den Pfad zum App-Icon fuer Fenster, Taskleiste, Tray und Benachrichtigungen auf.
  * @returns {string}
  */
-export function resolveTrayIconPath() {
+export function resolveAppIconPath() {
   const candidates = [
-    app.isPackaged && process.resourcesPath ? path.join(process.resourcesPath, 'icon.ico') : '',
+    process.resourcesPath ? path.join(process.resourcesPath, 'icon.ico') : '',
     path.join(getAppFolder(), 'build', 'icon.ico'),
     path.join(app.getAppPath(), 'build', 'icon.ico'),
     path.resolve(__dirname, '../../build/icon.ico'),
@@ -99,7 +99,7 @@ export function initTrayService(handlers = {}, initialState = {}) {
     return tray;
   }
 
-  const iconPath = resolveTrayIconPath();
+  const iconPath = resolveAppIconPath();
   let iconImage = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
   if (iconImage.isEmpty() && iconPath) {
     iconImage = nativeImage.createFromPath(path.resolve(iconPath));

@@ -3,6 +3,8 @@
  * (ohne Node/Electron-Abhängigkeiten, für Main, Scanner, Renderer & Tests nutzbar).
  */
 
+import { compareVersions, extractVersion } from './version.js';
+
 /**
  * Normalisiert einen Pfad für Vergleiche (Separatoren, Trim, Windows-Case).
  * @param {string} rawPath
@@ -522,18 +524,55 @@ export function mergeMultiRootCatalogEntries(
     );
     primary.hasMultipleArchiveRoots = sources.length > 1 || rootIndicesInFiles.size > 1;
 
-    // Erreichbare Setup-Dateien vor Offline-Dateien sortieren, sonst Prioritätsreihenfolge beibehalten
-    if (primary.lastFiles.length > 1 && anyOnline) {
-      const onlineFiles = [];
-      const offlineFiles = [];
-      for (const f of primary.lastFiles) {
-        if (primary.lastFileSources[f]?.offline) offlineFiles.push(f);
-        else onlineFiles.push(f);
-      }
-      primary.lastFiles = [...onlineFiles, ...offlineFiles];
+    // Hoechste Versionsnummer absteigend sortieren (bei Multi-Archiv erreichbare Dateien vor Offline)
+    if (primary.lastFiles.length > 1) {
+      primary.lastFiles = sortArchiveSetupFiles(primary.lastFiles, primary.lastFileSources);
     }
 
     return primary;
+  });
+}
+
+/**
+ * Sortiert Setup-Dateien absteigend nach hoechster erkannter Versionsnummer
+ * (und bevorzugt erreichbare Multi-Archiv-Dateien gegenueber Offline-Quellen).
+ * @param {string[]} files
+ * @param {Record<string, { offline?: boolean }>} [fileSources]
+ * @returns {string[]}
+ */
+export function sortArchiveSetupFiles(files = [], fileSources = {}) {
+  const list = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (list.length <= 1) return [...list];
+
+  const getBaseName = (p) =>
+    String(p || '')
+      .split(/[\\/]/)
+      .pop() || '';
+  const hasAnyOnline =
+    fileSources && Object.keys(fileSources).length > 0 ? list.some((f) => !fileSources[f]?.offline) : true;
+
+  return [...list].sort((a, b) => {
+    if (hasAnyOnline && fileSources && Object.keys(fileSources).length > 0) {
+      const aOffline = Boolean(fileSources[a]?.offline);
+      const bOffline = Boolean(fileSources[b]?.offline);
+      if (aOffline !== bOffline) return aOffline ? 1 : -1;
+    }
+
+    const baseA = getBaseName(a);
+    const baseB = getBaseName(b);
+    const verA = extractVersion(baseA);
+    const verB = extractVersion(baseB);
+
+    if (verA && verB) {
+      const cmp = compareVersions(verB, verA, 0);
+      if (cmp !== 0) return cmp;
+    } else if (verA && !verB) {
+      return -1;
+    } else if (!verA && verB) {
+      return 1;
+    }
+
+    return baseB.localeCompare(baseA, 'en', { numeric: true, sensitivity: 'base' });
   });
 }
 

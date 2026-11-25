@@ -53,6 +53,7 @@ export const uvProvider = {
     search: true,
     listInstalled: true,
     listUpgrades: true,
+    listVersions: true,
     show: true,
     install: true,
     uninstall: true,
@@ -128,6 +129,15 @@ export const uvProvider = {
       forceRefresh,
       signal,
       indexUrl: getPrimaryCustomRegistryUrl('uv'),
+    });
+  },
+
+  async listVersions(packageId, { forceRefresh = false, signal = null } = {}) {
+    const { listPyPiPackageVersions } = await import('./pypi-client.js');
+    return listPyPiPackageVersions(packageId, {
+      indexUrl: getPrimaryCustomRegistryUrl('uv'),
+      forceRefresh,
+      signal,
     });
   },
 

@@ -12,7 +12,7 @@ import { getConfig, saveConfig } from '../config.js';
  * @param {string} providerId
  * @returns {Array<{ name: string, url: string }>}
  */
-export function getConfiguredCustomSources(providerId) {
+function getConfiguredCustomSources(providerId) {
   const cleanId = String(providerId || '')
     .trim()
     .toLowerCase();

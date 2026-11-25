@@ -6,7 +6,7 @@ import { loadCatalogWithLiveStatus } from './catalog-service.js';
 import { getConfig, saveConfig } from './config.js';
 import { isProcessElevated } from './elevated-helper.js';
 import { loadIgnoredUpdates } from './ignore-service.js';
-import { resolveTrayIconPath } from './tray-service.js';
+import { resolveAppIconPath } from './tray-service.js';
 import { enqueueUpdates, getQueueState, waitForQueueIdle } from './update-queue.js';
 import { checkAllWebVersions } from './web-updater.js';
 import { scanInstalledSoftware } from './windows-tools.js';
@@ -23,7 +23,7 @@ const defaultBackgroundUpdater = createBackgroundUpdater({
   enqueueUpdatesFn: enqueueUpdates,
   getQueueStateFn: getQueueState,
   waitForQueueIdleFn: waitForQueueIdle,
-  resolveIconPathFn: resolveTrayIconPath,
+  resolveIconPathFn: resolveAppIconPath,
   NotificationClass: Notification,
   tFn: t,
 });

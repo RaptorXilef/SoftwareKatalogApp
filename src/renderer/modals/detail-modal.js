@@ -1,8 +1,8 @@
 import { isIdLikeDisplayName } from '../../shared/installed-merger.js';
 import { getInstallModeBadge, resolveDetailInstallMode } from '../../shared/installer-logic.js';
-import { formatMultiRootFileLabel } from '../../shared/multi-archive-logic.js';
+import { formatMultiRootFileLabel, sortArchiveSetupFiles } from '../../shared/multi-archive-logic.js';
 import { buildRemotePackageItem, canDownloadOnline } from '../../shared/unified-packages.js';
-import { compareVersions } from '../../shared/version.js';
+import { compareVersions, extractVersion } from '../../shared/version.js';
 import { openLightbox } from '../components/lightbox.js';
 import { showToast } from '../components/toast.js';
 import { evaluateItemPolicy, getBaseName, getItemById, getItemStatus, isItemNew, state } from '../state.js';
@@ -73,6 +73,7 @@ function getProviderMeta(effectivePm) {
     canInstall: prov ? Boolean(prov.capabilities?.install) : cleanPm === 'winget',
     canShow: prov ? Boolean(prov.capabilities?.show) : cleanPm === 'winget',
     canUninstall: prov ? Boolean(prov.capabilities?.uninstall) : cleanPm === 'winget',
+    canListVersions: prov ? Boolean(prov.capabilities?.listVersions) : cleanPm === 'winget',
     supportsArchiveDownload: prov ? Boolean(prov.capabilities?.supportsArchiveDownload) : cleanPm === 'winget',
   };
 }
@@ -821,6 +822,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const canProviderInstall = provMeta.canInstall && Boolean(effectivePkgId);
   const canArchiveDownload = provMeta.supportsArchiveDownload && Boolean(effectivePkgId);
   const hasPackageProfile = Boolean(effectivePkgId) && provMeta.canShow;
+  const sortedLastFiles = sortArchiveSetupFiles(item.lastFiles || [], item.lastFileSources || {});
+  const archiveViewItem = sortedLastFiles.length > 0 ? { ...item, lastFiles: sortedLastFiles } : item;
   const matchedArchive = item.matchedArchiveItem || null;
   const metaSource = item.inArchive ? item : matchedArchive || item;
   const primaryAction =
@@ -837,6 +840,46 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const isSilentLocked = initialModeState.silentLocked;
   const canUninstall = isCanUninstall(item, provMeta, effectivePkgId);
   const onlineReady = canDownloadOnline(item);
+  let selectedArchiveIdx = 0;
+  let selectedProviderVersion = '';
+
+  const fileSourceIndices = new Set(Object.values(item.lastFileSources || {}).map((s) => Number(s?.rootIndex ?? 0)));
+  const showRootPrefix = Boolean(item.hasMultipleArchiveRoots || fileSourceIndices.size > 1);
+  const archiveVersionBarHtml =
+    item.inArchive && sortedLastFiles.length > 1
+      ? `
+      <div class="detail-version-bar">
+        <label for="detailOverviewFileSelect" class="detail-version-label">📦 ${escapeHTML(t('detail.archiveVersionLabel'))}</label>
+        <select id="detailOverviewFileSelect" class="detail-file-select">
+          ${sortedLastFiles
+            .map(
+              (f, idx) =>
+                `<option value="${idx}">${escapeHTML(formatMultiRootFileLabel(f, item.lastFileSources, showRootPrefix))}</option>`
+            )
+            .join('')}
+        </select>
+      </div>
+    `
+      : '';
+
+  const showProviderVersionBar =
+    Boolean(effectivePkgId) && provMeta.canListVersions && (canProviderInstall || onlineReady);
+  const providerLatestLabel = st.webVersion
+    ? t('detail.providerVersionLatestWithVer', { version: st.webVersion })
+    : t('detail.providerVersionLatest');
+  const providerVersionBarHtml = showProviderVersionBar
+    ? `
+      <div class="detail-provider-version-bar">
+        <label for="detailProviderVersionSelect" class="detail-version-label">🏷️ ${escapeHTML(t('detail.providerVersionLabel'))}</label>
+        <select id="detailProviderVersionSelect" class="detail-file-select">
+          <option value="">${escapeHTML(providerLatestLabel)}</option>
+        </select>
+        <button type="button" class="btn btn-ghost btn-xs" id="btnLoadProviderVersions" data-detail-action="load-provider-versions">
+          🕒 ${escapeHTML(t('detail.loadOlderVersionsBtn'))}
+        </button>
+      </div>
+    `
+    : '';
   const supportsChangelog =
     (item.webSourceType === 'github' && Boolean(item.webVersionUrl)) ||
     (Boolean(effectivePm) && effectivePm !== 'archive' && Boolean(effectivePkgId) && provMeta.canShow);
@@ -991,7 +1034,9 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       <section class="tab-panel" data-detail-panel="overview" ${initialTab === 'overview' ? '' : 'hidden'}>
         ${buildVersionGridHtml(item, st, { matchedArchive })}
         ${postDownloadBanner}
-        ${buildHeroBarHtml(item, st, { provMeta, canUninstall, matchedArchive, policyEval })}
+        ${buildHeroBarHtml(archiveViewItem, st, { provMeta, canUninstall, matchedArchive, policyEval })}
+        ${archiveVersionBarHtml}
+        ${providerVersionBarHtml}
         ${buildInstallModeToggleHtml({
           item,
           st,
@@ -1019,7 +1064,7 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       </section>
 
       <section class="tab-panel" data-detail-panel="archive-tech" ${initialTab === 'archive-tech' ? '' : 'hidden'}>
-        ${buildArchiveTechTabHtml(item, { effectivePm, effectivePkgId, matchedArchive, policyEval })}
+        ${buildArchiveTechTabHtml(archiveViewItem, { effectivePm, effectivePkgId, matchedArchive, policyEval })}
       </section>
     </div>
 
@@ -1252,7 +1297,8 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       packageManager: effectivePm,
       packageId: effectivePkgId,
       name: loadedPkgProfile?.name || item.name,
-      version: loadedPkgProfile?.version || st.webVersion || st.localVersion || '',
+      version: selectedProviderVersion || loadedPkgProfile?.version || st.webVersion || st.localVersion || '',
+      selectedVersion: selectedProviderVersion,
       description: loadedPkgProfile?.description || loadedPkgProfile?.shortDescription || item.shortDescription || '',
       tags: loadedPkgProfile?.tags || item.tags || [],
       homepage: loadedPkgProfile?.homepage || item.homepage || '',
@@ -1270,9 +1316,44 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   };
 
   const getSelectedArchiveFile = () => {
-    const sel = modal.querySelector('#detailFileSelect');
-    const idx = sel instanceof HTMLSelectElement ? parseInt(sel.value, 10) : 0;
-    return item.lastFiles?.[idx] || item.lastFiles?.[0] || null;
+    return sortedLastFiles[selectedArchiveIdx] || sortedLastFiles[0] || null;
+  };
+
+  const syncArchiveSelectsAndHero = (nextIdx) => {
+    selectedArchiveIdx = nextIdx;
+    const overviewSel = modal.querySelector('#detailOverviewFileSelect');
+    const techSel = modal.querySelector('#detailFileSelect');
+    if (overviewSel instanceof HTMLSelectElement) overviewSel.value = String(nextIdx);
+    if (techSel instanceof HTMLSelectElement) techSel.value = String(nextIdx);
+
+    const chosenFile = getSelectedArchiveFile();
+    if (!chosenFile) return;
+    const chosenVer = extractVersion(getBaseName(chosenFile)) || st.archiveVersion || '';
+    const heroBtn = modal.querySelector('.detail-hero-bar [data-detail-action="install-file"]');
+    if (heroBtn instanceof HTMLElement) {
+      heroBtn.dataset.file = chosenFile;
+      heroBtn.dataset.version = chosenVer;
+      if (st.hasArchiveUpdate && nextIdx === 0 && st.archiveVersion) {
+        heroBtn.textContent = `⬆️ ${t('detail.heroInstallFileUpdate', { version: st.archiveVersion })}`;
+      } else if (chosenVer) {
+        heroBtn.textContent = `▶️ ${t('detail.heroInstallFileVersion', { version: chosenVer })}`;
+      } else {
+        heroBtn.textContent = `▶️ ${t('detail.heroInstallFileGeneric')}`;
+      }
+    }
+  };
+
+  modal.onchange = (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.id === 'detailOverviewFileSelect' || target.id === 'detailFileSelect') {
+      const idx = Number.parseInt(target.value, 10);
+      if (Number.isFinite(idx) && idx >= 0 && idx < sortedLastFiles.length) {
+        syncArchiveSelectsAndHero(idx);
+      }
+    } else if (target.id === 'detailProviderVersionSelect') {
+      selectedProviderVersion = target.value || '';
+    }
   };
 
   const runInstallerFlow = async (filePath, targetVersion) => {
@@ -1321,7 +1402,10 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
   const runWebDownloadFlow = async () => {
     const saveLastEl = modal.querySelector('#detailSaveIntoLast');
     const saveIntoLastFolder = saveLastEl instanceof HTMLInputElement ? saveLastEl.checked : false;
-    const res = await window.electronAPI.downloadWebUpdate(item, { saveIntoLastFolder });
+    const res = await window.electronAPI.downloadWebUpdate(item, {
+      saveIntoLastFolder,
+      version: selectedProviderVersion,
+    });
 
     if (res.alreadyRunning) {
       showToast(t('detail.toastDownloadRunning'), { type: 'info' });
@@ -1378,9 +1462,19 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       }
     );
 
+    const chosenVersion = selectedProviderVersion || (item.isInstalled && st.hasWebUpdate ? st.webVersion || '' : '');
+    const shouldUpgrade = selectedProviderVersion
+      ? Boolean(
+          item.isInstalled &&
+            st.installedVersion &&
+            compareVersions(selectedProviderVersion, st.installedVersion, 0) > 0
+        )
+      : Boolean(item.isInstalled && st.hasWebUpdate);
+
     const res = await window.electronAPI.installPackage(effectivePm, effectivePkgId, {
-      upgrade: item.isInstalled && st.hasWebUpdate,
-      targetVersion: item.isInstalled && st.hasWebUpdate ? st.webVersion || '' : '',
+      upgrade: shouldUpgrade,
+      version: chosenVersion,
+      targetVersion: chosenVersion,
       silent: useSilent,
       itemName: item.name,
     });
@@ -1496,9 +1590,38 @@ function renderDetailModalCore(item, { freshDownload = null, initialTab = 'overv
       window.electronAPI.openPath(item.validInstallPath);
     } else if (action === 'refresh-pkg-profile') {
       await loadPackageProfile(true);
+    } else if (action === 'load-provider-versions') {
+      if (!(btn instanceof HTMLButtonElement) || !effectivePm || !effectivePkgId) return;
+      btn.disabled = true;
+      const origText = btn.textContent || '';
+      btn.textContent = `⏳ ${t('detail.loadingVersionsBtn')}`;
+      const res = await window.electronAPI.listPackageVersions(effectivePm, effectivePkgId);
+      if (!isStillActive()) return;
+      if (res?.success && Array.isArray(res.versions) && res.versions.length > 0) {
+        const verSel = modal.querySelector('#detailProviderVersionSelect');
+        if (verSel instanceof HTMLSelectElement) {
+          const prevVal = verSel.value;
+          verSel.innerHTML = [
+            `<option value="">${escapeHTML(providerLatestLabel)}</option>`,
+            ...res.versions.map((v) => `<option value="${escapeHTML(v)}">v${escapeHTML(v)}</option>`),
+          ].join('');
+          if (prevVal && res.versions.includes(prevVal)) {
+            verSel.value = prevVal;
+          }
+        }
+        btn.textContent = `✅ ${t('detail.versionsLoadedCount', { count: res.versions.length })}`;
+      } else {
+        btn.disabled = false;
+        btn.textContent = origText;
+        showToast(res?.error || t('detail.versionsNoneFound'), { type: 'warn' });
+      }
     } else if (action === 'web-download') {
       await runWebDownloadFlow();
-    } else if (action === 'install-file' || action === 'install-fresh') {
+    } else if (action === 'install-file') {
+      const selectedFile = getSelectedArchiveFile() || btn.dataset.file;
+      const derivedVer = (selectedFile ? extractVersion(getBaseName(selectedFile)) : '') || btn.dataset.version;
+      await runInstallerFlow(selectedFile, derivedVer);
+    } else if (action === 'install-fresh') {
       await runInstallerFlow(btn.dataset.file, btn.dataset.version);
     } else if (action === 'run-selected') {
       await runInstallerFlow(getSelectedArchiveFile(), null);

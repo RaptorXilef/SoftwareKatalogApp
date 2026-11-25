@@ -5,11 +5,11 @@ import { normalizeAccessPolicy } from './policy-logic.js';
 export const HKLM_POLICY_REGISTRY_PATH = 'HKLM\\SOFTWARE\\Policies\\SoftwareKatalog';
 export const HKLM_POLICY_VALUE_NAME = 'PolicyFilePath';
 export const DEFAULT_POLICY_FILENAME = 'admin-policy.json';
-export const POLICY_SCHEMA_VERSION = 1;
-export const MIN_PASSWORD_LENGTH = 6;
-export const MAX_SESSION_TIMEOUT_MINUTES = 1440;
+const POLICY_SCHEMA_VERSION = 1;
+const MIN_PASSWORD_LENGTH = 6;
+const MAX_SESSION_TIMEOUT_MINUTES = 1440;
 
-export const SCRYPT_PARAMS = Object.freeze({
+const SCRYPT_PARAMS = Object.freeze({
   N: 16384,
   r: 8,
   p: 1,
@@ -328,7 +328,7 @@ function buildCanonicalPolicyPayload(policyDoc) {
  * @param {Record<string, any>} policyDoc
  * @returns {string}
  */
-export function computePolicyIntegrity(policyDoc) {
+function computePolicyIntegrity(policyDoc) {
   const canonical = buildCanonicalPolicyPayload(policyDoc);
   const serialized = `SoftwareKatalog.AdminPolicy.v1:${JSON.stringify(canonical)}`;
   return crypto.createHash('sha256').update(serialized, 'utf8').digest('hex');

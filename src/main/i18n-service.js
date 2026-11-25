@@ -39,6 +39,5 @@ const defaultI18nService = createI18nService({
 
 export const configureI18nService = (options) => defaultI18nService.configure(options);
 export const initI18nService = () => defaultI18nService.init();
-export const reloadI18nLocales = () => defaultI18nService.reloadLocales();
 export const getI18nState = (opts) => defaultI18nService.getState(opts);
 export const setLanguage = (code) => defaultI18nService.setLanguage(code);

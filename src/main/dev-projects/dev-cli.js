@@ -147,7 +147,7 @@ function buildPythonEnv() {
  *   findBinaryPathFn?: typeof findBinaryPath,
  * }} [deps]
  */
-export function createDevCliRunner(deps = {}) {
+function createDevCliRunner(deps = {}) {
   let getConfigFn = typeof deps.getConfigFn === 'function' ? deps.getConfigFn : () => ({});
   let runCliFn = typeof deps.runCliFn === 'function' ? deps.runCliFn : runCli;
   let findBinaryPathFn = typeof deps.findBinaryPathFn === 'function' ? deps.findBinaryPathFn : findBinaryPath;

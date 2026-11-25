@@ -808,3 +808,66 @@ export function parseWingetExportJson(rawText) {
 
   return [...byId.values()];
 }
+
+function compareSemverDesc(a, b) {
+  const parse = (raw) => {
+    const clean = String(raw || '')
+      .trim()
+      .replace(/^v(?=\d)/i, '');
+    const m = clean.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?(.*)$/);
+    if (!m) return null;
+    return {
+      nums: [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0), Number(m[4] || 0)],
+      suffix: String(m[5] || '').trim(),
+      clean,
+    };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa && pb) {
+    for (let i = 0; i < 4; i++) {
+      if (pb.nums[i] !== pa.nums[i]) return pb.nums[i] - pa.nums[i];
+    }
+    if (!pa.suffix !== !pb.suffix) return pa.suffix ? 1 : -1;
+    return pb.clean.localeCompare(pa.clean, 'en', { numeric: true, sensitivity: 'base' });
+  }
+  if (pa && !pb) return -1;
+  if (!pa && pb) return 1;
+  return String(b || '').localeCompare(String(a || ''), 'en', { numeric: true, sensitivity: 'base' });
+}
+
+/**
+ * Parst die Ausgabe von `winget show --id <id> --exact --versions` und sortiert absteigend nach SemVer.
+ * @param {string} stdout
+ * @returns {string[]}
+ */
+export function parseWingetVersionsOutput(stdout) {
+  const lines = cleanCliLines(stdout);
+  if (lines.length === 0) return [];
+
+  let sepIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^-{3,}$/.test(lines[i])) {
+      sepIdx = i;
+      break;
+    }
+  }
+
+  const startIdx = sepIdx !== -1 ? sepIdx + 1 : 0;
+  const seen = new Set();
+  const versions = [];
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const rawLine = String(lines[i] || '').trim();
+    if (!rawLine || /^-{3,}$/.test(rawLine)) continue;
+    const token = rawLine.split(/\s+/)[0] || '';
+    if (!/^v?\d+(?:[._+-][0-9A-Za-z._-]+)*$/i.test(token)) continue;
+    const key = token.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    versions.push(token);
+  }
+
+  versions.sort(compareSemverDesc);
+  return versions;
+}

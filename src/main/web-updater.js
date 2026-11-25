@@ -86,8 +86,8 @@ export async function searchWinget(query, opts = {}) {
   return wingetProvider.search(query, opts);
 }
 
-async function fetchWingetInfo(wingetId, signal = null) {
-  const res = await wingetProvider.show(wingetId, { preferGerman: true, signal });
+async function fetchWingetInfo(wingetId, signal = null, version = '') {
+  const res = await wingetProvider.show(wingetId, { preferGerman: true, version, signal });
   if (!res.success || !res.package) {
     return { success: false, error: res.error || `Winget-Paket "${wingetId}" nicht gefunden.` };
   }
@@ -593,11 +593,11 @@ export function openVisualLinkPicker(url, knownVersion = '') {
 // ==========================================
 // DOWNLOAD INS ARCHIV (AUTO-BENENNUNG, SHA256, ABBRECHBAR)
 // ==========================================
-async function resolveDownloadUrl(item, signal) {
+async function resolveDownloadUrl(item, signal, { version = '' } = {}) {
   // 1. Winget liefert immer die frischeste direkte Installer-URL + SHA256
   const resolvedWingetId = getEffectiveWingetId(item);
   if ((item.webSourceType === 'winget' || item.packageManager === 'winget') && resolvedWingetId) {
-    const wg = await fetchWingetInfo(resolvedWingetId, signal);
+    const wg = await fetchWingetInfo(resolvedWingetId, signal, version);
     if (!wg.success || !wg.downloadUrl) {
       throw new Error(wg.error || 'Winget liefert keine direkte Download-URL.');
     }
@@ -652,7 +652,7 @@ async function computeSha256(filePath) {
 
 export async function downloadWebUpdate(
   item,
-  { saveIntoLastFolder = false, useJob = true, signal = null, onProgress = null } = {}
+  { saveIntoLastFolder = false, useJob = true, signal = null, onProgress = null, version = '' } = {}
 ) {
   const cfg = getConfig();
   const targetSoftwareDir = resolveBestArchivePath(item, {
@@ -725,7 +725,7 @@ export async function downloadWebUpdate(
 
   try {
     reportProgress(2, 'Ermittle Download-Link...');
-    const resolved = await resolveDownloadUrl(item, activeSignal);
+    const resolved = await resolveDownloadUrl(item, activeSignal, { version });
     const finalUrl = resolved.url;
     const knownVersion = resolved.version || item.webVersion || '';
 

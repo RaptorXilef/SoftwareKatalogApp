@@ -1,9 +1,9 @@
 import { normalizeInstallMode } from './installer-logic.js';
 
-export const POLICY_SCOPE_MODES = Object.freeze(['shared', 'separate']);
-export const POLICY_LIST_TYPES = Object.freeze(['none', 'whitelist', 'blacklist']);
-export const POLICY_EXECUTION_MODES = Object.freeze(['allow-interactive', 'silent-only']);
-export const POLICY_ENTRY_EXECUTION_MODES = Object.freeze(['inherit', 'silent-only', 'allow-interactive']);
+const POLICY_SCOPE_MODES = Object.freeze(['shared', 'separate']);
+const POLICY_LIST_TYPES = Object.freeze(['none', 'whitelist', 'blacklist']);
+const POLICY_EXECUTION_MODES = Object.freeze(['allow-interactive', 'silent-only']);
+const POLICY_ENTRY_EXECUTION_MODES = Object.freeze(['inherit', 'silent-only', 'allow-interactive']);
 export const POLICY_MATCH_TYPES = Object.freeze(['packageId', 'archiveId', 'name', 'provider']);
 export const POLICY_EXPORT_FORMAT = 'software-katalog-access-policy';
 
@@ -54,7 +54,7 @@ const MATCH_TYPE_SET = new Set(POLICY_MATCH_TYPES);
  * Erzeugt ein leeres Standard-Regelset.
  * @returns {PolicyRuleSet}
  */
-export function createDefaultRuleSet() {
+function createDefaultRuleSet() {
   return {
     listType: 'none',
     defaultExecutionMode: 'allow-interactive',
@@ -112,7 +112,7 @@ export function getPolicyEntryKey(entry) {
  * @param {unknown} raw
  * @returns {PolicyEntry | null}
  */
-export function normalizePolicyEntry(raw) {
+function normalizePolicyEntry(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = /** @type {Record<string, any>} */ (raw);
   const rawMatchType = String(obj.matchType || '').trim();
@@ -144,7 +144,7 @@ export function normalizePolicyEntry(raw) {
  * @param {unknown} raw
  * @returns {PolicyRuleSet}
  */
-export function normalizePolicyRuleSet(raw) {
+function normalizePolicyRuleSet(raw) {
   const obj = raw && typeof raw === 'object' && !Array.isArray(raw) ? /** @type {Record<string, any>} */ (raw) : {};
   const rawListType = String(obj.listType || 'none').trim();
   const listType = LIST_TYPE_SET.has(/** @type {PolicyListType} */ (rawListType))

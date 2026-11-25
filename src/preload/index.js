@@ -61,6 +61,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('installed-scan-progress', listener);
   },
   extractCachedAppIcon: (payload) => ipcRenderer.invoke('extract-cached-app-icon', payload),
+  getIconCacheStats: () => ipcRenderer.invoke('icon-cache-stats'),
+  clearIconCache: () => ipcRenderer.invoke('icon-cache-clear'),
   uninstallSoftware: (payload) => ipcRenderer.invoke('uninstall-software', payload),
   autoDetectPath: (names) => ipcRenderer.invoke('auto-detect-path', names),
   autoDetectAll: () => ipcRenderer.invoke('auto-detect-all'),
@@ -79,6 +81,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   uninstallProviderManager: (providerId) => ipcRenderer.invoke('providers-uninstall-manager', providerId),
   searchProviders: (query, opts) => ipcRenderer.invoke('providers-search', query, opts),
   showPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-show', providerId, packageId, opts),
+  listPackageVersions: (providerId, packageId, opts) =>
+    ipcRenderer.invoke('providers-list-versions', providerId, packageId, opts),
   listProviderUpgrades: (opts) => ipcRenderer.invoke('providers-list-upgrades', opts),
   installPackage: (providerId, packageId, opts) => ipcRenderer.invoke('providers-install', providerId, packageId, opts),
   uninstallPackage: (providerId, packageId, opts) =>

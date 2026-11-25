@@ -1239,7 +1239,6 @@ export function createElevatedHelperService(deps = {}) {
 const defaultService = createElevatedHelperService();
 
 export const configureElevatedHelper = (options) => defaultService.configure(options);
-export const subscribeAdminStatus = (listener) => defaultService.subscribeStatus(listener);
 export const isProcessElevated = (opts) => defaultService.isProcessElevated(opts);
 export const getAdminSessionStatus = () => defaultService.getStatus();
 export const isAdminSessionActive = () => defaultService.isSessionActive();

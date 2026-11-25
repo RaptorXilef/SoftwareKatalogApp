@@ -556,6 +556,7 @@ describe('registry defaults for new Windows providers', () => {
       search: false,
       listInstalled: true,
       listUpgrades: false,
+      listVersions: false,
       show: false,
       install: true,
       uninstall: true,

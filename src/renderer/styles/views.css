@@ -69,10 +69,6 @@
     color: var(--text-muted);
     cursor: pointer;
     padding: 4px 6px;
-
-    &:hover {
-      color: var(--text);
-    }
   }
 }
 
@@ -340,11 +336,12 @@
     color: var(--text-muted);
     cursor: pointer;
     padding: 4px 6px;
-
-    &:hover {
-      color: var(--text);
-    }
   }
+}
+
+.bundles-search-box .clear-btn:hover,
+.discover-search-box .clear-btn:hover {
+  color: var(--text);
 }
 
 .discover-sources-row {
