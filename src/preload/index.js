@@ -117,6 +117,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   runBundleInstall: (bundleId, selectedItemIds, opts) =>
     ipcRenderer.invoke('bundles-run-install', bundleId, selectedItemIds, opts),
 
+  // DEV-Projekte (lokale Entwicklungsprojekte & Projekt-Pakete)
+  listDevProjects: () => ipcRenderer.invoke('dev-projects-list'),
+  addDevProject: (payload) => ipcRenderer.invoke('dev-projects-add', payload),
+  updateDevProject: (projectId, patch) => ipcRenderer.invoke('dev-projects-update', projectId, patch),
+  removeDevProject: (projectId) => ipcRenderer.invoke('dev-projects-remove', projectId),
+  scanDevProject: (projectId, opts) => ipcRenderer.invoke('dev-projects-scan', projectId, opts),
+  devInstallPackage: (projectId, payload, opts) =>
+    ipcRenderer.invoke('dev-projects-install-package', projectId, payload, opts),
+  devUpdatePackage: (projectId, payload, opts) =>
+    ipcRenderer.invoke('dev-projects-update-package', projectId, payload, opts),
+  devUninstallPackage: (projectId, payload, opts) =>
+    ipcRenderer.invoke('dev-projects-uninstall-package', projectId, payload, opts),
+  devToggleScope: (projectId, payload, opts) =>
+    ipcRenderer.invoke('dev-projects-toggle-scope', projectId, payload, opts),
+  devSyncProject: (projectId, manager, opts) => ipcRenderer.invoke('dev-projects-sync', projectId, manager, opts),
+  devSearchPackages: (manager, query, opts) => ipcRenderer.invoke('dev-projects-search-packages', manager, query, opts),
+
   // Online-Updates (GitHub, Winget, Web-Scraper)
   checkWebVersions: () => ipcRenderer.invoke('check-web-versions'),
   checkSingleWeb: (payload) => ipcRenderer.invoke('check-single-web', payload),

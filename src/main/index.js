@@ -64,6 +64,26 @@ import {
   saveConfig,
 } from './config.js';
 import {
+  configureDevActions,
+  devInstallPackage,
+  devSearchPackages,
+  devSyncProject,
+  devToggleScope,
+  devUninstallPackage,
+  devUpdatePackage,
+} from './dev-projects/dev-actions.js';
+import { configureDevCli } from './dev-projects/dev-cli.js';
+import {
+  addDevProject,
+  configureDevProjectsService,
+  getDevProject,
+  listDevProjects,
+  markDevProjectScanned,
+  removeDevProject,
+  updateDevProject,
+} from './dev-projects/dev-projects-service.js';
+import { configureDevScanner, scanDevProject } from './dev-projects/dev-scanner.js';
+import {
   configureElevatedHelper,
   getAdminSessionStatus,
   isAdminSessionActive,
@@ -82,7 +102,7 @@ import {
   removeIgnoredUpdate,
 } from './ignore-service.js';
 import { detectInstallerFile } from './installer-detector.js';
-import { cancelJob, dismissJob, getJobsSnapshot } from './jobs.js';
+import { cancelJob, createJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
 import { installProviderManager, uninstallProviderManager } from './providers/manager-bootstrap.js';
 import { installLocalMsi, readMsiFileMetadata } from './providers/msi-provider.js';
@@ -92,6 +112,7 @@ import {
   checkAllProvidersAvailability,
   checkProviderAvailability,
   clearProviderCache,
+  getProvider,
   getProviderCacheStats,
   initDefaultProviders,
   installPackage,
@@ -303,6 +324,31 @@ function registerBundleIpcHandlers() {
   );
 }
 
+function registerDevProjectsIpcHandlers() {
+  // DEV-Projekte (zentral in data/dev-projects.json)
+  handleIpc('dev-projects-list', () => listDevProjects());
+  handleIpc('dev-projects-add', (_e, payload) => addDevProject(payload || {}));
+  handleIpc('dev-projects-update', (_e, projectId, patch) => updateDevProject(projectId, patch || {}));
+  handleIpc('dev-projects-remove', (_e, projectId) => removeDevProject(projectId));
+  handleIpc('dev-projects-scan', (_e, projectId, opts) => scanDevProject(projectId, opts || {}));
+  handleIpc('dev-projects-install-package', (_e, projectId, payload, opts) =>
+    devInstallPackage(projectId, payload || {}, opts || {})
+  );
+  handleIpc('dev-projects-update-package', (_e, projectId, payload, opts) =>
+    devUpdatePackage(projectId, payload || {}, opts || {})
+  );
+  handleIpc('dev-projects-uninstall-package', (_e, projectId, payload, opts) =>
+    devUninstallPackage(projectId, payload || {}, opts || {})
+  );
+  handleIpc('dev-projects-toggle-scope', (_e, projectId, payload, opts) =>
+    devToggleScope(projectId, payload || {}, opts || {})
+  );
+  handleIpc('dev-projects-sync', (_e, projectId, manager, opts) => devSyncProject(projectId, manager, opts || {}));
+  handleIpc('dev-projects-search-packages', (_e, manager, query, opts) =>
+    devSearchPackages(manager, query, opts || {})
+  );
+}
+
 let ipcRegistered = false;
 
 function registerIpcHandlers() {
@@ -423,6 +469,7 @@ function registerIpcHandlers() {
   handleIpc('archive-cleanup-execute', (_e, opts) => executeArchiveCleanup(opts || {}));
 
   registerBundleIpcHandlers();
+  registerDevProjectsIpcHandlers();
 
   handleIpc('copy-files-to-pc', async (_e, sourceFiles) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -643,6 +690,26 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           win.webContents.send('auth-status-updated', status);
         }
       }
+    },
+  });
+
+  configureDevProjectsService({ getDataFolderFn: getDataFolder });
+  configureDevCli({ getConfigFn: getConfig });
+  configureDevScanner({
+    getProjectFn: getDevProject,
+    markScannedFn: markDevProjectScanned,
+    createJobFn: createJob,
+  });
+  configureDevActions({
+    getProjectFn: getDevProject,
+    scanProjectFn: scanDevProject,
+    createJobFn: createJob,
+    searchProviderFn: async (providerId, query, opts) => {
+      const provider = getProvider(providerId);
+      if (!provider?.search) {
+        return { success: false, results: [], error: `Provider "${providerId}" unterstuetzt keine Suche.` };
+      }
+      return provider.search(query, opts);
     },
   });
 

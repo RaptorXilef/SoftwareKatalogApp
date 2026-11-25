@@ -58,6 +58,14 @@ export const PROTECTED_ADMIN_IPC_CHANNELS = new Set([
   'policy-import',
   'autostart-apply',
   'background-set-auto-update-paused',
+  'dev-projects-add',
+  'dev-projects-update',
+  'dev-projects-remove',
+  'dev-projects-install-package',
+  'dev-projects-update-package',
+  'dev-projects-uninstall-package',
+  'dev-projects-toggle-scope',
+  'dev-projects-sync',
 ]);
 
 Object.freeze(PROTECTED_ADMIN_IPC_CHANNELS);
