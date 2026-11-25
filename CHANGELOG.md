@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.2...v1.31.3) (2026-11-25)
+
+### 🧹 Chore / Maintenance
+
+* fix som formats ([525ebcb](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/525ebcb96f9c5a5faf35308ea77590d3aa0fc670))
+* URL zur englischen Fassung der README in der deutschen Fassung korrigiert ([c169d1c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c169d1c3bd16a3a08911a95fc1d688a3dfc66c9b))
+
 ## [1.31.2](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.1...v1.31.2) (2026-11-25)
 
 ### 📚 Dokumentation
