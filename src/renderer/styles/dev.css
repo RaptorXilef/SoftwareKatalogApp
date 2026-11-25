@@ -227,12 +227,12 @@
   background: var(--bg);
   border: 1px solid var(--border);
 
-  & strong {
+  & .dev-kpi-value {
     font-size: 15px;
     color: var(--text);
   }
 
-  & span {
+  & .dev-kpi-label {
     font-size: 11px;
     color: var(--text-muted);
   }
@@ -241,7 +241,7 @@
     border-color: color-mix(in srgb, var(--color-web) 55%, var(--border));
     background: color-mix(in srgb, var(--color-web) 12%, var(--bg));
 
-    & strong {
+    & .dev-kpi-value {
       color: var(--color-web);
     }
   }
@@ -250,7 +250,7 @@
     border-color: color-mix(in srgb, var(--color-archive) 55%, var(--border));
     background: color-mix(in srgb, var(--color-archive) 12%, var(--bg));
 
-    & strong {
+    & .dev-kpi-value {
       color: var(--color-archive);
     }
   }
@@ -484,7 +484,7 @@
   flex-wrap: wrap;
   gap: 8px;
 
-  & strong {
+  & .dev-pkg-name {
     font-size: 15px;
     overflow-wrap: anywhere;
   }

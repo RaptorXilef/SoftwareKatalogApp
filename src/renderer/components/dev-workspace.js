@@ -163,7 +163,7 @@ function renderUpdatesListHtml(project, scan) {
 
           <div class="dev-pkg-main">
             <div class="dev-pkg-title-row">
-              <strong>${escapeHTML(upd.name)}</strong>
+              <strong class="dev-pkg-name">${escapeHTML(upd.name)}</strong>
               <span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>
               ${renderScopeBadgeHtml(upd.scope)}
               ${
@@ -291,7 +291,7 @@ function renderInstalledListHtml(project, scan) {
         <article class="dev-pkg-row">
           <div class="dev-pkg-main">
             <div class="dev-pkg-title-row">
-              <strong>${escapeHTML(pkg.name)}</strong>
+              <strong class="dev-pkg-name">${escapeHTML(pkg.name)}</strong>
               <span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>
               ${renderScopeBadgeHtml(pkg.scope)}
               ${
@@ -430,7 +430,7 @@ function renderDependenciesListHtml(scan) {
         <article class="dev-pkg-row is-dependency">
           <div class="dev-pkg-main">
             <div class="dev-pkg-title-row">
-              <strong>${escapeHTML(dep.name)}</strong>
+              <strong class="dev-pkg-name">${escapeHTML(dep.name)}</strong>
               ${dep.version ? `<span class="card-chip">v${escapeHTML(dep.version)}</span>` : ''}
               <span class="provider-badge ${escapeHTML(mgrMeta.badgeClass)}">${escapeHTML(mgrMeta.label)}</span>
               <span class="dev-direct-badge ${dep.direct ? 'is-direct' : 'is-transitive'}">${escapeHTML(dep.direct ? t('dev.workspace.badgeDirect') : t('dev.workspace.badgeTransitive'))}</span>

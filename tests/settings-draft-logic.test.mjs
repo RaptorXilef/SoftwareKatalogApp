@@ -35,6 +35,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
   it('erzeugt saubere Defaults und behandelt 0 sowie askSaveDialog korrekt', () => {
     const defaults = createSettingsDraft({});
     assert.equal(defaults.language, 'en');
+    assert.equal(defaults.showDevTab, true);
     assert.equal(defaults.startTab, 'updates');
     assert.equal(defaults.newBadgeDays, 14);
     assert.equal(defaults.versionCompareDepth, 3);
@@ -88,6 +89,14 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
 
     const neverUpdate = createSettingsDraft({ updateInterval: -1 });
     assert.equal(neverUpdate.updateInterval, -1);
+
+    const devHidden = createSettingsDraft({ showDevTab: false, startTab: 'dev' });
+    assert.equal(devHidden.showDevTab, false);
+    assert.equal(devHidden.startTab, 'updates');
+
+    const devStart = createSettingsDraft({ showDevTab: true, startTab: 'dev' });
+    assert.equal(devStart.showDevTab, true);
+    assert.equal(devStart.startTab, 'dev');
   });
 
   it('trennt Array-Referenzen vom Ausgangsobjekt', () => {
@@ -148,6 +157,7 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
 
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, language: 'de' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, language: 'auto' }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, showDevTab: false }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, startTab: 'discover' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, newBadgeDays: 0 }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, versionCompareDepth: 4 }), true);
@@ -233,6 +243,8 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     const withBg = {
       ...current,
       language: 'de',
+      showDevTab: false,
+      startTab: 'dev',
       autostartEnabled: true,
       autostartMode: 'admin',
       autoUpdateEnabled: true,
@@ -241,6 +253,8 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     const bgPlan = buildSettingsSavePlan(initial, withBg);
     assert.equal(bgPlan.languageChanged, true);
     assert.equal(bgPlan.payload.language, 'de');
+    assert.equal(bgPlan.payload.showDevTab, false);
+    assert.equal(bgPlan.payload.startTab, 'updates');
     assert.equal(bgPlan.autostartChanged, true);
     assert.equal(bgPlan.sortDefaultsChanged, true);
     assert.equal(bgPlan.backgroundChanged, true);

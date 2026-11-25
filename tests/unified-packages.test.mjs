@@ -7,6 +7,7 @@ import {
   computeTabCounts,
   DEFAULT_START_TAB,
   getPackageStatus,
+  getProviderBadgeInfo,
   normalizeStartTab,
 } from '../src/shared/unified-packages.js';
 
@@ -377,8 +378,12 @@ describe('normalizeStartTab', () => {
     assert.equal(normalizeStartTab(' archive '), 'archive');
     assert.equal(normalizeStartTab('bundles'), 'bundles');
     assert.equal(normalizeStartTab('discover'), 'discover');
+    assert.equal(normalizeStartTab('dev'), 'dev');
+    assert.equal(normalizeStartTab('DEV', { showDevTab: true }), 'dev');
+    assert.equal(normalizeStartTab('dev', { showDevTab: false }), 'updates');
     assert.equal(normalizeStartTab(''), 'updates');
     assert.equal(normalizeStartTab('unknown-tab'), 'updates');
     assert.equal(normalizeStartTab(null), 'updates');
+    assert.deepEqual(getProviderBadgeInfo('yarn'), { id: 'yarn', label: 'Yarn', badgeClass: 'is-yarn' });
   });
 });

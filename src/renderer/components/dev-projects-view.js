@@ -103,16 +103,16 @@ function renderProjectCardHtml(project) {
 
       <div class="dev-project-kpis">
         <div class="dev-kpi-box">
-          <strong>${escapeHTML(directVal)}</strong>
-          <span>${escapeHTML(t('dev.kpiDirect'))}</span>
+          <strong class="dev-kpi-value">${escapeHTML(directVal)}</strong>
+          <span class="dev-kpi-label">${escapeHTML(t('dev.kpiDirect'))}</span>
         </div>
         <div class="dev-kpi-box">
-          <strong>${escapeHTML(depsVal)}</strong>
-          <span>${escapeHTML(t('dev.kpiDeps'))}</span>
+          <strong class="dev-kpi-value">${escapeHTML(depsVal)}</strong>
+          <span class="dev-kpi-label">${escapeHTML(t('dev.kpiDeps'))}</span>
         </div>
         <div class="${updatesCellClass}">
-          <strong>${escapeHTML(updatesVal)}</strong>
-          <span>${escapeHTML(t('dev.kpiUpdates'))}</span>
+          <strong class="dev-kpi-value">${escapeHTML(updatesVal)}</strong>
+          <span class="dev-kpi-label">${escapeHTML(t('dev.kpiUpdates'))}</span>
         </div>
       </div>
 
@@ -659,8 +659,9 @@ export function initDevView() {
           resetDevWorkspaceForProject(projId);
           renderDevView();
           const proj = getSelectedDevProject();
-          if (proj && proj.isAvailable !== false && !state.devScanByProjectId[proj.id]) {
-            void scanSingleDevProject(proj.id, { useJob: false, checkUpdates: false, silent: true });
+          const cached = proj ? state.devScanByProjectId[proj.id] : null;
+          if (proj && proj.isAvailable !== false && !cached?.hasCheckedUpdates) {
+            void scanSingleDevProject(proj.id, { useJob: true, checkUpdates: true, silent: true });
           }
         }
       }
@@ -725,8 +726,9 @@ export function initDevView() {
       resetDevWorkspaceForProject(projId);
       renderDevView();
       const proj = getSelectedDevProject();
-      if (proj && proj.isAvailable !== false && !state.devScanByProjectId[proj.id]) {
-        void scanSingleDevProject(proj.id, { useJob: false, checkUpdates: false, silent: true });
+      const cached = proj ? state.devScanByProjectId[proj.id] : null;
+      if (proj && proj.isAvailable !== false && !cached?.hasCheckedUpdates) {
+        void scanSingleDevProject(proj.id, { useJob: true, checkUpdates: true, silent: true });
       }
     }
   });
