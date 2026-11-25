@@ -1,6 +1,6 @@
 # Software Katalog
 
-[English](./README_de.md)
+[English](./README.md)
 
 Ein portabler, schneller Software-Katalog, Windows-Paketmanager und Entwickler-Arbeitsbereich auf Basis von Electron.
 
