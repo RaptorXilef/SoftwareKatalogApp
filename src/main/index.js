@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { hasTrayStartupArg } from '../shared/background-update-logic.js';
 import { t } from '../shared/i18n.js';
 import { buildExportPolicyPayload, validateImportPolicyPayload } from '../shared/policy-logic.js';
@@ -144,6 +144,7 @@ import {
   destroyTrayService,
   initTrayService,
   isTrayActive,
+  loadAppWindowIcon,
   resolveAppIconPath,
   updateTrayState,
 } from './tray-service.js';
@@ -185,6 +186,10 @@ app.commandLine.appendSwitch('disable-direct-composition');
 // Muss VOR app.whenReady() registriert werden
 registerMediaScheme();
 
+const APP_USER_MODEL_ID = app.isPackaged
+  ? 'io.github.raptorxilef.softwarekatalogapp'
+  : 'io.github.raptorxilef.softwarekatalogapp.dev';
+
 const startedInTray = hasTrayStartupArg(process.argv);
 let mainWindow = null;
 let isQuitting = false;
@@ -195,7 +200,29 @@ function isSettingsLockedByAuth(authStatus) {
   return Boolean(authStatus?.enabled && !authStatus?.isAuthenticated);
 }
 
+function applyWindowTaskbarIcon(win, windowIcon, iconPath) {
+  if (!win || win.isDestroyed()) return;
+  if (windowIcon && !windowIcon.isEmpty()) {
+    win.setIcon(windowIcon);
+  }
+  if (process.platform === 'win32' && iconPath) {
+    try {
+      win.setAppDetails({
+        appId: APP_USER_MODEL_ID,
+        appIconPath: iconPath,
+        appIconIndex: 0,
+      });
+    } catch {
+      // Ignorieren, falls Windows-Shell-Properties nicht verfuegbar sind
+    }
+  }
+}
+
 function createWindow({ showOnReady = true } = {}) {
+  const iconPath = resolveAppIconPath();
+  const windowIcon = loadAppWindowIcon(iconPath);
+
+  /** @type {Electron.BrowserWindowConstructorOptions} */
   const windowOptions = {
     title: t('app.title'),
     width: 1280,
@@ -212,18 +239,14 @@ function createWindow({ showOnReady = true } = {}) {
     },
   };
 
-  const iconPath = resolveAppIconPath();
-  const windowIcon = iconPath ? nativeImage.createFromPath(iconPath) : null;
-  const effectiveIcon = windowIcon && !windowIcon.isEmpty() ? windowIcon : iconPath;
-  if (effectiveIcon) {
-    windowOptions.icon = effectiveIcon;
+  if (windowIcon && !windowIcon.isEmpty()) {
+    windowOptions.icon = windowIcon;
+  } else if (iconPath) {
+    windowOptions.icon = iconPath;
   }
 
   mainWindow = new BrowserWindow(windowOptions);
-
-  if (effectiveIcon) {
-    mainWindow.setIcon(effectiveIcon);
-  }
+  applyWindowTaskbarIcon(mainWindow, windowIcon, iconPath);
 
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -233,9 +256,7 @@ function createWindow({ showOnReady = true } = {}) {
 
   mainWindow.once('ready-to-show', () => {
     if (showOnReady && mainWindow && !mainWindow.isDestroyed()) {
-      if (process.platform === 'win32' && effectiveIcon) {
-        mainWindow.setIcon(effectiveIcon);
-      }
+      applyWindowTaskbarIcon(mainWindow, windowIcon, iconPath);
       mainWindow.show();
     }
   });
@@ -520,7 +541,7 @@ function registerIpcHandlers() {
   registerDevProjectsIpcHandlers();
 
   handleIpc('copy-files-to-pc', async (_e, sourceFiles) => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
+    const { canceled, filePaths } = await showOpenDialogAnchored({
       title: t('dialogs.copyFilesTitle'),
       properties: ['openDirectory'],
     });
@@ -629,7 +650,7 @@ function registerIpcHandlers() {
     return canceled ? null : filePaths[0];
   });
   handleIpc('select-file', async (_e, filters, returnAbsolute = false) => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
+    const { canceled, filePaths } = await showOpenDialogAnchored({
       title: t('dialogs.selectFileTitle'),
       properties: ['openFile'],
       filters,
@@ -692,7 +713,7 @@ function registerIpcHandlers() {
   });
   handleIpc('policy-import', async () => {
     try {
-      const { canceled, filePaths } = await dialog.showOpenDialog({
+      const { canceled, filePaths } = await showOpenDialogAnchored({
         title: t('dialogs.policyImportTitle'),
         properties: ['openFile'],
         filters: [{ name: t('dialogs.policyFilterName'), extensions: ['json'] }],
@@ -801,7 +822,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   });
 
   if (process.platform === 'win32') {
-    app.setAppUserModelId('io.github.raptorxilef.softwarekatalogapp');
+    app.setAppUserModelId(APP_USER_MODEL_ID);
   }
 
   app.whenReady().then(async () => {

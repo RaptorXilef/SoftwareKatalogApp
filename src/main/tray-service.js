@@ -3,6 +3,7 @@ import path from 'node:path';
 import { app, Menu, nativeImage, Tray } from 'electron';
 import { buildTrayMenuDescriptors, formatTrayTooltip } from '../shared/background-update-logic.js';
 import { t } from '../shared/i18n.js';
+import { extractPngFromIcoBuffer } from '../shared/ico-logic.js';
 import { getAppFolder } from './config.js';
 
 /** @type {Tray | null} */
@@ -44,6 +45,83 @@ export function resolveAppIconPath() {
     }
   }
   return '';
+}
+
+function resolveFallbackPngPath() {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'icon.png') : '',
+    path.join(getAppFolder(), 'build', 'icon.png'),
+    path.join(app.getAppPath(), 'build', 'icon.png'),
+    path.join(getAppFolder(), 'build', 'icon-original.png'),
+    path.join(app.getAppPath(), 'build', 'icon-original.png'),
+    path.resolve(__dirname, '../../build/icon.png'),
+    path.resolve(__dirname, '../../build/icon-original.png'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      const resolved = path.resolve(candidate);
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    } catch {
+      // Ignorieren
+    }
+  }
+  return '';
+}
+
+/**
+ * Laedt ein garantiertes RGBA-NativeImage fuer BrowserWindow & Taskleiste.
+ * Extrahiert unter Windows bevorzugt den eingebetteten 256x256-PNG-Frame aus icon.ico,
+ * da nativeImage.createFromPath() bei .ico-Dateien oft leer oder unvollstaendig bleibt.
+ * @param {string} [icoPath]
+ * @returns {Electron.NativeImage | null}
+ */
+export function loadAppWindowIcon(icoPath = resolveAppIconPath()) {
+  if (icoPath) {
+    try {
+      const raw = fs.readFileSync(icoPath);
+      const pngBuf = extractPngFromIcoBuffer(raw);
+      if (pngBuf) {
+        const fromEmbeddedPng = nativeImage.createFromBuffer(pngBuf);
+        if (!fromEmbeddedPng.isEmpty()) {
+          return fromEmbeddedPng;
+        }
+      }
+    } catch {
+      // Weiter mit PNG-/Path-Fallback
+    }
+  }
+
+  const pngPath = resolveFallbackPngPath();
+  if (pngPath) {
+    try {
+      let img = nativeImage.createFromPath(pngPath);
+      if (!img.isEmpty()) {
+        const size = img.getSize();
+        if (size.width > 256 || size.height > 256) {
+          img = img.resize({ width: 256, height: 256, quality: 'best' });
+        }
+        return img;
+      }
+    } catch {
+      // Weiter mit direktem .ico-Fallback
+    }
+  }
+
+  if (icoPath) {
+    try {
+      const direct = nativeImage.createFromPath(icoPath);
+      if (!direct.isEmpty()) {
+        return direct;
+      }
+    } catch {
+      // Ignorieren
+    }
+  }
+
+  return null;
 }
 
 function buildTrayMenu() {
@@ -100,12 +178,10 @@ export function initTrayService(handlers = {}, initialState = {}) {
   }
 
   const iconPath = resolveAppIconPath();
-  let iconImage = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
-  if (iconImage.isEmpty() && iconPath) {
-    iconImage = nativeImage.createFromPath(path.resolve(iconPath));
-  }
+  const trayIcon =
+    process.platform === 'win32' && iconPath ? iconPath : loadAppWindowIcon(iconPath) || nativeImage.createEmpty();
 
-  tray = new Tray(iconImage);
+  tray = new Tray(trayIcon);
   tray.on('click', () => trayHandlers.onOpenWindow?.());
   tray.on('double-click', () => trayHandlers.onOpenWindow?.());
   refreshTrayUi();
