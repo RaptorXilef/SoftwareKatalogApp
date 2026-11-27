@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, net, shell } from 'electron';
 import { buildPersistentIconIndexKeys, createIconCacheIndex } from '../shared/icon-cache-store.js';
+import { clearArchiveIconCache, getArchiveIconCacheStats, invalidateArchiveIcon } from './archive-icon-cache.js';
 import {
   buildIconCacheKey,
   deriveGitHubAvatarUrl,
@@ -461,6 +462,7 @@ export async function extractExeIcon(exePath, targetSoftwareDir) {
     }
 
     await fs.promises.writeFile(path.join(metaDir, 'icon.png'), icon.toPNG());
+    invalidateArchiveIcon(targetSoftwareDir);
     await scanSingleFolder(targetSoftwareDir);
     return { success: true };
   } catch (e) {
@@ -1492,12 +1494,25 @@ function getIconCacheIndex() {
 }
 
 export function getIconCacheStats() {
-  return getIconCacheIndex().getStats();
+  const base = getIconCacheIndex().getStats();
+  const archive = getArchiveIconCacheStats();
+  return {
+    ...base,
+    entryCount: base.entryCount + archive.entryCount,
+    hitCount: base.hitCount + archive.entryCount,
+    fileCount: base.fileCount + archive.fileCount,
+    totalBytes: base.totalBytes + archive.totalBytes,
+  };
 }
 
 export function clearIconCache() {
   failedIconKeys.clear();
-  return getIconCacheIndex().clear();
+  const base = getIconCacheIndex().clear();
+  const archive = clearArchiveIconCache();
+  return {
+    success: true,
+    removedFiles: (base.removedFiles || 0) + (archive.removedFiles || 0),
+  };
 }
 
 function normalizeDirPath(rawDir) {

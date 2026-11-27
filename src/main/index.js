@@ -60,7 +60,9 @@ import {
   getConfig,
   getDataFolder,
   getInstallInfo,
+  getUserDataFolder,
   inspectArchiveRootPath,
+  migrateUserFileFromLegacy,
   saveConfig,
 } from './config.js';
 import {
@@ -348,7 +350,7 @@ function registerBundleIpcHandlers() {
 }
 
 function registerDevProjectsIpcHandlers() {
-  // DEV-Projekte (zentral in data/dev-projects.json)
+  // DEV-Projekte (nutzerspezifisch in %APPDATA%\SoftwareKatalog\dev-projects.json)
   handleIpc('dev-projects-list', () => listDevProjects());
   handleIpc('dev-projects-add', (_e, payload) => addDevProject(payload || {}));
   handleIpc('dev-projects-update', (_e, projectId, patch) => updateDevProject(projectId, patch || {}));
@@ -375,7 +377,7 @@ function registerDevProjectsIpcHandlers() {
     devAuditFixProject(projectId, payload || {}, opts || {})
   );
 
-  // Dev-Buendel (zentral in data/dev-bundles.json)
+  // Dev-Buendel (nutzerspezifisch in %APPDATA%\SoftwareKatalog\dev-bundles.json)
   handleIpc('dev-bundles-load', () => loadDevBundles());
   handleIpc('dev-bundles-save', (_e, bundle) => saveDevBundle(bundle));
   handleIpc('dev-bundles-delete', (_e, bundleId) => deleteDevBundle(bundleId));
@@ -447,7 +449,7 @@ function registerIpcHandlers() {
   handleIpc('queue-cancel-all', () => cancelAllQueue());
   handleIpc('queue-get-state', () => getQueueState());
 
-  // Ignorierliste fuer Updates (zentral in data/ignored-updates.json)
+  // Ignorierliste fuer Updates
   handleIpc('ignore-load', () => loadIgnoredUpdates());
   handleIpc('ignore-add', (_e, entry) => addIgnoredUpdate(entry));
   handleIpc('ignore-remove', (_e, entryId) => removeIgnoredUpdate(entryId));
@@ -774,7 +776,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     },
   });
 
-  configureDevProjectsService({ getDataFolderFn: getDataFolder });
+  // Einmalige Migration nutzerspezifischer DEV-Daten aus data/ nach %APPDATA%\SoftwareKatalog
+  migrateUserFileFromLegacy('dev-projects.json', [getDataFolder()]);
+  migrateUserFileFromLegacy('dev-bundles.json', [getDataFolder()]);
+
+  configureDevProjectsService({ getDataFolderFn: getUserDataFolder });
   configureDevCli({ getConfigFn: getConfig });
   configureDevScanner({
     getProjectFn: getDevProject,
@@ -794,7 +800,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     },
   });
   configureDevBundlesService({
-    getDataFolderFn: getDataFolder,
+    getDataFolderFn: getUserDataFolder,
     getProjectFn: getDevProject,
     scanProjectFn: scanDevProject,
     installPackagesBatchFn: devInstallPackagesBatch,

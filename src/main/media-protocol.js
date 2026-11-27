@@ -46,11 +46,12 @@ export function setupMediaProtocolHandler() {
 
       if (allowedIconCache || IMAGE_MIME_TYPES[ext]) {
         const data = await fs.promises.readFile(filePath);
+        const cacheHeader = allowedIconCache ? 'public, max-age=86400' : 'no-cache';
         return new Response(data, {
           status: 200,
           headers: {
             'Content-Type': IMAGE_MIME_TYPES[ext] || 'application/octet-stream',
-            'Cache-Control': 'no-cache',
+            'Cache-Control': cacheHeader,
           },
         });
       }

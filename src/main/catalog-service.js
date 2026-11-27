@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { dialog } from 'electron';
 import { buildPersistentIconIndexKeys, createIconCacheIndex } from '../shared/icon-cache-store.js';
+import { invalidateArchiveIcon, lookupCachedArchiveIcon, queueArchiveIconWarm } from './archive-icon-cache.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
@@ -16,10 +17,31 @@ export function loadCatalogWithLiveStatus() {
     return data.map((item) => {
       const absPath = item.path ? path.resolve(appFolder, item.path) : '';
       const resolvedIcon = item.icon ? path.resolve(appFolder, item.icon) : null;
-      const existingArchiveIcon = resolvedIcon && fs.existsSync(resolvedIcon) ? resolvedIcon : null;
+
+      let effectiveArchiveIcon = null;
+      if (item.icon && resolvedIcon) {
+        // Zuerst rein lokal im verkleinerten 128x128 Archiv-Icon-Cache nachschlagen (0 NAS-IO!)
+        const localArchiveThumb = lookupCachedArchiveIcon({
+          itemId: item.id,
+          relIcon: item.icon,
+          scanMtime: item.scanMtime || 0,
+        });
+        if (localArchiveThumb) {
+          effectiveArchiveIcon = localArchiveThumb;
+        } else {
+          // Erstmaliges Laden oder geaendertes Icon: Pfad direkt durchreichen und im Hintergrund lokal verkleinert cachen
+          effectiveArchiveIcon = resolvedIcon;
+          queueArchiveIconWarm({
+            itemId: item.id,
+            relIcon: item.icon,
+            absSourcePath: resolvedIcon,
+            scanMtime: item.scanMtime || 0,
+          });
+        }
+      }
 
       let cachedIconPath = null;
-      if (!existingArchiveIcon) {
+      if (!effectiveArchiveIcon) {
         const keys = buildPersistentIconIndexKeys({
           id: item.id || '',
           packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
@@ -60,7 +82,7 @@ export function loadCatalogWithLiveStatus() {
         path: absPath,
         primaryPath: item.primaryPath ? path.resolve(appFolder, item.primaryPath) : absPath,
         alternatePaths: resolvedAlternatePaths,
-        icon: existingArchiveIcon,
+        icon: effectiveArchiveIcon,
         cachedIconPath,
         screenshots: (item.screenshots || []).map((s) => path.resolve(appFolder, s)),
         lastFiles: resolvedLastFiles,
@@ -224,6 +246,7 @@ export async function addIconFile(targetPath, filePath) {
 
     const ext = path.extname(filePath);
     await fs.promises.copyFile(filePath, path.join(metaDir, `icon${ext}`));
+    invalidateArchiveIcon(targetPath);
     await scanSingleFolder(targetPath);
     return { success: true };
   } catch (e) {

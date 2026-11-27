@@ -59,10 +59,13 @@ const DEFAULT_STATE = {
 };
 
 let migrationChecked = false;
+let userStateMigrationChecked = false;
 /** @type {{ installKind: 'installed' | 'portable-exe' | 'portable-dir', isAllUsersInstall: boolean, arch: 'x64' | 'ia32' | 'arm64', isPackaged: boolean, platform: string } | null} */
 let cachedInstallInfo = null;
 /** @type {string | null} */
 let cachedDataDir = null;
+/** @type {string | null} */
+let cachedUserDataDir = null;
 /** @type {string | null} */
 let cachedIconCacheDir = null;
 
@@ -89,6 +92,20 @@ function canWriteDirectory(dirPath) {
     }
     return false;
   }
+}
+
+function getRealAppDataPath() {
+  try {
+    const appData = app.getPath('appData');
+    const appPath = app.getAppPath();
+    // In isolierten Unit-Test-Mocks liefert app.getPath('appData') oft appDir zurueck -> dann nicht das echte OS-Profil nutzen
+    if (appData && (!appPath || path.resolve(appData) !== path.resolve(appPath))) {
+      return appData;
+    }
+  } catch {
+    // Ignorieren
+  }
+  return '';
 }
 
 export function getInstallInfo() {
@@ -153,6 +170,68 @@ export function getDataFolder() {
 }
 
 /**
+ * Liefert den persistenten nutzer-/PC-spezifischen Datenordner (`%APPDATA%\SoftwareKatalog`),
+ * geteilt über alle 4 Startvarianten (Dev, Portabel, ZIP, Setup).
+ * @returns {string}
+ */
+export function getUserDataFolder() {
+  if (cachedUserDataDir) {
+    if (!fs.existsSync(cachedUserDataDir)) {
+      try {
+        fs.mkdirSync(cachedUserDataDir, { recursive: true });
+      } catch {
+        // Ignorieren
+      }
+    }
+    return cachedUserDataDir;
+  }
+
+  const realAppData = getRealAppDataPath();
+  const candidates = [realAppData ? path.join(realAppData, 'SoftwareKatalog') : '', app.getPath('userData')].filter(
+    Boolean
+  );
+
+  for (const candidate of candidates) {
+    if (canWriteDirectory(candidate)) {
+      cachedUserDataDir = candidate;
+      return candidate;
+    }
+  }
+
+  const fallback = app.getPath('userData');
+  if (!fs.existsSync(fallback)) {
+    fs.mkdirSync(fallback, { recursive: true });
+  }
+  cachedUserDataDir = fallback;
+  return fallback;
+}
+
+/**
+ * Migriert eine einzelne Datei einmalig aus einem Legacy-Ordner in den persistenten User-Ordner,
+ * falls sie im Ziel noch nicht existiert.
+ * @param {string} fileName
+ * @param {string[]} legacyDirs
+ */
+export function migrateUserFileFromLegacy(fileName, legacyDirs = []) {
+  const userDir = getUserDataFolder();
+  const targetPath = path.join(userDir, fileName);
+  if (fs.existsSync(targetPath)) return;
+
+  const resolvedUserDir = path.resolve(userDir);
+  for (const legacyDir of legacyDirs) {
+    if (!legacyDir || path.resolve(legacyDir) === resolvedUserDir) continue;
+    const oldPath = path.join(legacyDir, fileName);
+    if (!fs.existsSync(oldPath)) continue;
+    try {
+      fs.copyFileSync(oldPath, targetPath);
+      return;
+    } catch (e) {
+      console.warn(`Konnte ${fileName} nicht nach ${userDir} migrieren:`, e);
+    }
+  }
+}
+
+/**
  * Prüft ob ein Verzeichnis auf dem System erreichbar/vorhanden ist.
  * @param {string} absPath
  * @returns {boolean}
@@ -209,6 +288,12 @@ function migrateLegacyFiles(appFolder, dataDir) {
   }
 }
 
+function ensureUserStateMigrated() {
+  if (userStateMigrationChecked) return;
+  userStateMigrationChecked = true;
+  migrateUserFileFromLegacy('state.json', [app.getPath('userData')]);
+}
+
 function getDefaultScannerPath(appFolder) {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'scanner.mjs')
@@ -221,9 +306,10 @@ export function getConfig() {
   if (path.resolve(dataDir) === path.resolve(appFolder, 'data')) {
     migrateLegacyFiles(appFolder, dataDir);
   }
+  ensureUserStateMigrated();
 
   const configPath = path.join(dataDir, 'config.json');
-  const statePath = path.join(app.getPath('userData'), 'state.json');
+  const statePath = path.join(getUserDataFolder(), 'state.json');
 
   /** @type {Record<string, any>} */
   const rawConfig = {};
@@ -318,7 +404,7 @@ export function getConfig() {
 export function saveConfig(newSettings) {
   const dataDir = getDataFolder();
   const configPath = path.join(dataDir, 'config.json');
-  const statePath = path.join(app.getPath('userData'), 'state.json');
+  const statePath = path.join(getUserDataFolder(), 'state.json');
   const current = getConfig();
   const merged = { ...current, ...newSettings };
   Object.assign(merged, normalizeBackgroundSettings(merged));
@@ -405,8 +491,8 @@ export function isInsideTargetDir(targetPath) {
 }
 
 /**
- * Liefert ein dauerhaft persistentes Icon-Cache-Verzeichnis (primaer `data/icon-cache`,
- * bei schreibgeschuetztem data/-Ordner Fallback auf `%APPDATA%/SoftwareKatalog/icon-cache`).
+ * Liefert ein dauerhaft persistentes, lokales Icon-Cache-Verzeichnis auf der PC-Festplatte
+ * (`%LOCALAPPDATA%\SoftwareKatalog\icon-cache`, Fallback `%APPDATA%\SoftwareKatalog\icon-cache`).
  * @returns {string}
  */
 export function getIconCacheDir() {
@@ -421,17 +507,12 @@ export function getIconCacheDir() {
     return cachedIconCacheDir;
   }
 
-  let appDataIconDir = '';
-  try {
-    const appData = app.getPath('appData');
-    if (appData) appDataIconDir = path.join(appData, 'SoftwareKatalog', 'icon-cache');
-  } catch {
-    appDataIconDir = '';
-  }
+  const realAppData = getRealAppDataPath();
+  const localAppData = realAppData && process.env.LOCALAPPDATA ? process.env.LOCALAPPDATA : '';
 
   const candidates = [
-    path.join(getDataFolder(), 'icon-cache'),
-    appDataIconDir,
+    localAppData ? path.join(localAppData, 'SoftwareKatalog', 'icon-cache') : '',
+    realAppData ? path.join(realAppData, 'SoftwareKatalog', 'icon-cache') : '',
     path.join(app.getPath('userData'), 'icon-cache'),
   ].filter(Boolean);
 
@@ -453,6 +534,7 @@ export function getIconCacheDir() {
 export function isInsideIconCacheDir(filePath) {
   if (!filePath) return false;
   if (isPathInsideBase(filePath, getIconCacheDir())) return true;
+  if (isPathInsideBase(filePath, path.join(getDataFolder(), 'icon-cache'))) return true;
   const legacyDir = path.join(app.getPath('userData'), 'icon-cache');
   return isPathInsideBase(filePath, legacyDir);
 }

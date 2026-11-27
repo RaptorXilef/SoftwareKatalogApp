@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { clearArchiveIconCache } from './archive-icon-cache.js';
 import { getConfig } from './config.js';
 import { createJob } from './jobs.js';
 
@@ -115,6 +116,10 @@ export async function runArchiveScan(mode = 'smart') {
 
       if (code === 0) {
         if (dirCount > 0) lastCounts[mode] = dirCount;
+        // Bei "Alle Metadaten neu einlesen" (--update) oder Voll-Rescan (--full) lokale Archiv-Icon-Thumbnails neu aufbauen
+        if (mode === 'update' || mode === 'full') {
+          clearArchiveIconCache();
+        }
         const offlineNote =
           offlineRoots.length > 0
             ? ` · ${offlineRoots.length} offline (${offlineRoots.map((r) => r.label || r.path).join(', ')})`
