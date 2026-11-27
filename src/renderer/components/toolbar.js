@@ -3,11 +3,13 @@ import {
   getActiveSortMode,
   getTabCounts,
   getTotalDevPendingUpdates,
+  getUpdateScope,
   getUsableProviders,
   isDevTabEnabled,
   isItemVisibleForTab,
   setActiveOriginFilter,
   setActiveSortMode,
+  setUpdateScope,
   state,
 } from '../state.js';
 import { closestEl, qsa, qsInput, qsSelect } from '../utils/dom.js';
@@ -16,11 +18,14 @@ import { escapeHTML } from '../utils/sanitize.js';
 
 function getOriginFilterOptionsForTab(tab) {
   if (tab === 'updates') {
-    const options = [
-      { id: 'all', label: t('toolbar.originAll') },
-      { id: 'in-archive', label: t('toolbar.originInArchive') },
-      { id: 'not-in-archive', label: t('toolbar.originNotInArchive') },
-    ];
+    const scope = getUpdateScope();
+    const options = [{ id: 'all', label: t('toolbar.originAll') }];
+    if (scope !== 'archive') {
+      options.push(
+        { id: 'in-archive', label: t('toolbar.originInArchive') },
+        { id: 'not-in-archive', label: t('toolbar.originNotInArchive') }
+      );
+    }
     for (const provider of getUsableProviders({ capability: 'listUpgrades', excludeIds: ['archive'] })) {
       options.push({ id: provider.id, label: provider.name });
     }
@@ -147,13 +152,36 @@ function renderOriginFilterBar() {
     setActiveOriginFilter('all');
   }
 
+  let scopeHtml = '';
+  if (state.activeTab === 'updates') {
+    const activeScope = getUpdateScope();
+    const scopes = [
+      { id: 'installed', label: `💻 ${t('toolbar.updateScopeInstalled')}` },
+      { id: 'archive', label: `🗄️ ${t('toolbar.updateScopeArchive')}` },
+      { id: 'both', label: `📦 ${t('toolbar.updateScopeBoth')}` },
+    ];
+    scopeHtml = `
+      <div class="update-scope-group" role="group" aria-label="${escapeHTML(t('toolbar.updateScopeAria'))}">
+        ${scopes
+          .map(
+            (s) =>
+              `<button type="button" class="update-scope-chip ${activeScope === s.id ? 'active' : ''}" data-update-scope="${escapeHTML(s.id)}" aria-pressed="${activeScope === s.id ? 'true' : 'false'}">${escapeHTML(s.label)}</button>`
+          )
+          .join('')}
+      </div>
+      <span class="origin-filter-divider" aria-hidden="true"></span>
+    `;
+  }
+
   bar.hidden = false;
-  bar.innerHTML = options
-    .map(
-      (opt) =>
-        `<button type="button" class="origin-chip ${active === opt.id ? 'active' : ''}" data-origin-filter="${escapeHTML(opt.id)}">${escapeHTML(opt.label)}</button>`
-    )
-    .join('');
+  bar.innerHTML =
+    scopeHtml +
+    options
+      .map(
+        (opt) =>
+          `<button type="button" class="origin-chip ${active === opt.id ? 'active' : ''}" data-origin-filter="${escapeHTML(opt.id)}">${escapeHTML(opt.label)}</button>`
+      )
+      .join('');
 }
 
 export function syncToolbarForTab() {
@@ -224,7 +252,7 @@ export function renderTagChips() {
     const isHidden = Boolean(item.hiddenCategory?.trim());
     if (isHidden && !visibleHidden.includes(item.hiddenCategory)) continue;
     if (!isItemVisibleForTab({ ...item, inArchive: true }, 'archive')) continue;
-    for (const t of item.tags) allTags.add(t);
+    for (const tag of item.tags) allTags.add(tag);
   }
 
   const locale = getI18nLocale() || 'en';
@@ -294,6 +322,14 @@ export function initToolbar(handlers) {
   });
 
   originFilterBar?.addEventListener('click', (e) => {
+    const scopeBtn = closestEl(e.target, '[data-update-scope]');
+    if (scopeBtn) {
+      setUpdateScope(scopeBtn.dataset.updateScope);
+      renderOriginFilterBar();
+      handlers.onFilterChange();
+      return;
+    }
+
     const chip = closestEl(e.target, '[data-origin-filter]');
     if (!chip) return;
     setActiveOriginFilter(chip.dataset.originFilter);

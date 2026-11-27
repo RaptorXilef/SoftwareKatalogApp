@@ -4,6 +4,7 @@ import path from 'node:path';
 import { BrowserWindow, dialog, session } from 'electron';
 import { resolveBestArchivePath } from '../shared/multi-archive-logic.js';
 import { buildArchiveFilename, extractVersion } from '../shared/version.js';
+import { extractLinkFromHtml, extractVersionFromHtml } from '../shared/web-scraper-logic.js';
 import { persistWebVersion, writeCatalogAtomic } from './catalog-service.js';
 import { getConfig } from './config.js';
 import { createJob } from './jobs.js';
@@ -15,62 +16,84 @@ import { getFileVersion } from './windows-tools.js';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const DIRECT_EXTS = new Set(['exe', 'msi', 'msix', 'zip', '7z', 'rar', 'tar', 'gz']);
 
-// ==========================================
-// HTML PRÄFIX/SUFFIX EXTRAKTION
-// ==========================================
-function extractBetween(html, prefix, suffix) {
-  if (!html || !prefix) return null;
-
-  const buildFlexRegex = (str, wildcardNumbers = false) => {
-    let escaped = str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (wildcardNumbers) {
-      escaped = escaped.replace(/\d+(?:\\.\d+)+|\b\d+\b|(?<=_|-|\/)\d+/g, '\\d+(?:\\.\\d+)*');
+/**
+ * Lädt eine Webseite unsichtbar in einem isolierten BrowserWindow und liefert `document.body.innerHTML`
+ * (Fallback für JS-gerenderte Webseiten und abweichende DOM-Serialisierung).
+ * @param {string} url
+ * @param {{ signal?: AbortSignal | null, timeoutMs?: number, settleMs?: number }} [options]
+ * @returns {Promise<string | null>}
+ */
+function fetchRenderedBodyHtml(url, { signal = null, timeoutMs = 15000, settleMs = 1200 } = {}) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(null);
+      return;
     }
-    return escaped
-      .replace(/["']/g, '["\']')
-      .replace(/<br\s*\\?\/?>/gi, '<br\\s*\\/?>')
-      .replace(/\s+/g, '\\s+');
-  };
 
-  if (suffix) {
-    let searchFrom = 0;
-    while (searchFrom < html.length) {
-      const preIdx = html.indexOf(prefix, searchFrom);
-      if (preIdx === -1) break;
-      const startIdx = preIdx + prefix.length;
-      const sufIdx = html.indexOf(suffix, startIdx);
-      if (sufIdx === -1) break;
+    const partition = `bg-scrape-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const win = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition,
+      },
+    });
 
-      const closerPreIdx = html.lastIndexOf(prefix, sufIdx);
-      const actualStart = closerPreIdx !== -1 && closerPreIdx >= preIdx ? closerPreIdx + prefix.length : startIdx;
+    let settled = false;
+    let settleTimer = null;
 
-      if (sufIdx - actualStart <= 500) {
-        return html.substring(actualStart, sufIdx).trim();
+    const cleanup = () => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      if (!win.isDestroyed()) {
+        try {
+          win.destroy();
+        } catch {
+          // Ignorieren
+        }
       }
-      searchFrom = actualStart;
-    }
-  } else {
-    const preIdx = html.indexOf(prefix);
-    if (preIdx !== -1) {
-      return html.substring(preIdx + prefix.length, preIdx + prefix.length + 40).trim();
-    }
-  }
+    };
 
-  for (const useWildcard of [false, true]) {
-    try {
-      const prePat = buildFlexRegex(prefix, useWildcard);
-      const sufPat = suffix ? buildFlexRegex(suffix, useWildcard) : '';
-      const fullRegex = suffix
-        ? new RegExp(`${prePat}([\\s\\S]{1,500}?)${sufPat}`, 'i')
-        : new RegExp(`${prePat}([\\s\\S]{1,40})`, 'i');
-      const match = html.match(fullRegex);
-      if (match?.[1]) return match[1].trim();
-    } catch {
-      // Ignorieren
-    }
-  }
+    const finish = (html) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(html);
+    };
 
-  return null;
+    const onAbort = () => finish(null);
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const timeoutTimer = setTimeout(() => finish(null), timeoutMs);
+
+    win.webContents.once('did-finish-load', () => {
+      if (settled) return;
+      settleTimer = setTimeout(async () => {
+        if (settled || win.isDestroyed()) return;
+        try {
+          const html = await win.webContents.executeJavaScript(
+            'document.body ? document.body.innerHTML : (document.documentElement ? document.documentElement.innerHTML : "")'
+          );
+          finish(typeof html === 'string' && html.length > 0 ? html : null);
+        } catch {
+          finish(null);
+        }
+      }, settleMs);
+    });
+
+    win.webContents.once('did-fail-load', (_ev, errorCode) => {
+      if (errorCode === -3) return; // ERR_ABORTED bei Redirect ignorieren
+      finish(null);
+    });
+
+    win.loadURL(url, { userAgent: USER_AGENT }).catch(() => finish(null));
+  });
 }
 
 // ==========================================
@@ -218,17 +241,41 @@ export async function checkSingleWebSource(
       result = await fetchGitHubRelease(url, githubAssetPattern, signal);
     } else if (effectiveType === 'web') {
       if (!url) return { success: false, error: 'Keine Prüf-URL angegeben.' };
-      if (!prefix)
+      if (!prefix) {
         return { success: false, error: 'Bitte nutze "Version auf Seite markieren" oder gib ein Präfix an.' };
+      }
 
-      const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal });
-      if (!res.ok) return { success: false, error: `HTTP Fehler ${res.status}` };
-      const html = await res.text();
-      const raw = extractBetween(html, prefix, suffix);
-      const version = extractVersion(raw || '');
+      let version = null;
+      let httpError = '';
+
+      try {
+        const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, signal });
+        if (res.ok) {
+          const html = await res.text();
+          version = extractVersionFromHtml(html, prefix, suffix);
+        } else {
+          httpError = `HTTP Fehler ${res.status}`;
+        }
+      } catch (fetchErr) {
+        if (fetchErr?.name === 'AbortError') throw fetchErr;
+        httpError = fetchErr?.message || '';
+      }
+
+      // Fallback für JS-gerenderte Webseiten / Chromium-DOM-Abweichungen
+      if (!version && !signal?.aborted) {
+        const renderedHtml = await fetchRenderedBodyHtml(url, { signal });
+        if (renderedHtml) {
+          version = extractVersionFromHtml(renderedHtml, prefix, suffix);
+        }
+      }
+
+      if (signal?.aborted) {
+        return { success: false, canceled: true };
+      }
+
       result = version
         ? { success: true, version }
-        : { success: false, error: 'Keine Versionsnummer an dieser Stelle gefunden.' };
+        : { success: false, error: httpError || 'Keine Versionsnummer an dieser Stelle gefunden.' };
     }
 
     if (result.success && persist && itemId) {
@@ -393,7 +440,7 @@ export function openVisualScraper(url) {
 
               document.getElementById('sk-save-btn').onclick = () => {
                 const sel = window.getSelection();
-                const text = sel.toString().trim();
+                const text = sel ? sel.toString().trim() : '';
                 if (!text) return alert('Bitte markiere zuerst eine Versionsnummer (z. B. 4.2.1) mit der Maus.');
 
                 const range = sel.getRangeAt(0);
@@ -402,6 +449,7 @@ export function openVisualScraper(url) {
                 marker.appendChild(range.extractContents());
                 range.insertNode(marker);
 
+                div.remove();
                 const markerOuter = marker.outerHTML;
                 const fullHtml = document.body.innerHTML;
                 const mIdx = fullHtml.indexOf(markerOuter);
@@ -409,15 +457,12 @@ export function openVisualScraper(url) {
                 let prefix = '';
                 let suffix = '';
                 if (mIdx !== -1) {
-                  prefix = fullHtml.substring(Math.max(0, mIdx - 35), mIdx);
-                  suffix = fullHtml.substring(mIdx + markerOuter.length, mIdx + markerOuter.length + 25);
+                  prefix = fullHtml.substring(Math.max(0, mIdx - 50), mIdx);
+                  suffix = fullHtml.substring(mIdx + markerOuter.length, mIdx + markerOuter.length + 35);
                 }
 
                 marker.replaceWith(...marker.childNodes);
-                div.remove();
-
-                const cleanedVer = text.replace(/,\\s*/g, '.').match(/(\\d+(?:\\.\\d+)+)/);
-                resolveJS({ success: true, prefix, suffix, version: cleanedVer ? cleanedVer[1] : text });
+                resolveJS({ success: true, prefix, suffix, rawText: text });
               };
             });
           }
@@ -426,7 +471,13 @@ export function openVisualScraper(url) {
         if (result?.success && !isResolved) {
           isResolved = true;
           win.close();
-          resolve(result);
+          const parsedVer = extractVersion(result.rawText || '') || String(result.rawText || '').trim();
+          resolve({
+            success: true,
+            prefix: result.prefix || '',
+            suffix: result.suffix || '',
+            version: parsedVer,
+          });
         }
       } catch {
         // Navigation läuft
@@ -549,6 +600,7 @@ export function openVisualLinkPicker(url, knownVersion = '') {
                   e.preventDefault();
                   e.stopImmediatePropagation();
 
+                  div.remove();
                   const markerStr = 'SK_TEMP_HREF_MARKER';
                   link.setAttribute('href', markerStr);
                   const fullHtml = document.body.innerHTML;
@@ -557,12 +609,11 @@ export function openVisualLinkPicker(url, knownVersion = '') {
                   let prefix = '';
                   let suffix = '';
                   if (mIdx !== -1) {
-                    prefix = fullHtml.substring(Math.max(0, mIdx - 40), mIdx);
-                    suffix = fullHtml.substring(mIdx + markerStr.length, mIdx + markerStr.length + 20);
+                    prefix = fullHtml.substring(Math.max(0, mIdx - 50), mIdx);
+                    suffix = fullHtml.substring(mIdx + markerStr.length, mIdx + markerStr.length + 30);
                   }
 
                   link.setAttribute('href', href);
-                  div.remove();
                   resolveJS({ success: true, mode: 'html-link', url: window.location.href, prefix, suffix });
                 }
                 // Wenn es ein <button> ohne href ist, lassen wir das Klick-Event durch ->
@@ -624,17 +675,30 @@ async function resolveDownloadUrl(item, signal, { version = '' } = {}) {
     finalUrl = finalUrl.split('{version}').join(item.webVersion);
   }
 
-  // 4. Dynamische Link-Extraktion per Prefix/Suffix
+  // 4. Dynamische Link-Extraktion per Prefix/Suffix (mit BrowserWindow-Fallback)
   if (item.dlPrefix) {
-    const res = await fetch(finalUrl, { headers: { 'User-Agent': USER_AGENT }, signal });
-    if (!res.ok) throw new Error(`Download-Seite nicht erreichbar (HTTP ${res.status})`);
-    const html = await res.text();
-    const extracted = extractBetween(html, item.dlPrefix, item.dlSuffix);
+    let extracted = null;
+    try {
+      const res = await fetch(finalUrl, { headers: { 'User-Agent': USER_AGENT }, signal });
+      if (res.ok) {
+        const html = await res.text();
+        extracted = extractLinkFromHtml(html, item.dlPrefix, item.dlSuffix);
+      }
+    } catch (fetchErr) {
+      if (fetchErr?.name === 'AbortError') throw fetchErr;
+    }
+
+    if (!extracted && !signal?.aborted) {
+      const renderedHtml = await fetchRenderedBodyHtml(finalUrl, { signal });
+      if (renderedHtml) {
+        extracted = extractLinkFromHtml(renderedHtml, item.dlPrefix, item.dlSuffix);
+      }
+    }
+
     if (!extracted) {
       throw new Error('Download-Link konnte auf der Webseite nicht mehr gefunden werden.');
     }
-    const cleanHref = extracted.split(/["'\s>]/)[0];
-    finalUrl = new URL(cleanHref, finalUrl).href;
+    finalUrl = new URL(extracted, finalUrl).href;
   }
 
   return { url: finalUrl, version: item.webVersion || '', sha256: '' };

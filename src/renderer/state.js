@@ -3,9 +3,11 @@ import { filterUsableProviders, isProviderUsableInUi } from '../shared/provider-
 import {
   buildUnifiedPackages,
   computeTabCounts,
+  DEFAULT_UPDATE_SCOPE,
   getBaseName,
   getPackageStatus,
   normalizeDefaultSortModes,
+  normalizeUpdateScope,
 } from '../shared/unified-packages.js';
 import { t } from './utils/i18n.js';
 
@@ -25,6 +27,7 @@ export const state = {
   favorites: [],
   availableHiddenCats: [],
   activeTab: 'updates',
+  updateScope: DEFAULT_UPDATE_SCOPE,
   originFilters: {
     updates: 'all',
     installed: 'all',
@@ -290,9 +293,18 @@ export function getTabCounts() {
       ignoredUpdates: state.ignoredUpdates,
       accessPolicy: getAccessPolicy(),
       isAdmin: isAdminAuthenticated(),
+      updateScope: state.updateScope,
     }),
     dev: Array.isArray(state.devProjects) ? state.devProjects.length : 0,
   };
+}
+
+export function getUpdateScope() {
+  return normalizeUpdateScope(state.updateScope);
+}
+
+export function setUpdateScope(scope) {
+  state.updateScope = normalizeUpdateScope(scope);
 }
 
 export function isDevTabEnabled() {

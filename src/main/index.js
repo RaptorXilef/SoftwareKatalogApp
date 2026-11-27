@@ -368,10 +368,9 @@ function registerDevProjectsIpcHandlers() {
 
 function resolvePreferredArchiveDialogPath() {
   const cfg = getConfig();
-  const candidates = [
-    ...(Array.isArray(cfg.absArchivePaths) ? cfg.absArchivePaths : []),
-    cfg.absTargetPath,
-  ].filter(Boolean);
+  const candidates = [...(Array.isArray(cfg.absArchivePaths) ? cfg.absArchivePaths : []), cfg.absTargetPath].filter(
+    Boolean
+  );
 
   for (const dir of candidates) {
     try {

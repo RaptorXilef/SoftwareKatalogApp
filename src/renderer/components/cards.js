@@ -1,7 +1,12 @@
 import { getInstallModeBadge } from '../../shared/installer-logic.js';
 import { formatScanProgressBanner, formatSourceNameList } from '../../shared/scan-progress-logic.js';
 import { scoreCatalogItem } from '../../shared/search.js';
-import { canDownloadOnline, isPackageVisible, matchesProviderFilter } from '../../shared/unified-packages.js';
+import {
+  canDownloadOnline,
+  isPackageVisible,
+  matchesProviderFilter,
+  matchesUpdateScope,
+} from '../../shared/unified-packages.js';
 import { compareVersions } from '../../shared/version.js';
 import {
   evaluateItemPolicy,
@@ -214,7 +219,7 @@ function matchesTabAndFilter(item, st) {
   if (tab === 'updates') {
     if (!isProviderItemVisible(item)) return false;
     if (item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) return false;
-    if (!st.hasVisibleUpdate) return false;
+    if (!matchesUpdateScope(item, st, state.updateScope)) return false;
     const originFilter = getActiveOriginFilter();
     if (!['all', 'in-archive', 'not-in-archive'].includes(originFilter) && !isProviderUsable(originFilter)) {
       return false;
@@ -259,7 +264,7 @@ function getTabBaseCount(visibleHidden) {
     if (
       state.activeTab === 'updates' &&
       !(item.origin === 'pc' && item.packageManager && !isProviderUsable(item.packageManager)) &&
-      st.hasVisibleUpdate
+      matchesUpdateScope(item, st, state.updateScope)
     ) {
       count++;
     } else if (state.activeTab === 'installed' && item.isInstalled) count++;

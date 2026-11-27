@@ -124,7 +124,11 @@
     "categoriesAndTags": "Categories & Tags",
     "originAll": "All",
     "originInArchive": "In Archive",
-    "originNotInArchive": "Not in Archive"
+    "originNotInArchive": "Not in Archive",
+    "updateScopeAria": "Update scope",
+    "updateScopeInstalled": "Installed Software",
+    "updateScopeArchive": "Archive",
+    "updateScopeBoth": "Both"
   },
   "discover": {
     "searchPlaceholder": "Search new software in active sources & Archive (Ctrl+F)...",
