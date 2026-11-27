@@ -1,5 +1,6 @@
 import { parseDisplayIcon } from './icon-logic.js';
 import { extractMsiProductCodeFromEntry } from './msi-parser.js';
+import { compareVersions, extractVersion } from './version.js';
 
 const GENERIC_ID_TAILS = new Set([
   'app',
@@ -253,6 +254,38 @@ export function isIdLikeDisplayName(name, packageId = '') {
 export function isUnknownVersionString(value) {
   const clean = String(value || '').trim();
   return !clean || UNKNOWN_VERSION_RE.test(clean);
+}
+
+/**
+ * Bewertet anhand numerischem Versionsvergleich, ob eine angebotene Zielversion
+ * wirklich neuer ist als die tatsaechlich aufgeloesete lokale Version.
+ * @param {{ installedVersion?: string, availableVersion?: string, installedVersionIsLowerBound?: boolean }} params
+ * @returns {boolean}
+ */
+function computeProviderHasUpdate({
+  installedVersion = '',
+  availableVersion = '',
+  installedVersionIsLowerBound = false,
+}) {
+  const cleanAvail = String(availableVersion || '').trim();
+  if (!cleanAvail || isUnknownVersionString(cleanAvail)) return false;
+
+  const cleanInst = String(installedVersion || '').trim();
+  if (!cleanInst || isUnknownVersionString(cleanInst)) return true;
+
+  const parsedAvail = extractVersion(cleanAvail);
+  const parsedInst = extractVersion(cleanInst);
+  if (parsedAvail && parsedInst) {
+    const cmp = compareVersions(parsedAvail, parsedInst, 0);
+    if (cmp > 0) return true;
+    if (cmp < 0) return false;
+    return Boolean(installedVersionIsLowerBound);
+  }
+
+  if (cleanAvail.toLowerCase() === cleanInst.toLowerCase()) {
+    return Boolean(installedVersionIsLowerBound);
+  }
+  return true;
 }
 
 /**
@@ -831,20 +864,34 @@ export function mergeInstalledSoftware({
       packageId: wg.packageId,
       packageManager: 'winget',
     });
-    const installedVersion = reg?.displayVersion || wg.version || up?.installedVersion || '';
+
+    const regVersion = !isUnknownVersionString(reg?.displayVersion) ? String(reg.displayVersion).trim() : '';
+    const rawWgVersion = !isUnknownVersionString(wg.version) ? String(wg.version).trim() : '';
+    const rawUpVersion = !isUnknownVersionString(up?.installedVersion) ? String(up.installedVersion).trim() : '';
+    const rawLowerBound = Boolean(up?.installedVersionIsLowerBound || wg.installedVersionIsLowerBound);
+
+    const installedVersion = regVersion || rawWgVersion || rawUpVersion || '';
+    const hasExactLocalVersion = Boolean(regVersion || (rawWgVersion && !wg.installedVersionIsLowerBound));
+    const installedVersionIsLowerBound = Boolean(rawLowerBound && !hasExactLocalVersion);
     const availableVersion = up?.availableVersion || wg.availableVersion || '';
+    const hasUpdate = computeProviderHasUpdate({
+      installedVersion,
+      availableVersion,
+      installedVersionIsLowerBound,
+    });
 
     programs.push({
       id: `winget:${wg.packageId.toLowerCase()}`,
       name: displayName,
       publisher: reg?.publisher || cachedMeta?.publisher || cachedMeta?.author || '',
       installedVersion,
-      installedVersionIsLowerBound: Boolean(up?.installedVersionIsLowerBound || wg.installedVersionIsLowerBound),
-      availableVersion,
-      hasUpdate: Boolean(availableVersion),
+      installedVersionIsLowerBound,
+      availableVersion: hasUpdate ? availableVersion : '',
+      hasUpdate,
       packageManager: 'winget',
       packageId: wg.packageId,
       homepage: cachedMeta?.homepage || cachedMeta?.repositoryUrl || '',
+      cachedIconPath: null,
       source: wg.source || up?.source || 'winget',
       uninstallString: reg?.uninstallString || '',
       quietUninstallString: reg?.quietUninstallString || '',
@@ -903,26 +950,56 @@ export function mergeInstalledSoftware({
       packageManager: provPkg.packageManager,
     });
 
-    let installedVersion = provPkg.version || reg?.displayVersion || up?.installedVersion || '';
-    if (isUnknownVersionString(installedVersion) && appx?.version) {
-      installedVersion = appx.version;
+    const regVersion = !isUnknownVersionString(reg?.displayVersion) ? String(reg.displayVersion).trim() : '';
+    const appxVersion = !isUnknownVersionString(appx?.version) ? String(appx.version).trim() : '';
+    const provVersion = !isUnknownVersionString(provPkg.version) ? String(provPkg.version).trim() : '';
+    const upInstVersion = !isUnknownVersionString(up?.installedVersion) ? String(up.installedVersion).trim() : '';
+    const rawLowerBound = Boolean(up?.installedVersionIsLowerBound || provPkg.installedVersionIsLowerBound);
+
+    let installedVersion = '';
+    let resolvedFromExactSource = false;
+    if (provPkg.packageManager === 'msstore' && appxVersion) {
+      installedVersion = appxVersion;
+      resolvedFromExactSource = true;
+    } else if (rawLowerBound && (regVersion || appxVersion)) {
+      installedVersion = regVersion || appxVersion;
+      resolvedFromExactSource = true;
+    } else if (provVersion && !provPkg.installedVersionIsLowerBound) {
+      installedVersion = provVersion;
+      resolvedFromExactSource = true;
+    } else if (regVersion) {
+      installedVersion = regVersion;
+      resolvedFromExactSource = true;
+    } else if (appxVersion) {
+      installedVersion = appxVersion;
+      resolvedFromExactSource = true;
+    } else {
+      installedVersion = provVersion || upInstVersion || '';
     }
+
+    const installedVersionIsLowerBound = Boolean(rawLowerBound && !resolvedFromExactSource);
     const availableVersion = up?.availableVersion || '';
+    const hasUpdate = computeProviderHasUpdate({
+      installedVersion,
+      availableVersion,
+      installedVersionIsLowerBound,
+    });
 
     programs.push({
       id: `${provPkg.packageManager}:${provPkg.packageId.toLowerCase()}`,
       name: displayName,
       publisher: reg?.publisher || appx?.publisherDisplayName || cachedMeta?.publisher || cachedMeta?.author || '',
       installedVersion,
-      installedVersionIsLowerBound: Boolean(up?.installedVersionIsLowerBound || provPkg.installedVersionIsLowerBound),
-      availableVersion,
-      hasUpdate: Boolean(availableVersion),
+      installedVersionIsLowerBound,
+      availableVersion: hasUpdate ? availableVersion : '',
+      hasUpdate,
       packageManager: provPkg.packageManager,
       packageId: provPkg.packageId,
       bucket: provPkg.bucket || '',
       isActive: Boolean(provPkg.isActive),
       arch: provPkg.arch || '',
       homepage: cachedMeta?.homepage || cachedMeta?.repositoryUrl || '',
+      cachedIconPath: null,
       appxPackageFamilyName: appx?.packageFamilyName || '',
       source: provPkg.source || up?.source || provPkg.packageManager,
       uninstallString: reg?.uninstallString || '',
@@ -959,6 +1036,8 @@ export function mergeInstalledSoftware({
         hasUpdate: false,
         packageManager: 'msi',
         packageId: msiCode,
+        homepage: '',
+        cachedIconPath: null,
         source: 'msi',
         uninstallString: reg.uninstallString || `msiexec.exe /X${msiCode}`,
         quietUninstallString: reg.quietUninstallString || `msiexec.exe /X${msiCode} /qn /norestart`,
@@ -991,6 +1070,8 @@ export function mergeInstalledSoftware({
       hasUpdate: false,
       packageManager: null,
       packageId: null,
+      homepage: '',
+      cachedIconPath: null,
       source: 'registry',
       uninstallString: reg.uninstallString || '',
       quietUninstallString: reg.quietUninstallString || '',
@@ -1005,6 +1086,6 @@ export function mergeInstalledSoftware({
     });
   }
 
-  programs.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
+  programs.sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base', numeric: true }));
   return programs;
 }

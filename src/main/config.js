@@ -63,6 +63,8 @@ let migrationChecked = false;
 let cachedInstallInfo = null;
 /** @type {string | null} */
 let cachedDataDir = null;
+/** @type {string | null} */
+let cachedIconCacheDir = null;
 
 /**
  * Echte Schreibprobe auf Verzeichnisebene (fs.accessSync W_OK ignoriert unter Windows oft NTFS-ACLs).
@@ -402,15 +404,55 @@ export function isInsideTargetDir(targetPath) {
   return isInsideAnyArchiveDir(targetPath);
 }
 
+/**
+ * Liefert ein dauerhaft persistentes Icon-Cache-Verzeichnis (primaer `data/icon-cache`,
+ * bei schreibgeschuetztem data/-Ordner Fallback auf `%APPDATA%/SoftwareKatalog/icon-cache`).
+ * @returns {string}
+ */
 export function getIconCacheDir() {
-  const dir = path.join(getDataFolder(), 'icon-cache');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (cachedIconCacheDir) {
+    if (!fs.existsSync(cachedIconCacheDir)) {
+      try {
+        fs.mkdirSync(cachedIconCacheDir, { recursive: true });
+      } catch {
+        // Ignorieren
+      }
+    }
+    return cachedIconCacheDir;
   }
-  return dir;
+
+  let appDataIconDir = '';
+  try {
+    const appData = app.getPath('appData');
+    if (appData) appDataIconDir = path.join(appData, 'SoftwareKatalog', 'icon-cache');
+  } catch {
+    appDataIconDir = '';
+  }
+
+  const candidates = [
+    path.join(getDataFolder(), 'icon-cache'),
+    appDataIconDir,
+    path.join(app.getPath('userData'), 'icon-cache'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (canWriteDirectory(candidate)) {
+      cachedIconCacheDir = candidate;
+      return candidate;
+    }
+  }
+
+  const fallback = path.join(app.getPath('userData'), 'icon-cache');
+  if (!fs.existsSync(fallback)) {
+    fs.mkdirSync(fallback, { recursive: true });
+  }
+  cachedIconCacheDir = fallback;
+  return fallback;
 }
 
 export function isInsideIconCacheDir(filePath) {
-  const cacheDir = path.join(getDataFolder(), 'icon-cache');
-  return isPathInsideBase(filePath, cacheDir);
+  if (!filePath) return false;
+  if (isPathInsideBase(filePath, getIconCacheDir())) return true;
+  const legacyDir = path.join(app.getPath('userData'), 'icon-cache');
+  return isPathInsideBase(filePath, legacyDir);
 }

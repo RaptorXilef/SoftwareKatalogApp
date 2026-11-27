@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { dialog } from 'electron';
-import { getConfig, isInsideTargetDir, saveConfig } from './config.js';
+import { buildPersistentIconIndexKeys, createIconCacheIndex } from '../shared/icon-cache-store.js';
+import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
 import { scanSingleFolder } from './scanner-bridge.js';
 
 export function loadCatalogWithLiveStatus() {
@@ -10,9 +11,29 @@ export function loadCatalogWithLiveStatus() {
 
   try {
     const data = JSON.parse(fs.readFileSync(absJsonPath, 'utf-8'));
+    const iconIndex = createIconCacheIndex({ cacheDir: getIconCacheDir() });
+
     return data.map((item) => {
       const absPath = item.path ? path.resolve(appFolder, item.path) : '';
       const resolvedIcon = item.icon ? path.resolve(appFolder, item.icon) : null;
+      const existingArchiveIcon = resolvedIcon && fs.existsSync(resolvedIcon) ? resolvedIcon : null;
+
+      let cachedIconPath = null;
+      if (!existingArchiveIcon) {
+        const keys = buildPersistentIconIndexKeys({
+          id: item.id || '',
+          packageManager: item.packageManager || (item.wingetId ? 'winget' : ''),
+          packageId: item.packageId || item.wingetId || '',
+          homepage: item.homepage || '',
+          webVersionUrl: item.webVersionUrl || '',
+          links: Array.isArray(item.links) ? item.links : [],
+        });
+        const primaryKeys = keys.filter((k) => !k.startsWith('url:'));
+        const lookupRes = iconIndex.lookup(primaryKeys.length > 0 ? primaryKeys : keys);
+        if ((lookupRes.status === 'hit' || lookupRes.status === 'stale') && lookupRes.filePath) {
+          cachedIconPath = lookupRes.filePath;
+        }
+      }
 
       const rawSources = item.lastFileSources && typeof item.lastFileSources === 'object' ? item.lastFileSources : {};
       /** @type {Record<string, any>} */
@@ -39,7 +60,8 @@ export function loadCatalogWithLiveStatus() {
         path: absPath,
         primaryPath: item.primaryPath ? path.resolve(appFolder, item.primaryPath) : absPath,
         alternatePaths: resolvedAlternatePaths,
-        icon: resolvedIcon && fs.existsSync(resolvedIcon) ? resolvedIcon : null,
+        icon: existingArchiveIcon,
+        cachedIconPath,
         screenshots: (item.screenshots || []).map((s) => path.resolve(appFolder, s)),
         lastFiles: resolvedLastFiles,
         lastFileSources: resolvedLastFileSources,

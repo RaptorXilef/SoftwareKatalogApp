@@ -321,7 +321,7 @@ export function buildUnifiedPackages({ catalogItems = [], installedApps = [], pc
 
     const archiveIcon = item.icon || null;
     const matchedPcIcon = matchedPc ? resolvePcIcon(matchedPc, pcIconCache) : null;
-    const directCachedIcon = lookupIconInCache(item.id, pcIconCache);
+    const directCachedIcon = lookupIconInCache(item.id, pcIconCache) || item.cachedIconPath || null;
     const resolvedIcon = resolvePackageIcon({
       archiveIcon,
       pcIcon: matchedPcIcon,
@@ -511,6 +511,7 @@ export function buildRemotePackageItem({
     bucket: summary.bucket || '',
     isActive: Boolean(matchedPcItem?.isActive || summary.isActive),
     publisher: summary.publisher || matchedPcItem?.publisher || '',
+    homepage: summary.homepage || matchedPcItem?.homepage || matchedArchiveItem?.homepage || '',
     shortDescription: summary.shortDescription || '',
     description: summary.description || '',
     tags: Array.isArray(summary.tags) ? summary.tags : [],
@@ -543,15 +544,25 @@ export function buildRemotePackageItem({
   };
 }
 
+function isUnknownVersion(ver) {
+  const clean = String(ver || '').trim();
+  return !clean || /^(?:unknown|unbekannt|-)$/i.test(clean);
+}
+
 /**
  * Ermittelt Status & Versionen für Karte und Detailansicht.
  * Priorität für Kartenfarbe: webupdate (Lila) > update (Orange) > newer (Blau) > installed (Grün) > none
  */
 export function getPackageStatus(item, { versionCompareDepth = 3, ignoredUpdates = [] } = {}) {
   const archiveVersion = item.lastFiles?.length > 0 ? extractVersion(getBaseName(item.lastFiles[0])) : null;
-  const localVersion = item.installedVersion || null;
-  const webVersion = item.webVersion || null;
+  const rawLocalVersion = item.installedVersion || null;
+  const localIsUnknown = isUnknownVersion(rawLocalVersion);
+  const localVersion = localIsUnknown ? null : String(rawLocalVersion).trim();
+  const rawWebVersion = item.webVersion || null;
+  const webVersion = isUnknownVersion(rawWebVersion) ? null : String(rawWebVersion).trim();
   const depth = versionCompareDepth;
+
+  const isArchiveItem = Boolean(item.inArchive || item.origin === 'archive' || item.origin === 'both');
 
   const hasArchiveUpdate = Boolean(
     item.isInstalled && archiveVersion && localVersion && compareVersions(archiveVersion, localVersion, depth) > 0
@@ -560,22 +571,44 @@ export function getPackageStatus(item, { versionCompareDepth = 3, ignoredUpdates
     item.isInstalled && archiveVersion && localVersion && compareVersions(archiveVersion, localVersion, depth) < 0
   );
 
+  const hasKnownUpgradeFlag = Boolean(item.hasWingetUpgrade || item.hasProviderUpgrade);
+  let hasInstalledWebUpdate = false;
+  if (item.isInstalled && webVersion) {
+    if (localIsUnknown) {
+      hasInstalledWebUpdate = hasKnownUpgradeFlag;
+    } else {
+      const parsedWeb = extractVersion(webVersion);
+      const parsedLocal = extractVersion(localVersion);
+      if (parsedWeb && parsedLocal) {
+        const cmp = compareVersions(parsedWeb, parsedLocal, depth);
+        if (cmp > 0) {
+          hasInstalledWebUpdate = true;
+        } else if (cmp === 0) {
+          hasInstalledWebUpdate = Boolean(hasKnownUpgradeFlag && item.installedVersionIsLowerBound);
+        } else {
+          hasInstalledWebUpdate = false;
+        }
+      } else if (webVersion.toLowerCase() === localVersion.toLowerCase()) {
+        hasInstalledWebUpdate = Boolean(hasKnownUpgradeFlag && item.installedVersionIsLowerBound);
+      } else {
+        hasInstalledWebUpdate = hasKnownUpgradeFlag;
+      }
+    }
+  }
+
+  const hasArchiveWebUpdate = Boolean(
+    isArchiveItem && webVersion && (!archiveVersion || compareVersions(webVersion, archiveVersion, depth) > 0)
+  );
+
   let hasWebUpdate = false;
   if (item.origin === 'remote') {
     hasWebUpdate = Boolean(
       item.isInstalled && webVersion && localVersion && compareVersions(webVersion, localVersion, depth) > 0
     );
   } else if (item.origin === 'pc') {
-    const hasKnownUpgradeFlag = Boolean(item.hasWingetUpgrade || item.hasProviderUpgrade);
-    const localIsUnknown = !localVersion || /^(?:unknown|unbekannt|-)$/i.test(String(localVersion).trim());
-    hasWebUpdate = Boolean(
-      webVersion &&
-        ((localVersion && compareVersions(webVersion, localVersion, depth) > 0) ||
-          (hasKnownUpgradeFlag &&
-            (webVersion !== localVersion || Boolean(item.installedVersionIsLowerBound) || localIsUnknown)))
-    );
+    hasWebUpdate = hasInstalledWebUpdate;
   } else {
-    hasWebUpdate = Boolean(webVersion && (!archiveVersion || compareVersions(webVersion, archiveVersion, depth) > 0));
+    hasWebUpdate = hasArchiveWebUpdate;
   }
 
   let status = 'none';
@@ -589,11 +622,14 @@ export function getPackageStatus(item, { versionCompareDepth = 3, ignoredUpdates
     status = 'installed';
   }
 
+  const hasInstalledUpdate = Boolean(item.isInstalled && (hasInstalledWebUpdate || hasArchiveUpdate));
   const hasAnyUpdate = hasWebUpdate || hasArchiveUpdate;
   const targetUpdateVersion = hasWebUpdate ? webVersion : hasArchiveUpdate ? archiveVersion : null;
   const ignoreRule = hasAnyUpdate ? findMatchingIgnoreRule(item, targetUpdateVersion, ignoredUpdates) : null;
   const isIgnoredUpdate = Boolean(ignoreRule);
   const hasVisibleUpdate = Boolean(hasAnyUpdate && !isIgnoredUpdate);
+  const hasVisibleInstalledUpdate = Boolean(hasInstalledUpdate && !isIgnoredUpdate);
+  const hasVisibleArchiveWebUpdate = Boolean(hasArchiveWebUpdate && !isIgnoredUpdate);
 
   return {
     status,
@@ -602,15 +638,52 @@ export function getPackageStatus(item, { versionCompareDepth = 3, ignoredUpdates
     localVersion,
     webVersion,
     hasWebUpdate,
+    hasInstalledWebUpdate,
+    hasArchiveWebUpdate,
     hasArchiveUpdate,
     hasNasUpdate: hasArchiveUpdate,
+    hasInstalledUpdate,
     hasAnyUpdate,
     targetUpdateVersion,
     ignoreRule,
     isIgnoredUpdate,
     hasVisibleUpdate,
+    hasVisibleInstalledUpdate,
+    hasVisibleArchiveWebUpdate,
     isPcNewer,
   };
+}
+
+const VALID_UPDATE_SCOPES = Object.freeze(['installed', 'archive', 'both']);
+export const DEFAULT_UPDATE_SCOPE = 'installed';
+
+/**
+ * Normalisiert den Update-Scope im Tab "Updates" ('installed' | 'archive' | 'both').
+ * @param {unknown} scope
+ * @returns {'installed' | 'archive' | 'both'}
+ */
+export function normalizeUpdateScope(scope) {
+  const clean = String(scope || '')
+    .trim()
+    .toLowerCase();
+  return VALID_UPDATE_SCOPES.includes(clean)
+    ? /** @type {'installed' | 'archive' | 'both'} */ (clean)
+    : DEFAULT_UPDATE_SCOPE;
+}
+
+/**
+ * Prüft, ob ein Paket mit dem berechneten Status im gewählten Update-Scope sichtbar sein soll.
+ * @param {Record<string, any> | null | undefined} item
+ * @param {ReturnType<typeof getPackageStatus>} st
+ * @param {unknown} [updateScope]
+ * @returns {boolean}
+ */
+export function matchesUpdateScope(item, st, updateScope = DEFAULT_UPDATE_SCOPE) {
+  if (!item || !st || st.isIgnoredUpdate) return false;
+  const scope = normalizeUpdateScope(updateScope);
+  if (scope === 'installed') return Boolean(st.hasVisibleInstalledUpdate);
+  if (scope === 'archive') return Boolean(st.hasVisibleArchiveWebUpdate);
+  return Boolean(st.hasVisibleInstalledUpdate || st.hasVisibleArchiveWebUpdate);
 }
 
 export function isPackageVisible(item, visibleHiddenCats = []) {
@@ -705,6 +778,7 @@ export function computeTabCounts(
     ignoredUpdates = [],
     accessPolicy = null,
     isAdmin = false,
+    updateScope = DEFAULT_UPDATE_SCOPE,
   } = {}
 ) {
   let updates = 0;
@@ -716,7 +790,12 @@ export function computeTabCounts(
 
     const st = getPackageStatus(item, { versionCompareDepth, ignoredUpdates });
     const viewDecision = evaluatePackagePolicy(item, 'view', accessPolicy, isAdmin);
-    if (st.hasVisibleUpdate && evaluatePackagePolicy(item, 'update', accessPolicy, isAdmin).visible) updates++;
+    if (
+      matchesUpdateScope(item, st, updateScope) &&
+      evaluatePackagePolicy(item, 'update', accessPolicy, isAdmin).visible
+    ) {
+      updates++;
+    }
     if (item.isInstalled && viewDecision.visible) installed++;
     if (item.inArchive && viewDecision.visible) archive++;
   }

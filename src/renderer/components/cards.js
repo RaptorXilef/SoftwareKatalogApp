@@ -325,7 +325,7 @@ function getFilteredAndSortedEntries() {
       const cmp = compareVersions(b.st.webVersion, a.st.webVersion, depth);
       if (cmp !== 0) return cmp;
     }
-    return a.item.name.localeCompare(b.item.name, getI18nLocale() || 'en', { sensitivity: 'base' });
+    return a.item.name.localeCompare(b.item.name, getI18nLocale() || 'en', { sensitivity: 'base', numeric: true });
   });
 
   return { entries, hasSearch };
