@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.32.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.3...v1.32.0) (2026-11-27)
+
+### 🚀 Features
+
+* **detail,bundles,icons:** Add update source selector in Detail modal and display package icons across Bundle Editor and Discover ([9b2e01a](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/9b2e01a4610328471adb47f26ac3bc82a3f6b430)), closes [#1](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/1) [#2](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/2)
+* **edit-modal:** Display package manager icons in Online-Updates search results ([f4ba793](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f4ba7932eb3566ccea47d04ae4e197216bd7abcb))
+* **icons:** Display package manager icons in Discover results and Bundle Runner ([1e916c4](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/1e916c481cf763effe6fa05b8a27227c0573721b)), references [#2](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/2) [#1](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/1)
+* **updates,web-scraper:** Add Updates tab scope switcher and harden webpage version extraction ([759a792](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/759a79267c78a8ed12d13518009a9cf39d7db1a9)), closes [#5](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/5), references [#6](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/6)
+
+### 🐛 Bug Fixes
+
+* **cache,dialogs,types:** persist icon cache in data dir, default archive folder picker, and fix TS checks ([2c6af30](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/2c6af30f6fe90cb5c43d52151775ccb8299c2478)), closes [#4](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/4) [#3](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/3)
+* **cache,updates,sort:** Persist icon cache in data dir, prevent false Winget/MS Store updates, and sort versions numerically ([bf953c0](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/bf953c0ee80b4e16d7fdb1882214e22e3fad2b33)), closes [#6](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/6), references [#4](https://github.com/RaptorXilef/SoftwareKatalogApp/issues/4)
+* **icon:** Decode PNG frame from icon.ico for Windows taskbar icon and isolate dev AppUserModelId ([c8a8028](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/c8a80280a35c9f0ab82bb7fcf633fd38c95fa261))
+* **version,nvm:** Support 1-4 segment versions and sort NVM versions numerically ([d045354](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d045354c366192d08ddf54629d994d0a68e97cae))
+
 ## [1.31.3](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.2...v1.31.3) (2026-11-25)
 
 ### 🧹 Chore / Maintenance
