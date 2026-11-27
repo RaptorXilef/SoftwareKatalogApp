@@ -1195,6 +1195,7 @@ export function parsePyprojectTomlDirect(rawText, manager = 'pip') {
   /** @type {'prod' | 'dev' | 'optional'} */
   let arrayScope = 'prod';
 
+  /** @type {Array<{ manager: string, name: string, declaredRange: string, installedVersion: string, scope: 'prod' | 'dev' | 'optional', description: string }>} */
   const results = [];
   const seen = new Set();
 
@@ -1259,6 +1260,7 @@ export function parsePyprojectTomlDirect(rawText, manager = 'pip') {
     const isUvDevDeps = currentSection === 'tool.uv' && key === 'dev-dependencies';
 
     if (isPep621Deps || isPep621Opt || isDepGroups || isUvDevDeps) {
+      /** @type {'prod' | 'dev' | 'optional'} */
       const scope =
         isUvDevDeps || (isDepGroups && /dev|test|lint/i.test(key))
           ? 'dev'
@@ -1286,6 +1288,7 @@ export function parsePyprojectTomlDirect(rawText, manager = 'pip') {
       currentSection === 'tool.poetry.dev-dependencies' ||
       /^tool\.poetry\.group\.[^.]+\.dependencies$/.test(currentSection)
     ) {
+      /** @type {'prod' | 'dev'} */
       const scope = currentSection === 'tool.poetry.dependencies' ? 'prod' : 'dev';
       let declared = '';
       if (val.startsWith('{')) {
@@ -1470,6 +1473,7 @@ export function parseCargoTomlDirect(rawText) {
 
   let currentSection = '';
   let rootPackageName = '';
+  /** @type {Array<{ manager: string, name: string, declaredRange: string, installedVersion: string, scope: 'prod' | 'dev' | 'optional', description: string }>} */
   const results = [];
   const seen = new Set();
 
@@ -1529,12 +1533,14 @@ export function parseCargoTomlDirect(rawText) {
     if (seen.has(normKey)) continue;
     seen.add(normKey);
 
+    /** @type {'prod' | 'dev' | 'optional'} */
+    const scope = isDev ? 'dev' : isOptional ? 'optional' : 'prod';
     results.push({
       manager: 'cargo',
-      name: crateName,
+      name: String(crateName),
       declaredRange,
       installedVersion: '',
-      scope: isDev ? 'dev' : isOptional ? 'optional' : 'prod',
+      scope,
       description: '',
     });
   }
@@ -1670,6 +1676,7 @@ export function parseCsprojDirect(rawText) {
   const text = stripBom(rawText);
   if (!text.trim()) return [];
 
+  /** @type {Array<{ manager: string, name: string, declaredRange: string, installedVersion: string, scope: 'prod' | 'dev' | 'optional', description: string }>} */
   const results = [];
   const seen = new Set();
 
@@ -1690,12 +1697,14 @@ export function parseCsprojDirect(rawText) {
       if (!seen.has(key)) {
         seen.add(key);
         const declaredRange = String(attrVerMatch?.[1] || bodyVerMatch?.[1] || '').trim();
+        /** @type {'prod' | 'dev' | 'optional'} */
+        const scope = isDevAttr ? 'dev' : 'prod';
         results.push({
           manager: 'dotnet',
           name,
           declaredRange,
           installedVersion: '',
-          scope: isDevAttr ? 'dev' : 'prod',
+          scope,
           description: '',
         });
       }

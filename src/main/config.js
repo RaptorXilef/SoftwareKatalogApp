@@ -403,7 +403,7 @@ export function isInsideTargetDir(targetPath) {
 }
 
 export function getIconCacheDir() {
-  const dir = path.join(app.getPath('userData'), 'icon-cache');
+  const dir = path.join(getDataFolder(), 'icon-cache');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -411,6 +411,6 @@ export function getIconCacheDir() {
 }
 
 export function isInsideIconCacheDir(filePath) {
-  const cacheDir = path.join(app.getPath('userData'), 'icon-cache');
+  const cacheDir = path.join(getDataFolder(), 'icon-cache');
   return isPathInsideBase(filePath, cacheDir);
 }

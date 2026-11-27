@@ -6,7 +6,7 @@ const ICON_CACHE_INDEX_FILENAME = 'icon-index.json';
 export const ICON_CACHE_POSITIVE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const ICON_CACHE_NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000;
 
-const ICON_FILE_EXTS = new Set(['.png', '.ico', '.svg', '.webp', '.jpg', '.jpeg']);
+const ICON_FILE_EXTS = new Set(['.png', '.ico', '.svg', '.webp', '.jpg', '.jpeg', '.gif', '.avif']);
 const SHARED_REPO_HOSTS = new Set([
   'github.com',
   'www.github.com',
@@ -101,7 +101,8 @@ export function buildPersistentIconIndexKeys({
     }
   }
 
-  if (cleanId && !cleanId.toLowerCase().startsWith('provider:')) {
+  const lowerId = cleanId.toLowerCase();
+  if (cleanId && !lowerId.startsWith('provider:') && !lowerId.startsWith('remote:')) {
     pushKey(`archive:${cleanId}`);
   }
 
@@ -166,15 +167,29 @@ export function createIconCacheIndex({
     }
   }
 
+  let persistSeq = 0;
+
   function persist() {
     if (!indexPath) return;
+    const payload = JSON.stringify(store, null, 2);
+    const tmpPath = `${indexPath}.${process.pid}.${Date.now()}.${++persistSeq}.tmp`;
     try {
       fs.mkdirSync(resolvedCacheDir, { recursive: true });
-      const tmpPath = `${indexPath}.${process.pid}.${Date.now()}.tmp`;
-      fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf-8');
-      fs.renameSync(tmpPath, indexPath);
+      fs.writeFileSync(tmpPath, payload, 'utf-8');
+      try {
+        fs.renameSync(tmpPath, indexPath);
+      } catch {
+        // Windows-Fallback bei gleichzeitigem Zugriff (EPERM/EBUSY)
+        fs.writeFileSync(indexPath, payload, 'utf-8');
+      }
     } catch {
       // Cache-Schreibfehler niemals fatal machen
+    } finally {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {
+        // Temp-Datei ignorieren
+      }
     }
   }
 

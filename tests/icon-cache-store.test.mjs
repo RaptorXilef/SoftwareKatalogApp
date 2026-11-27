@@ -109,4 +109,21 @@ describe('createIconCacheIndex', () => {
     assert.equal(indexB.lookup(keys).status, 'none');
     assert.equal(indexB.getStats().fileCount, 0);
   });
+
+  it('ueberlebt parallele recordHit-Aufrufe ohne Datenverlust in icon-index.json', () => {
+    const cacheDir = makeTempCacheDir();
+    const index = createIconCacheIndex({ cacheDir });
+
+    for (let i = 0; i < 12; i++) {
+      const file = path.join(cacheDir, `app-${i}.png`);
+      fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, i]));
+      index.recordHit([`winget:vendor.app${i}`], file, 'online-favicon');
+    }
+
+    const reloaded = createIconCacheIndex({ cacheDir });
+    for (let i = 0; i < 12; i++) {
+      const hit = reloaded.lookup([`winget:vendor.app${i}`]);
+      assert.equal(hit.status, 'hit', `Icon ${i} muss nach Neustart im Index vorhanden sein`);
+    }
+  });
 });

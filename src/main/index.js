@@ -366,6 +366,31 @@ function registerDevProjectsIpcHandlers() {
   );
 }
 
+function resolvePreferredArchiveDialogPath() {
+  const cfg = getConfig();
+  const candidates = [
+    ...(Array.isArray(cfg.absArchivePaths) ? cfg.absArchivePaths : []),
+    cfg.absTargetPath,
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        return dir;
+      }
+    } catch {
+      // Nicht erreichbare Quelle überspringen
+    }
+  }
+  return undefined;
+}
+
+function showOpenDialogAnchored(options) {
+  return mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showOpenDialog(mainWindow, options)
+    : dialog.showOpenDialog(options);
+}
+
 let ipcRegistered = false;
 
 function registerIpcHandlers() {
@@ -417,9 +442,11 @@ function registerIpcHandlers() {
   handleIpc('save-meta-json', (_e, targetPath, data) => saveMetaJson(targetPath, data));
 
   handleIpc('add-software', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
+    const defaultPath = resolvePreferredArchiveDialogPath();
+    const { canceled, filePaths } = await showOpenDialogAnchored({
       title: t('dialogs.addSoftwareTitle'),
-      properties: ['openDirectory'],
+      ...(defaultPath ? { defaultPath } : {}),
+      properties: ['openDirectory', 'createDirectory'],
     });
     if (canceled || filePaths.length === 0) return { success: false, canceled: true };
     return createSoftwareEntry(filePaths[0]);
@@ -582,10 +609,22 @@ function registerIpcHandlers() {
     }
   });
   handleIpc('select-dir', async (_e, opts = {}) => {
-    const defaultPath = opts?.defaultPath || (opts?.defaultToArchive ? getConfig().absTargetPath : undefined);
-    const { canceled, filePaths } = await dialog.showOpenDialog({
+    let defaultPath;
+    if (typeof opts?.defaultPath === 'string' && opts.defaultPath.trim()) {
+      try {
+        if (fs.existsSync(opts.defaultPath) && fs.statSync(opts.defaultPath).isDirectory()) {
+          defaultPath = opts.defaultPath;
+        }
+      } catch {
+        // Ignorieren
+      }
+    }
+    if (!defaultPath && opts?.defaultToArchive) {
+      defaultPath = resolvePreferredArchiveDialogPath();
+    }
+    const { canceled, filePaths } = await showOpenDialogAnchored({
       title: opts?.title || t('dialogs.selectDirTitle'),
-      defaultPath,
+      ...(defaultPath ? { defaultPath } : {}),
       properties: ['openDirectory', 'createDirectory'],
     });
     return canceled ? null : filePaths[0];

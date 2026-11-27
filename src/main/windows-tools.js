@@ -1332,6 +1332,7 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
       for (const pkg of providerInstalled) collectCachedMeta(pkg.packageManager, pkg.packageId || pkg.id);
       for (const up of providerUpgrades) collectCachedMeta(up.packageManager, up.packageId || up.id);
 
+      /** @type {Array<ReturnType<typeof mergeInstalledSoftware>[number] & { cachedIconPath?: string }>} */
       const programs = mergeInstalledSoftware({
         wingetExports,
         wingetUpgrades,
@@ -1394,6 +1395,22 @@ export async function scanInstalledSoftware({ includeSystemComponents = false, s
       }
 
       syncArchiveInstalledVersions(programs);
+
+      const iconIndex = getIconCacheIndex();
+      for (const prog of programs) {
+        if (prog.cachedIconPath) continue;
+        const keys = buildPersistentIconIndexKeys({
+          id: prog.id || '',
+          packageManager: prog.packageManager || '',
+          packageId: prog.packageId || '',
+          homepage: prog.homepage || '',
+        });
+        const primaryKeys = keys.filter((k) => !k.startsWith('url:'));
+        const cachedHit = iconIndex.lookup(primaryKeys.length > 0 ? primaryKeys : keys);
+        if ((cachedHit.status === 'hit' || cachedHit.status === 'stale') && cachedHit.filePath) {
+          prog.cachedIconPath = cachedHit.filePath;
+        }
+      }
 
       const stats = {
         total: programs.length,
@@ -1510,11 +1527,17 @@ function extractExeFromCommandString(cmd) {
   return plain ? expandWindowsEnvVars(plain[1], process.env) : '';
 }
 
+let atomicWriteSeq = 0;
+
 async function writeFileAtomic(targetPath, data) {
-  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.${++atomicWriteSeq}.tmp`;
   try {
     await fs.promises.writeFile(tmpPath, data);
-    await fs.promises.rename(tmpPath, targetPath);
+    try {
+      await fs.promises.rename(tmpPath, targetPath);
+    } catch {
+      await fs.promises.writeFile(targetPath, data);
+    }
   } finally {
     try {
       if (fs.existsSync(tmpPath)) await fs.promises.unlink(tmpPath);
@@ -1617,7 +1640,7 @@ async function findStartMenuIconCandidate({ appName = '', installDirs = [] }) {
 async function extractIconViaPowerShell(sourcePath, iconIndex, targetPngPath) {
   const safeSrc = sourcePath.replace(/'/g, "''");
   const idx = Number.isFinite(iconIndex) ? iconIndex : 0;
-  const tmpOut = `${targetPngPath}.${process.pid}.${Date.now()}.tmp`;
+  const tmpOut = `${targetPngPath}.${process.pid}.${Date.now()}.${++atomicWriteSeq}.tmp`;
   const safeTmp = tmpOut.replace(/'/g, "''");
 
   const psScript = `
@@ -1662,7 +1685,11 @@ async function extractIconViaPowerShell(sourcePath, iconIndex, targetPngPath) {
     if (code === 0 && fs.existsSync(tmpOut)) {
       const stat = await fs.promises.stat(tmpOut);
       if (stat.size > 0) {
-        await fs.promises.rename(tmpOut, targetPngPath);
+        try {
+          await fs.promises.rename(tmpOut, targetPngPath);
+        } catch {
+          await fs.promises.copyFile(tmpOut, targetPngPath);
+        }
         return true;
       }
     }
@@ -2012,7 +2039,7 @@ async function findAppxLogoInInstallLocation(installLocation, cachedLogoCandidat
 }
 
 /**
- * Extrahiert ein Programm-Icon on-demand über mehrstufige Fallback-Kette in `userData/icon-cache/`:
+ * Extrahiert ein Programm-Icon on-demand über mehrstufige Fallback-Kette in `data/icon-cache/`:
  * 1. Registry DisplayIcon (inkl. .ico/.png/.svg & .exe/.dll mit Index)
  * 1.5. AppX-/MS-Store-Manifest-Logos (`AppxManifest.xml` inkl. `.scale-200.png` / `.targetsize-48`)
  * 2. Installationsordner (inkl. Scoop-Apps) & Startmenü-.lnk-Ziele
@@ -2044,11 +2071,16 @@ export async function extractCachedAppIcon({
     webVersionUrl,
     links,
   });
+  const primaryIndexKeys = baseIndexKeys.filter((k) => !k.startsWith('url:'));
+  const hasLocalSourceHint = Boolean(
+    displayIcon || installLocation || executablePath || uninstallString || appxPackageFamilyName
+  );
 
   try {
     const cacheDir = getIconCacheDir();
     const iconIndex = getIconCacheIndex();
-    const indexLookup = iconIndex.lookup(baseIndexKeys);
+    const initialLookupKeys = hasLocalSourceHint && primaryIndexKeys.length > 0 ? primaryIndexKeys : baseIndexKeys;
+    const indexLookup = iconIndex.lookup(initialLookupKeys);
     if (indexLookup.status === 'hit' && indexLookup.filePath) {
       return { success: true, iconPath: indexLookup.filePath, fromCache: true };
     }
@@ -2060,8 +2092,9 @@ export async function extractCachedAppIcon({
       return { success: false, error: 'Icon für diesen Eintrag in dieser Sitzung nicht gefunden.' };
     }
 
+    const localSaveKeys = primaryIndexKeys.length > 0 ? primaryIndexKeys : baseIndexKeys;
     const returnLocalHit = (stageRes, sourceType) => {
-      iconIndex.recordHit(baseIndexKeys, stageRes.iconPath, sourceType);
+      iconIndex.recordHit(localSaveKeys, stageRes.iconPath, sourceType);
       return stageRes;
     };
 
