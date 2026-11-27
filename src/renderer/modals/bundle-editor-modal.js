@@ -10,10 +10,11 @@ import {
   sortBundleItems,
 } from '../../shared/bundles-logic.js';
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
+import { getCachedIconForPackage, queueItemsForIconResolution } from '../components/cards.js';
 import { showToast } from '../components/toast.js';
 import { isProviderUsable, state } from '../state.js';
 import { getI18nLocale, getLocalizedProviderBadge, getLocalizedProviderName, t } from '../utils/i18n.js';
-import { escapeHTML } from '../utils/sanitize.js';
+import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
 let activeEditorToken = 0;
@@ -65,6 +66,8 @@ export function renderBundleEditorModal({
   let remoteSearchSeq = 0;
   let searchDebounceTimer = null;
   let renderedSearchEntries = [];
+  let pendingSearchIconCandidates = [];
+  let pendingItemIconCandidates = [];
 
   const isStillOpen = () => token === activeEditorToken && !overlay.hidden;
 
@@ -157,6 +160,7 @@ export function renderBundleEditorModal({
     const q = searchQuery.trim();
     const { archiveResults, remoteMeta, combined } = buildCombinedSearchView();
     renderedSearchEntries = combined;
+    pendingSearchIconCandidates = [];
 
     const parts = [];
 
@@ -230,10 +234,39 @@ export function renderBundleEditorModal({
           const isArchive = entry.providerId === 'archive';
           const badgeInfo = getLocalizedProviderBadge(entry.providerId, state.providers);
           const providerLabel = badgeInfo?.label || getProviderLabel(entry.providerId);
+
+          const matchedPkg = isArchive
+            ? state.packages.find((p) => p.inArchive && p.id === entry.packageId)
+            : state.packages.find(
+                (p) =>
+                  String(p.packageManager || '').toLowerCase() === String(entry.providerId || '').toLowerCase() &&
+                  String(p.packageId || p.wingetId || '').toLowerCase() === String(entry.packageId || '').toLowerCase()
+              );
+          const iconItemId = isArchive ? entry.packageId : `remote:${entry.providerId}:${entry.packageId}`;
+          const iconPkgKey =
+            !isArchive && entry.packageId
+              ? `${String(entry.providerId).toLowerCase()}:${String(entry.packageId).toLowerCase()}`
+              : '';
+          const iconTarget = matchedPkg || {
+            id: iconItemId,
+            name: entry.name || entry.packageId,
+            packageManager: isArchive ? '' : entry.providerId,
+            packageId: isArchive ? entry.linkedPackageId || '' : entry.packageId || '',
+            homepage: entry.homepage || '',
+          };
+          const iconPath = getCachedIconForPackage(iconTarget);
+          if (!iconPath) {
+            pendingSearchIconCandidates.push(iconTarget);
+          }
+          const iconHtml = iconPath
+            ? `<img class="bundle-item-icon" src="${escapeHTML(toMediaUrl(iconPath))}" loading="lazy" decoding="async" alt="">`
+            : `<span class="bundle-item-icon-fallback" data-icon-item-id="${escapeHTML(iconTarget.id)}" data-icon-pkg-key="${escapeHTML(iconPkgKey)}" data-icon-class="bundle-item-icon"></span>`;
+
           return `
             <div class="bundle-search-row">
               <div class="bundle-search-row-main">
                 <div class="bundle-search-row-title">
+                  ${iconHtml}
                   <strong>${escapeHTML(entry.name)}</strong>
                   <span class="provider-badge ${escapeHTML(badgeInfo?.badgeClass || (isArchive ? 'is-archive' : ''))}">${escapeHTML(providerLabel)}</span>
                   ${entry.isInstalled ? `<span class="card-chip">💻 ${escapeHTML(t('bundleEditor.badgeInstalled'))}</span>` : ''}
@@ -268,6 +301,9 @@ export function renderBundleEditorModal({
     const resultsEl = modal.querySelector('#bundleSearchResults');
     if (resultsEl) {
       resultsEl.innerHTML = renderSearchResultsHtml();
+      if (pendingSearchIconCandidates.length > 0) {
+        queueItemsForIconResolution(pendingSearchIconCandidates.slice(0, 30), { prioritize: true });
+      }
     }
   };
 
@@ -424,6 +460,7 @@ export function renderBundleEditorModal({
   };
 
   const renderItemsListHtml = () => {
+    pendingItemIconCandidates = [];
     const filterQ = isSnapshotMode ? snapshotFilterText.trim().toLowerCase() : '';
     const visibleItems = draftItems
       .map((item, idx) => ({ item, idx }))
@@ -455,6 +492,24 @@ export function renderBundleEditorModal({
         const isChecked = !isSnapshotMode || snapshotCheckedKeys.has(key);
         const itemBadge = getLocalizedProviderBadge(item.source, state.providers);
 
+        const iconTarget = evalInfo.matchedPackage || {
+          id: key,
+          name: evalInfo.name || item.name,
+          packageManager: item.source === 'archive' ? '' : item.source,
+          packageId: item.packageId || '',
+        };
+        const iconPkgKey =
+          item.source !== 'archive' && item.packageId
+            ? `${String(item.source).toLowerCase()}:${String(item.packageId).toLowerCase()}`
+            : '';
+        const iconPath = getCachedIconForPackage(iconTarget);
+        if (!iconPath) {
+          pendingItemIconCandidates.push(iconTarget);
+        }
+        const itemIconHtml = iconPath
+          ? `<img class="bundle-item-icon" src="${escapeHTML(toMediaUrl(iconPath))}" loading="lazy" decoding="async" alt="">`
+          : `<span class="bundle-item-icon-fallback" data-icon-item-id="${escapeHTML(iconTarget.id)}" data-icon-pkg-key="${escapeHTML(iconPkgKey)}" data-icon-class="bundle-item-icon"></span>`;
+
         let modeHintHtml = '';
         if (evalInfo.adwareProtected) {
           modeHintHtml = `<span class="card-chip chip-install-protected" title="${escapeHTML(t('bundleEditor.chipAdwareTitle'))}">🛡️ ${escapeHTML(t('bundleEditor.chipAdwareLabel'))}</span>`;
@@ -473,6 +528,7 @@ export function renderBundleEditorModal({
             <span class="bundle-item-order">#${idx + 1}</span>
             <div class="bundle-item-main">
               <div class="bundle-item-title">
+                ${itemIconHtml}
                 <strong>${escapeHTML(evalInfo.name || item.name)}</strong>
                 <span class="provider-badge ${escapeHTML(itemBadge?.badgeClass || '')}">${escapeHTML(itemBadge?.label || getProviderLabel(item.source))}</span>
                 ${modeHintHtml}
@@ -629,6 +685,11 @@ export function renderBundleEditorModal({
       </div>
     `;
 
+    const allIconCandidates = [...pendingItemIconCandidates, ...pendingSearchIconCandidates.slice(0, 30)];
+    if (allIconCandidates.length > 0) {
+      queueItemsForIconResolution(allIconCandidates, { prioritize: true });
+    }
+
     // Bind input listeners without inline attributes (strict CSP)
     const nameInput = modal.querySelector('#bundleNameInput');
     if (nameInput instanceof HTMLInputElement) {
@@ -656,7 +717,12 @@ export function renderBundleEditorModal({
       snapFilterInput.oninput = () => {
         snapshotFilterText = snapFilterInput.value;
         const listEl = modal.querySelector('#bundleItemsList');
-        if (listEl) listEl.innerHTML = renderItemsListHtml();
+        if (listEl) {
+          listEl.innerHTML = renderItemsListHtml();
+          if (pendingItemIconCandidates.length > 0) {
+            queueItemsForIconResolution(pendingItemIconCandidates, { prioritize: true });
+          }
+        }
       };
     }
 
