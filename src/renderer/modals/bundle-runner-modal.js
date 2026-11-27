@@ -1,10 +1,11 @@
 import { evaluateBundleStatus, planBundleExecution } from '../../shared/bundles-logic.js';
 import { renderBundlesView } from '../components/bundles-view.js';
+import { getCachedIconForPackage, queueItemsForIconResolution } from '../components/cards.js';
 import { showToast } from '../components/toast.js';
 import { buildBundleItemPolicyPkg, evaluateItemPolicy, state } from '../state.js';
 import { closestEl, closestInput, qsInput } from '../utils/dom.js';
 import { getLocalizedPolicyError, getLocalizedProviderBadge, t } from '../utils/i18n.js';
-import { escapeHTML } from '../utils/sanitize.js';
+import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
 import { askBatchArchiveSaveChoice, pickArchiveTargetFolder } from './archive-target-modal.js';
 import { closeModal, resetModalContent, triggerCatalogReload } from './index.js';
 
@@ -110,6 +111,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
     const plan = planBundleExecution(selectedEntries, { allowSilent, silentWinget, t });
     const planByKey = new Map(plan.orderedQueue.map((entry) => [entry.key, entry]));
     const saveMode = state.settings.archiveSaveMode || 'ask';
+    const runnerIconCandidates = [];
 
     const rowsHtml =
       items.length === 0
@@ -158,6 +160,23 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
               }
 
               const entryBadge = getLocalizedProviderBadge(entry.source, state.providers);
+              const iconTarget = entry.matchedPackage || {
+                id: entry.key,
+                name: entry.name,
+                packageManager: entry.source === 'archive' ? '' : entry.source,
+                packageId: entry.packageId || '',
+              };
+              const iconPkgKey =
+                entry.source !== 'archive' && entry.packageId
+                  ? `${String(entry.source).toLowerCase()}:${String(entry.packageId).toLowerCase()}`
+                  : '';
+              const iconPath = getCachedIconForPackage(iconTarget);
+              if (!iconPath) {
+                runnerIconCandidates.push(iconTarget);
+              }
+              const itemIconHtml = iconPath
+                ? `<img class="bundle-item-icon" src="${escapeHTML(toMediaUrl(iconPath))}" loading="lazy" decoding="async" alt="">`
+                : `<span class="bundle-item-icon-fallback" data-icon-item-id="${escapeHTML(iconTarget.id)}" data-icon-pkg-key="${escapeHTML(iconPkgKey)}" data-icon-class="bundle-item-icon"></span>`;
 
               return `
                 <label class="bundle-runner-row ${checked ? 'is-checked' : ''} ${rowDisabled ? 'is-disabled' : ''}" ${entry.policyBlocked ? `title="${escapeHTML(policyErrText)}"` : ''}>
@@ -171,6 +190,7 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
                   <span class="bundle-item-order">#${entry.order}</span>
                   <div class="bundle-runner-info">
                     <div class="bundle-item-title">
+                      ${itemIconHtml}
                       <strong>${escapeHTML(entry.name)}</strong>
                       <span class="provider-badge ${escapeHTML(entryBadge?.badgeClass || '')}">${escapeHTML(entryBadge?.label || entry.source)}</span>
                       ${entry.optional ? `<span class="card-chip">${escapeHTML(t('common.optional'))}</span>` : ''}
@@ -259,6 +279,10 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
         </div>
       </div>
     `;
+
+    if (runnerIconCandidates.length > 0) {
+      queueItemsForIconResolution(runnerIconCandidates, { prioritize: true });
+    }
 
     const chkAllowSilent = qsInput(modal, '#chkBundleAllowSilent');
     if (chkAllowSilent) {

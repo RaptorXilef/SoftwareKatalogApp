@@ -45,19 +45,70 @@ const queuedIconIds = new Set();
 let activeIconJobs = 0;
 const MAX_ICON_JOBS = 4;
 
+function getPackageIconCacheKey(item) {
+  const pm = String(item?.packageManager || (item?.wingetId ? 'winget' : ''))
+    .trim()
+    .toLowerCase();
+  const pid = String(item?.packageId || item?.wingetId || '')
+    .trim()
+    .toLowerCase();
+  return pm && pid && pm !== 'archive' ? `${pm}:${pid}` : '';
+}
+
+/**
+ * Liefert einen bereits bekannten lokalen/gecachten Icon-Pfad für ein Paket.
+ * @param {Record<string, any> | null | undefined} item
+ * @returns {string | null}
+ */
+export function getCachedIconForPackage(item) {
+  if (!item || typeof item !== 'object') return null;
+  if (item.icon) return item.icon;
+  if (item.id && state.pcIconCache.has(item.id)) {
+    return state.pcIconCache.get(item.id) || null;
+  }
+  if (item.pcApp?.id && state.pcIconCache.has(item.pcApp.id)) {
+    return state.pcIconCache.get(item.pcApp.id) || null;
+  }
+  const pkgKey = getPackageIconCacheKey(item);
+  if (pkgKey && state.pcIconCache.has(pkgKey)) {
+    return state.pcIconCache.get(pkgKey) || null;
+  }
+  if (pkgKey) {
+    const matched = state.packages.find((p) => p.icon && getPackageIconCacheKey(p) === pkgKey);
+    if (matched?.icon) return matched.icon;
+  }
+  return null;
+}
+
 function createCardIconImg(iconPath, cls = 'card-icon') {
   const img = document.createElement('img');
   img.className = cls;
   img.src = toMediaUrl(iconPath);
-  if (cls === 'card-icon') {
+  if (cls === 'card-icon' || cls === 'discover-card-icon') {
     img.loading = 'lazy';
     img.decoding = 'async';
+  }
+  if (cls === 'discover-card-icon') {
+    img.width = 36;
+    img.height = 36;
   }
   img.alt = '';
   return img;
 }
 
-function updateCardIconInDom(itemId, iconPath) {
+function replaceMatchingIconSlots(root, itemId, iconPath, pkgKey = '') {
+  if (!root) return;
+  for (const slot of root.querySelectorAll('[data-icon-item-id]')) {
+    if (!(slot instanceof HTMLElement)) continue;
+    const matchesId = slot.dataset.iconItemId === itemId;
+    const matchesPkg = Boolean(pkgKey && slot.dataset.iconPkgKey === pkgKey);
+    if (!matchesId && !matchesPkg) continue;
+    const cls = slot.dataset.iconClass || 'bundle-item-icon';
+    slot.replaceWith(createCardIconImg(iconPath, cls));
+  }
+}
+
+function updateCardIconInDom(itemId, iconPath, pkgKey = '') {
   const grid = document.getElementById('grid');
   if (grid) {
     for (const card of grid.querySelectorAll('.card')) {
@@ -68,13 +119,8 @@ function updateCardIconInDom(itemId, iconPath) {
     }
   }
 
-  const bundlesView = document.getElementById('bundlesView');
-  if (bundlesView) {
-    for (const slot of bundlesView.querySelectorAll('[data-icon-item-id]')) {
-      if (!(slot instanceof HTMLElement) || slot.dataset.iconItemId !== itemId) continue;
-      slot.replaceWith(createCardIconImg(iconPath, 'bundle-item-icon'));
-    }
-  }
+  replaceMatchingIconSlots(document.getElementById('bundlesView'), itemId, iconPath, pkgKey);
+  replaceMatchingIconSlots(document.getElementById('discoverResults'), itemId, iconPath, pkgKey);
 
   if (state.currentModalId === itemId) {
     const detailFallback = document.querySelector('#modalContent .detail-icon-fallback');
@@ -83,13 +129,7 @@ function updateCardIconInDom(itemId, iconPath) {
     }
   }
 
-  const modalEl = document.getElementById('modalContent');
-  if (modalEl) {
-    for (const slot of modalEl.querySelectorAll('[data-icon-item-id]')) {
-      if (!(slot instanceof HTMLElement) || slot.dataset.iconItemId !== itemId) continue;
-      slot.replaceWith(createCardIconImg(iconPath, 'bundle-item-icon'));
-    }
-  }
+  replaceMatchingIconSlots(document.getElementById('modalContent'), itemId, iconPath, pkgKey);
 }
 
 function getExecutableCandidateForItem(item) {
@@ -123,7 +163,13 @@ function pumpIconQueue() {
     const item = iconQueue.shift();
     if (!item) continue;
     queuedIconIds.delete(item.id);
-    if (state.pcIconCache.has(item.id) || item.icon) continue;
+    const pkgKey = getPackageIconCacheKey(item);
+    const existingCached = getCachedIconForPackage(item);
+    if (existingCached) {
+      item.icon = existingCached;
+      updateCardIconInDom(item.id, existingCached, pkgKey);
+      continue;
+    }
     activeIconJobs++;
     window.electronAPI
       .extractCachedAppIcon({
@@ -146,8 +192,11 @@ function pumpIconQueue() {
           if (item.pcApp?.id) {
             state.pcIconCache.set(item.pcApp.id, res.iconPath);
           }
+          if (pkgKey) {
+            state.pcIconCache.set(pkgKey, res.iconPath);
+          }
           item.icon = res.iconPath;
-          updateCardIconInDom(item.id, res.iconPath);
+          updateCardIconInDom(item.id, res.iconPath, pkgKey);
         }
       })
       .catch(() => {
@@ -170,14 +219,11 @@ export function queueItemsForIconResolution(items, { prioritize = true } = {}) {
   const toPrepend = [];
   for (const item of items || []) {
     if (!item?.id) continue;
-    const cachedPath =
-      item.icon ||
-      state.pcIconCache.get(item.id) ||
-      (item.pcApp?.id ? state.pcIconCache.get(item.pcApp.id) : null) ||
-      null;
+    const pkgKey = getPackageIconCacheKey(item);
+    const cachedPath = getCachedIconForPackage(item);
     if (cachedPath) {
       item.icon = cachedPath;
-      updateCardIconInDom(item.id, cachedPath);
+      updateCardIconInDom(item.id, cachedPath, pkgKey);
       continue;
     }
     if (state.pcIconTried.has(item.id) || queuedIconIds.has(item.id)) continue;

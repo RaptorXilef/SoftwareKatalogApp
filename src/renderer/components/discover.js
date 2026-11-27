@@ -9,7 +9,8 @@ import {
   getLocalizedProviderName,
   t,
 } from '../utils/i18n.js';
-import { escapeHTML } from '../utils/sanitize.js';
+import { escapeHTML, toMediaUrl } from '../utils/sanitize.js';
+import { getCachedIconForPackage, queueItemsForIconResolution } from './cards.js';
 import { showToast } from './toast.js';
 
 let searchRequestSeq = 0;
@@ -50,26 +51,27 @@ function findMatchingArchivePackage(pkg) {
   );
 }
 
-function findMatchingInstalledPackage(pkg) {
-  if (pkg.isInstalled) return true;
+function findMatchingInstalledPackageObj(pkg) {
   const cleanPid = String(pkg.packageId || '')
     .trim()
     .toLowerCase();
   const cleanPm = String(pkg.packageManager || pkg.providerId || '')
     .trim()
     .toLowerCase();
-  if (!cleanPid) return false;
+  if (!cleanPid) return null;
 
-  return state.packages.some((p) => {
-    if (!p.isInstalled) return false;
-    const pId = String(p.packageId || p.wingetId || '')
-      .trim()
-      .toLowerCase();
-    const pPm = String(p.packageManager || (p.wingetId ? 'winget' : ''))
-      .trim()
-      .toLowerCase();
-    return pId === cleanPid && (!cleanPm || pPm === cleanPm);
-  });
+  return (
+    state.packages.find((p) => {
+      if (!p.isInstalled) return false;
+      const pId = String(p.packageId || p.wingetId || '')
+        .trim()
+        .toLowerCase();
+      const pPm = String(p.packageManager || (p.wingetId ? 'winget' : ''))
+        .trim()
+        .toLowerCase();
+      return pId === cleanPid && (!cleanPm || pPm === cleanPm);
+    }) || null
+  );
 }
 
 function toDiscoverPolicyPkg(pkg) {
@@ -363,19 +365,51 @@ function renderResults() {
     return;
   }
 
+  const iconCandidates = [];
+
   container.innerHTML = visibleEntries
     .map(({ pkg, idx, policy }) => {
-      const providerId = pkg.providerId || pkg.packageManager || 'winget';
+      const providerId = String(pkg.providerId || pkg.packageManager || 'winget')
+        .trim()
+        .toLowerCase();
+      const packageId = String(pkg.packageId || pkg.id || '').trim();
       const badgeInfo = getLocalizedProviderBadge(providerId, state.providers);
       const providerLabel =
         providerId === 'archive' ? t('providers.names.archive') : pkg.providerName || badgeInfo?.label || providerId;
       const badgeClass = badgeInfo?.badgeClass || '';
       const isArchiveSource = providerId === 'archive';
       const archiveMatch = findMatchingArchivePackage(pkg);
-      const isInstalled = findMatchingInstalledPackage(pkg);
+      const installedMatch = findMatchingInstalledPackageObj(pkg);
+      const isInstalled = Boolean(pkg.isInstalled || installedMatch);
       const canDownloadToArchive =
         !isArchiveSource && !archiveMatch && getProviderCapability(providerId, 'supportsArchiveDownload');
-      const canLinkToArchive = !isArchiveSource && !archiveMatch && Boolean(pkg.packageId || pkg.id);
+      const canLinkToArchive = !isArchiveSource && !archiveMatch && Boolean(packageId);
+
+      const iconItemId = isArchiveSource ? archiveMatch?.id || packageId : `remote:${providerId}:${packageId}`;
+      const iconPkgKey = !isArchiveSource && packageId ? `${providerId}:${packageId.toLowerCase()}` : '';
+      const iconTarget = {
+        id: iconItemId,
+        name: pkg.name || packageId,
+        icon: archiveMatch?.icon || installedMatch?.icon || pkg.icon || null,
+        displayIcon: installedMatch?.displayIcon || archiveMatch?.displayIcon || '',
+        installLocation: installedMatch?.installLocation || archiveMatch?.installLocation || '',
+        validInstallPath: installedMatch?.validInstallPath || archiveMatch?.validInstallPath || '',
+        uninstallString: installedMatch?.uninstallString || archiveMatch?.uninstallString || '',
+        appxPackageFamilyName: installedMatch?.appxPackageFamilyName || archiveMatch?.appxPackageFamilyName || '',
+        packageManager: isArchiveSource ? archiveMatch?.packageManager || '' : providerId,
+        packageId: isArchiveSource ? archiveMatch?.packageId || archiveMatch?.wingetId || '' : packageId,
+        homepage: pkg.homepage || installedMatch?.homepage || archiveMatch?.homepage || '',
+        webVersionUrl: archiveMatch?.webVersionUrl || '',
+        links: Array.isArray(archiveMatch?.links) ? archiveMatch.links : [],
+      };
+      const resolvedIconPath = getCachedIconForPackage(iconTarget);
+      if (!resolvedIconPath) {
+        iconCandidates.push(iconTarget);
+      }
+
+      const iconHtml = resolvedIconPath
+        ? `<img class="discover-card-icon" src="${escapeHTML(toMediaUrl(resolvedIconPath))}" width="36" height="36" loading="lazy" decoding="async" alt="">`
+        : `<div class="discover-card-icon-fallback" data-icon-item-id="${escapeHTML(iconItemId)}" data-icon-pkg-key="${escapeHTML(iconPkgKey)}" data-icon-class="discover-card-icon">${isArchiveSource ? '📦' : '🛍️'}</div>`;
 
       const archiveActionHtml = archiveMatch
         ? `<button type="button" class="btn btn-ghost" data-discover-action="open-archive" data-archive-id="${escapeHTML(archiveMatch.id)}">📂 ${escapeHTML(t('discover.openInArchive'))}</button>`
@@ -395,16 +429,17 @@ function renderResults() {
 
       return `
         <article class="discover-card">
+          ${iconHtml}
           <div class="discover-card-main">
             <div class="discover-card-title">
-              <strong>${escapeHTML(pkg.name || pkg.packageId)}</strong>
+              <strong>${escapeHTML(pkg.name || packageId)}</strong>
               <span class="provider-badge ${escapeHTML(badgeClass)}">${escapeHTML(providerLabel)}</span>
               ${pkg.version ? `<span class="card-chip">v${escapeHTML(pkg.version)}</span>` : ''}
               ${archiveMatch && !isArchiveSource ? `<span class="discover-status-badge">${escapeHTML(t('discover.badgeInArchive'))}</span>` : ''}
               ${isInstalled ? `<span class="discover-status-badge">${escapeHTML(t('discover.badgeInstalled'))}</span>` : ''}
             </div>
             <div class="discover-card-meta">
-              <code>${escapeHTML(pkg.packageId || pkg.id || '')}</code>
+              <code>${escapeHTML(packageId)}</code>
               ${pkg.source && pkg.source !== providerId ? `<span>${escapeHTML(t('discover.sourceMeta', { source: pkg.source }))}</span>` : ''}
             </div>
             ${pkg.shortDescription ? `<p class="discover-card-desc">${escapeHTML(pkg.shortDescription)}</p>` : ''}
@@ -418,6 +453,10 @@ function renderResults() {
       `;
     })
     .join('');
+
+  if (iconCandidates.length > 0) {
+    queueItemsForIconResolution(iconCandidates, { prioritize: true });
+  }
 }
 
 export function renderDiscoverView() {
