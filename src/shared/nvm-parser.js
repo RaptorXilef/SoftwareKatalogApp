@@ -29,7 +29,8 @@ export function isValidNvmVersion(version, { allowAliases = false } = {}) {
 }
 
 /**
- * Parst die Ausgabe von `nvm list` (inkl. `*`-Markierung für die aktive Version).
+ * Parst die Ausgabe von `nvm list` (inkl. `*`-Markierung für die aktive Version)
+ * und sortiert numerisch nach SemVer absteigend.
  * @param {string} stdout
  */
 export function parseNvmListOutput(stdout) {
@@ -65,6 +66,7 @@ export function parseNvmListOutput(stdout) {
     });
   }
 
+  results.sort((a, b) => compareVersions(b.version, a.version, 0));
   return results;
 }
 
