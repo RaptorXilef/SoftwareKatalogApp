@@ -5,6 +5,7 @@ import {
   sanitizeSilentArgs,
 } from '../../shared/installer-logic.js';
 import { filterUsableProviders } from '../../shared/provider-lifecycle-logic.js';
+import { getCachedIconForPackage, queueItemsForIconResolution } from '../components/cards.js';
 import { showToast } from '../components/toast.js';
 import { getBaseName, getCatalogItemById, getItemById, state } from '../state.js';
 import { closestButton, closestEl, qs, qsa, qsButton, qsInput, qsSelect, qsTextarea } from '../utils/dom.js';
@@ -803,19 +804,63 @@ export function renderEditModal(id, initialTab = 'general') {
       if (!items.length) {
         box.innerHTML = `<div class="winget-empty">${escapeHTML(providerRes?.hint || t('edit.providerNoResults'))}</div>`;
       } else {
+        const iconCandidates = [];
         box.innerHTML = items
           .map((r) => {
-            const pid = r.packageId || r.id || '';
+            const pid = String(r.packageId || r.id || '').trim();
+            const pm = String(r.providerId || r.packageManager || selectedPackageManager || '')
+              .trim()
+              .toLowerCase();
             const verText = [r.version ? `v${r.version}` : '', r.bucket || ''].filter(Boolean).join(' · ');
+
+            const matchedPkg = pid
+              ? state.packages.find((p) => {
+                  const pId = String(p.packageId || p.wingetId || '')
+                    .trim()
+                    .toLowerCase();
+                  const pPm = String(p.packageManager || (p.wingetId ? 'winget' : ''))
+                    .trim()
+                    .toLowerCase();
+                  return pId === pid.toLowerCase() && (!pm || !pPm || pPm === pm);
+                }) || null
+              : null;
+
+            const iconItemId = `remote:${pm}:${pid}`;
+            const iconPkgKey = pm && pid ? `${pm}:${pid.toLowerCase()}` : '';
+            const iconTarget = matchedPkg || {
+              id: iconItemId,
+              name: r.name || pid,
+              icon: r.icon || null,
+              packageManager: pm,
+              packageId: pid,
+              homepage: r.homepage || '',
+            };
+
+            const resolvedIconPath = getCachedIconForPackage(iconTarget);
+            if (!resolvedIconPath && pid) {
+              iconCandidates.push(iconTarget);
+            }
+
+            const iconHtml = resolvedIconPath
+              ? `<img class="winget-row-icon" src="${escapeHTML(toMediaUrl(resolvedIconPath))}" loading="lazy" decoding="async" alt="">`
+              : `<span class="winget-row-icon-fallback" data-icon-item-id="${escapeHTML(iconTarget.id)}" data-icon-pkg-key="${escapeHTML(iconPkgKey)}" data-icon-class="winget-row-icon">📦</span>`;
+
             return `
             <button type="button" class="winget-row" data-provider-pick="${escapeHTML(pid)}" data-provider-ver="${escapeHTML(r.version || '')}">
-              <strong>${escapeHTML(r.name || pid)}</strong>
+              <span class="winget-row-main">
+                ${iconHtml}
+                <strong>${escapeHTML(r.name || pid)}</strong>
+              </span>
               <code>${escapeHTML(pid)}</code>
               <span class="muted">${escapeHTML(verText)}</span>
             </button>
           `;
           })
           .join('');
+
+        if (iconCandidates.length > 0) {
+          queueItemsForIconResolution(iconCandidates, { prioritize: true });
+        }
       }
       return;
     }
