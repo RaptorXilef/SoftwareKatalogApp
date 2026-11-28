@@ -4,6 +4,19 @@ export const IGNORE_EXPORT_FORMAT = 'software-katalog-ignored-updates';
 const IGNORE_EXPORT_VERSION = 1;
 
 /**
+ * Normalisiert den Geltungsbereich eines Ignorier-Eintrags auf 'user' oder 'admin'.
+ * @param {unknown} scope
+ * @returns {'user' | 'admin'}
+ */
+export function normalizeIgnoreScope(scope) {
+  return String(scope || '')
+    .trim()
+    .toLowerCase() === 'admin'
+    ? 'admin'
+    : 'user';
+}
+
+/**
  * Normalisiert den Ignorier-Modus auf 'version' oder 'all'.
  * @param {unknown} mode
  * @returns {'version' | 'all'}
@@ -91,10 +104,10 @@ function getIgnoreMatchKeys(item) {
 /**
  * Normalisiert einen einzelnen Ignorier-Eintrag gemaess Schema.
  * @param {unknown} raw
- * @param {{ now?: number, fallbackId?: string }} [options]
- * @returns {{ id: string, packageKey: string, name: string, packageManager: string, packageId: string, mode: 'version' | 'all', ignoredVersion: string, createdAt: number } | null}
+ * @param {{ now?: number, fallbackId?: string, defaultScope?: 'user' | 'admin' }} [options]
+ * @returns {{ id: string, packageKey: string, name: string, packageManager: string, packageId: string, mode: 'version' | 'all', ignoredVersion: string, createdAt: number, scope: 'user' | 'admin' } | null}
  */
-export function normalizeIgnoreEntry(raw, { now = Date.now(), fallbackId = '' } = {}) {
+export function normalizeIgnoreEntry(raw, { now = Date.now(), fallbackId = '', defaultScope = 'user' } = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const src = /** @type {Record<string, any>} */ (raw);
 
@@ -116,6 +129,7 @@ export function normalizeIgnoreEntry(raw, { now = Date.now(), fallbackId = '' } 
   const name = String(src.name || packageId || packageKey).trim();
   const createdRaw = Number(src.createdAt);
   const createdAt = Number.isFinite(createdRaw) && createdRaw > 0 ? createdRaw : now;
+  const scope = normalizeIgnoreScope(src.scope !== undefined ? src.scope : defaultScope);
 
   return {
     id,
@@ -126,15 +140,19 @@ export function normalizeIgnoreEntry(raw, { now = Date.now(), fallbackId = '' } 
     mode,
     ignoredVersion,
     createdAt,
+    scope,
   };
 }
 
 /**
  * Erstellt einen Ignorier-Eintrag aus einem Paket-Objekt.
  * @param {Record<string, any> | null | undefined} item
- * @param {{ mode?: 'version' | 'all', ignoredVersion?: string, now?: number }} [options]
+ * @param {{ mode?: 'version' | 'all', ignoredVersion?: string, now?: number, scope?: 'user' | 'admin' }} [options]
  */
-export function buildIgnoreEntryFromPackage(item, { mode = 'version', ignoredVersion = '', now = Date.now() } = {}) {
+export function buildIgnoreEntryFromPackage(
+  item,
+  { mode = 'version', ignoredVersion = '', now = Date.now(), scope = 'user' } = {}
+) {
   const packageManager = String(item?.packageManager || (item?.wingetId ? 'winget' : item?.inArchive ? 'archive' : ''))
     .trim()
     .toLowerCase();
@@ -152,7 +170,26 @@ export function buildIgnoreEntryFromPackage(item, { mode = 'version', ignoredVer
     mode: resolvedMode,
     ignoredVersion: normalizeIgnoreVersion(ignoredVersion),
     createdAt: now,
+    scope: normalizeIgnoreScope(scope),
   };
+}
+
+/**
+ * Fuehrt globale Admin-Regeln (`data/ignored-updates.json`) und nutzerspezifische Regeln
+ * (`%APPDATA%\SoftwareKatalog\ignored-updates.json`) zusammen. Admin-Regeln stehen zuerst
+ * und haben Vorrang bei identischem Paket.
+ * @param {Array<Record<string, any>>} [adminEntries]
+ * @param {Array<Record<string, any>>} [userEntries]
+ */
+export function mergeScopedIgnoredUpdates(adminEntries = [], userEntries = []) {
+  const normalizedAdmin = (Array.isArray(adminEntries) ? adminEntries : [])
+    .map((e) => normalizeIgnoreEntry({ ...e, scope: 'admin' }, { defaultScope: 'admin' }))
+    .filter(Boolean);
+  const normalizedUser = (Array.isArray(userEntries) ? userEntries : [])
+    .map((e) => normalizeIgnoreEntry({ ...e, scope: 'user' }, { defaultScope: 'user' }))
+    .filter(Boolean);
+
+  return [...normalizedAdmin, ...normalizedUser];
 }
 
 /**
@@ -232,15 +269,17 @@ function defaultGenerateId() {
  * Fuegt einen Ignorier-Eintrag hinzu oder aktualisiert eine bestehende Regel fuer dasselbe packageKey.
  * @param {Array<Record<string, any>>} entries
  * @param {unknown} entryInput
- * @param {{ now?: number, generateId?: () => string }} [options]
+ * @param {{ now?: number, generateId?: () => string, defaultScope?: 'user' | 'admin' }} [options]
  */
 export function upsertIgnoredUpdate(
   entries = [],
   entryInput,
-  { now = Date.now(), generateId = defaultGenerateId } = {}
+  { now = Date.now(), generateId = defaultGenerateId, defaultScope = 'user' } = {}
 ) {
-  const list = Array.isArray(entries) ? entries.map((e) => normalizeIgnoreEntry(e, { now })).filter(Boolean) : [];
-  const normalized = normalizeIgnoreEntry(entryInput, { now, fallbackId: generateId() });
+  const list = Array.isArray(entries)
+    ? entries.map((e) => normalizeIgnoreEntry(e, { now, defaultScope })).filter(Boolean)
+    : [];
+  const normalized = normalizeIgnoreEntry(entryInput, { now, fallbackId: generateId(), defaultScope });
   if (!normalized) {
     return { success: false, error: 'Ungueltiger Ignorier-Eintrag.', entries: list };
   }
@@ -301,7 +340,16 @@ export function filterIgnoredEntries(entries = [], query = '') {
   return list.filter((entry) => {
     if (!entry) return false;
     const ruleLabel = entry.mode === 'all' ? 'alle updates' : `nur version v${entry.ignoredVersion || ''}`;
-    const hay = [entry.name, entry.packageId, entry.packageManager, entry.packageKey, entry.ignoredVersion, ruleLabel]
+    const scopeLabel = entry.scope === 'admin' ? 'admin global alle nutzer' : 'user persoenlich personal';
+    const hay = [
+      entry.name,
+      entry.packageId,
+      entry.packageManager,
+      entry.packageKey,
+      entry.ignoredVersion,
+      ruleLabel,
+      scopeLabel,
+    ]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
@@ -377,21 +425,21 @@ export function validateImportIgnoredUpdatesPayload(raw) {
  * Fuehrt bestehende und importierte Ignorier-Eintraege zusammen oder ersetzt die bestehende Liste.
  * @param {Array<Record<string, any>>} existingEntries
  * @param {Array<Record<string, any>>} importedEntries
- * @param {{ mode?: 'merge' | 'replace', now?: number, generateId?: () => string }} [options]
+ * @param {{ mode?: 'merge' | 'replace', now?: number, generateId?: () => string, defaultScope?: 'user' | 'admin' }} [options]
  */
 export function mergeIgnoredUpdates(
   existingEntries = [],
   importedEntries = [],
-  { mode = 'merge', now = Date.now(), generateId = defaultGenerateId } = {}
+  { mode = 'merge', now = Date.now(), generateId = defaultGenerateId, defaultScope = 'user' } = {}
 ) {
   const cleanExisting = (Array.isArray(existingEntries) ? existingEntries : [])
-    .map((e) => normalizeIgnoreEntry(e, { now }))
+    .map((e) => normalizeIgnoreEntry({ ...e, scope: defaultScope }, { now, defaultScope }))
     .filter(Boolean);
 
   // Import-Eintraege nach packageKey deduplizieren (letzter gewinnt)
   const dedupedImportMap = new Map();
   for (const raw of Array.isArray(importedEntries) ? importedEntries : []) {
-    const norm = normalizeIgnoreEntry(raw, { now });
+    const norm = normalizeIgnoreEntry({ ...raw, scope: defaultScope }, { now, defaultScope });
     if (norm) {
       dedupedImportMap.set(norm.packageKey, norm);
     }

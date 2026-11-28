@@ -9,6 +9,8 @@ import {
   IGNORE_EXPORT_FORMAT,
   isUpdateIgnored,
   mergeIgnoredUpdates,
+  mergeScopedIgnoredUpdates,
+  normalizeIgnoreScope,
   removeIgnoredUpdateEntry,
   upsertIgnoredUpdate,
   validateImportIgnoredUpdatesPayload,
@@ -120,8 +122,51 @@ describe('ignore-logic: mode "version" & "all"', () => {
     assert.equal(getIgnorePackageKey(archiveOnly), 'archive:custom-tool');
     assert.equal(entry.packageKey, 'archive:custom-tool');
     assert.equal(entry.packageManager, 'archive');
+    assert.equal(entry.scope, 'user');
     assert.ok(findMatchingIgnoreRule(archiveOnly, '1.2.0', [entry]));
     assert.equal(findMatchingIgnoreRule(archiveOnly, '1.3.0', [entry]), null);
+  });
+
+  it('kombiniert Admin- und Nutzer-Ignorierlisten mit Admin-Vorrang und Scope-Filter', () => {
+    assert.equal(normalizeIgnoreScope('ADMIN'), 'admin');
+    assert.equal(normalizeIgnoreScope('other'), 'user');
+
+    const combined = mergeScopedIgnoredUpdates(
+      [
+        {
+          id: 'adm-1',
+          packageKey: 'winget:videolan.vlc',
+          name: 'VLC Media Player',
+          packageManager: 'winget',
+          packageId: 'VideoLAN.VLC',
+          mode: 'all',
+        },
+      ],
+      [
+        {
+          id: 'usr-1',
+          packageKey: 'winget:git.git',
+          name: 'Git',
+          packageManager: 'winget',
+          packageId: 'Git.Git',
+          mode: 'version',
+          ignoredVersion: '2.48.0',
+        },
+      ]
+    );
+
+    assert.equal(combined.length, 2);
+    assert.equal(combined[0].scope, 'admin');
+    assert.equal(combined[1].scope, 'user');
+
+    const vlcRule = findMatchingIgnoreRule({ packageManager: 'winget', packageId: 'VideoLAN.VLC' }, '3.0.24', combined);
+    assert.equal(vlcRule?.scope, 'admin');
+
+    const gitRule = findMatchingIgnoreRule({ packageManager: 'winget', packageId: 'Git.Git' }, '2.48.0', combined);
+    assert.equal(gitRule?.scope, 'user');
+
+    assert.equal(filterIgnoredEntries(combined, 'admin').length, 1);
+    assert.equal(filterIgnoredEntries(combined, 'persoenlich').length, 1);
   });
 });
 

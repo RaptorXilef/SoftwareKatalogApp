@@ -30,12 +30,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('queue-updated', listener);
   },
 
-  // Ignorierliste fuer Updates
+  // Ignorierliste fuer Updates (Persoenlich in %APPDATA% + Admin in data/)
   loadIgnoredUpdates: () => ipcRenderer.invoke('ignore-load'),
   addIgnoredUpdate: (entry) => ipcRenderer.invoke('ignore-add', entry),
-  removeIgnoredUpdate: (entryId) => ipcRenderer.invoke('ignore-remove', entryId),
-  clearIgnoredUpdates: () => ipcRenderer.invoke('ignore-clear'),
-  exportIgnoredUpdates: () => ipcRenderer.invoke('ignore-export'),
+  removeIgnoredUpdate: (entryId, opts) => ipcRenderer.invoke('ignore-remove', entryId, opts),
+  setIgnoredUpdateScope: (entryId, scope) => ipcRenderer.invoke('ignore-set-scope', entryId, scope),
+  clearIgnoredUpdates: (opts) => ipcRenderer.invoke('ignore-clear', opts),
+  exportIgnoredUpdates: (opts) => ipcRenderer.invoke('ignore-export', opts),
   importIgnoredUpdates: (opts) => ipcRenderer.invoke('ignore-import', opts),
 
   // Katalog & Scanner

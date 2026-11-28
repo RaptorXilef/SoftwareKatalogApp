@@ -115,6 +115,7 @@ import {
   importIgnoredUpdates,
   loadIgnoredUpdates,
   removeIgnoredUpdate,
+  setIgnoredUpdateScope,
 } from './ignore-service.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, createJob, dismissJob, getJobsSnapshot } from './jobs.js';
@@ -449,12 +450,13 @@ function registerIpcHandlers() {
   handleIpc('queue-cancel-all', () => cancelAllQueue());
   handleIpc('queue-get-state', () => getQueueState());
 
-  // Ignorierliste fuer Updates
+  // Ignorierliste fuer Updates (Persoenlich in %APPDATA% + Global/Admin in data/)
   handleIpc('ignore-load', () => loadIgnoredUpdates());
   handleIpc('ignore-add', (_e, entry) => addIgnoredUpdate(entry));
-  handleIpc('ignore-remove', (_e, entryId) => removeIgnoredUpdate(entryId));
-  handleIpc('ignore-clear', () => clearIgnoredUpdates());
-  handleIpc('ignore-export', () => exportIgnoredUpdates());
+  handleIpc('ignore-remove', (_e, entryId, opts) => removeIgnoredUpdate(entryId, opts || {}));
+  handleIpc('ignore-set-scope', (_e, entryId, scope) => setIgnoredUpdateScope(entryId, scope));
+  handleIpc('ignore-clear', (_e, opts) => clearIgnoredUpdates(opts || {}));
+  handleIpc('ignore-export', (_e, opts) => exportIgnoredUpdates(opts || {}));
   handleIpc('ignore-import', (_e, opts) => importIgnoredUpdates(opts || {}));
 
   // Katalog & Scans
