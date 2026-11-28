@@ -114,6 +114,7 @@ function normalizeVisibleHiddenCats(raw) {
  *   enabledProviders: string[],
  *   vcpkgRoot: string,
  *   updateInterval: number,
+ *   scanOnStartup: boolean,
  *   autoRequestAdminForBatch: boolean,
  *   minimizeToTrayOnClose: boolean,
  *   autostartEnabled: boolean,
@@ -160,6 +161,7 @@ export function createSettingsDraft(rawSettings = {}) {
     enabledProviders: normalizeEnabledProviders(src.enabledProviders),
     vcpkgRoot: rawVcpkgRoot.trim(),
     updateInterval: normalizeUpdateInterval(src.updateInterval),
+    scanOnStartup: src.scanOnStartup !== false,
     autoRequestAdminForBatch: Boolean(src.autoRequestAdminForBatch),
     ...bg,
   };
@@ -231,6 +233,7 @@ export function hasSettingsDraftChanges(initialDraft, currentDraft) {
   if (initial.archiveSaveMode !== current.archiveSaveMode) return true;
   if (initial.vcpkgRoot !== current.vcpkgRoot) return true;
   if (initial.updateInterval !== current.updateInterval) return true;
+  if (initial.scanOnStartup !== current.scanOnStartup) return true;
   if (initial.autoRequestAdminForBatch !== current.autoRequestAdminForBatch) return true;
   if (initial.minimizeToTrayOnClose !== current.minimizeToTrayOnClose) return true;
   if (initial.autostartEnabled !== current.autostartEnabled) return true;
@@ -283,6 +286,7 @@ export function buildSettingsSavePlan(initialDraft, currentDraft, baseProviderSe
     nestedDepth: current.nestedDepth,
     visibleHiddenCats: current.visibleHiddenCats,
     updateInterval: current.updateInterval,
+    scanOnStartup: current.scanOnStartup,
     autoExtensions: current.autoExtensions,
     newBadgeDays: current.newBadgeDays,
     versionCompareDepth: current.versionCompareDepth,

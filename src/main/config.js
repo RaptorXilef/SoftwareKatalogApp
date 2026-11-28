@@ -18,7 +18,7 @@ import {
 } from '../shared/provider-lifecycle-logic.js';
 import { DEFAULT_SORT_MODES, normalizeDefaultSortModes, normalizeStartTab } from '../shared/unified-packages.js';
 
-const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions', 'notifiedUpdateVersions'];
+const STATE_KEYS = ['lastUpdateCheck', 'favorites', 'installedVersions', 'notifiedUpdateVersions', 'scanOnStartup'];
 
 const DEFAULT_CONFIG = {
   archivePaths: ['../software'],
@@ -56,6 +56,7 @@ const DEFAULT_STATE = {
   favorites: [],
   installedVersions: {},
   notifiedUpdateVersions: {},
+  scanOnStartup: true,
 };
 
 let migrationChecked = false;
@@ -368,6 +369,7 @@ export function getConfig() {
   const enabledProviders = normalizeEnabledProviders(config.enabledProviders);
   const providerSettings = normalizeProviderSettings(config.providerSettings);
   const backgroundSettings = normalizeBackgroundSettings(config);
+  const scanOnStartup = state.scanOnStartup !== false;
   const notifiedUpdateVersions =
     state.notifiedUpdateVersions &&
     typeof state.notifiedUpdateVersions === 'object' &&
@@ -388,6 +390,7 @@ export function getConfig() {
     ...config,
     ...state,
     ...backgroundSettings,
+    scanOnStartup,
     notifiedUpdateVersions,
     archivePaths,
     targetPath,
@@ -412,6 +415,7 @@ export function saveConfig(newSettings) {
   merged.showDevTab = merged.showDevTab !== false;
   merged.startTab = normalizeStartTab(merged.startTab, { showDevTab: merged.showDevTab });
   merged.defaultSortModes = normalizeDefaultSortModes(merged.defaultSortModes);
+  merged.scanOnStartup = merged.scanOnStartup !== false;
 
   if (newSettings?.enabledProviders !== undefined) {
     merged.enabledProviders = normalizeEnabledProviders(newSettings.enabledProviders);

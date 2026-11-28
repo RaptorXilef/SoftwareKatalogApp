@@ -48,6 +48,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
     assert.deepEqual(defaults.enabledProviders, ['winget', 'archive']);
     assert.equal(defaults.vcpkgRoot, '');
     assert.equal(defaults.updateInterval, 24);
+    assert.equal(defaults.scanOnStartup, true);
     assert.equal(defaults.autoRequestAdminForBatch, false);
     assert.equal(defaults.minimizeToTrayOnClose, true);
     assert.equal(defaults.autostartEnabled, false);
@@ -62,6 +63,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
 
     const customSortAndTrayOff = createSettingsDraft({
       minimizeToTrayOnClose: false,
+      scanOnStartup: false,
       defaultSortModes: {
         updates: 'updates',
         installed: 'newest',
@@ -69,6 +71,7 @@ describe('settings-draft-logic: createSettingsDraft & toggleDraftProvider', () =
       },
     });
     assert.equal(customSortAndTrayOff.minimizeToTrayOnClose, false);
+    assert.equal(customSortAndTrayOff.scanOnStartup, false);
     assert.deepEqual(customSortAndTrayOff.defaultSortModes, {
       updates: 'updates',
       installed: 'az',
@@ -169,6 +172,7 @@ describe('settings-draft-logic: hasSettingsDraftChanges', () => {
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archiveSaveMode: 'auto-id' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, vcpkgRoot: 'C:\\vcpkg' }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, updateInterval: 168 }), true);
+    assert.equal(hasSettingsDraftChanges(initial, { ...initial, scanOnStartup: false }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, autoRequestAdminForBatch: true }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, visibleHiddenCats: ['Beta'] }), true);
     assert.equal(hasSettingsDraftChanges(initial, { ...initial, archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'] }), true);
@@ -211,6 +215,7 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
       ...toggleDraftProvider(initial, 'npm', true),
       autoSaveDownloads: false,
       autoRequestAdminForBatch: true,
+      scanOnStartup: false,
       vcpkgRoot: 'D:\\dev\\vcpkg',
       archivePaths: ['D:\\Archiv2', 'C:\\Archiv1'],
     };
@@ -223,6 +228,7 @@ describe('settings-draft-logic: buildSettingsSavePlan', () => {
     assert.equal(plan.payload.askSaveDialog, true);
     assert.equal(plan.payload.autoSaveDownloads, false);
     assert.equal(plan.payload.autoRequestAdminForBatch, true);
+    assert.equal(plan.payload.scanOnStartup, false);
     assert.equal(plan.payload.targetPath, 'D:\\Archiv2');
     assert.deepEqual(plan.payload.enabledProviders, ['winget', 'archive', 'npm']);
     assert.equal(plan.payload.providerSettings.vcpkgRoot, 'D:\\dev\\vcpkg');

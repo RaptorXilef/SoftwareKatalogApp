@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // PC-Versionen & Installation
   scanLocalVersions: (opts) => ipcRenderer.invoke('scan-local-versions', opts),
   scanInstalledSoftware: (opts) => ipcRenderer.invoke('scan-installed-software', opts),
+  loadInstalledSnapshot: () => ipcRenderer.invoke('load-installed-snapshot'),
   onInstalledScanProgress: (cb) => {
     const listener = (_event, progress) => cb(progress);
     ipcRenderer.on('installed-scan-progress', listener);

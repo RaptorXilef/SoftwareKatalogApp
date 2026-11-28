@@ -117,6 +117,7 @@ import {
   removeIgnoredUpdate,
   setIgnoredUpdateScope,
 } from './ignore-service.js';
+import { loadInstalledSnapshot, saveInstalledSnapshot } from './installed-snapshot.js';
 import { detectInstallerFile } from './installer-detector.js';
 import { cancelJob, createJob, dismissJob, getJobsSnapshot } from './jobs.js';
 import { registerMediaScheme, setupMediaProtocolHandler } from './media-protocol.js';
@@ -392,9 +393,10 @@ function registerDevProjectsIpcHandlers() {
 
 function resolvePreferredArchiveDialogPath() {
   const cfg = getConfig();
-  const candidates = [...(Array.isArray(cfg.absArchivePaths) ? cfg.absArchivePaths : []), cfg.absTargetPath].filter(
-    Boolean
-  );
+  const candidates = [
+    ...(Array.isArray(cfg.absArchivePaths) ? cfg.absArchivePaths : []),
+    cfg.absTargetPath,
+  ].filter(Boolean);
 
   for (const dir of candidates) {
     try {
@@ -485,7 +487,14 @@ function registerIpcHandlers() {
 
   // Lokale PC-Tools & Installation
   handleIpc('scan-local-versions', (_e, opts) => scanLocalVersions(opts || {}));
-  handleIpc('scan-installed-software', (_e, opts) => scanInstalledSoftware(opts || {}));
+  handleIpc('scan-installed-software', async (_e, opts) => {
+    const res = await scanInstalledSoftware(opts || {});
+    if (res?.success && Array.isArray(res.programs)) {
+      saveInstalledSnapshot(res.programs, res.scannedAt);
+    }
+    return res;
+  });
+  handleIpc('load-installed-snapshot', () => loadInstalledSnapshot());
   handleIpc('extract-cached-app-icon', (_e, payload) => extractCachedAppIcon(payload || {}));
   handleIpc('icon-cache-stats', () => getIconCacheStats());
   handleIpc('icon-cache-clear', () => clearIconCache());
