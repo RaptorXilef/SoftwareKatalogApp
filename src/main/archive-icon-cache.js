@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { nativeImage } from 'electron';
+import * as electron from 'electron';
 import { extractPngFromIcoBuffer } from '../shared/ico-logic.js';
 import { getIconCacheDir } from './config.js';
 
@@ -123,16 +123,21 @@ function encodeCompressedIcon(rawBuffer, ext) {
     return { bytes: rawBuffer, ext: '.svg' };
   }
 
+  const nativeImg = electron.nativeImage;
+  if (typeof nativeImg?.createFromBuffer !== 'function') {
+    return { bytes: rawBuffer, ext: ext || '.png' };
+  }
+
   let img = null;
   if (ext === '.ico') {
     const embeddedPng = extractPngFromIcoBuffer(rawBuffer);
     if (embeddedPng) {
-      img = nativeImage.createFromBuffer(embeddedPng);
+      img = nativeImg.createFromBuffer(embeddedPng);
     }
   }
 
   if (!img || img.isEmpty()) {
-    img = nativeImage.createFromBuffer(rawBuffer);
+    img = nativeImg.createFromBuffer(rawBuffer);
   }
 
   if (!img || img.isEmpty()) {
@@ -226,7 +231,7 @@ export function lookupCachedArchiveIcon({ itemId, relIcon, scanMtime = 0 }) {
   if (!itemId || !relIcon) return null;
   const cacheDir = ensureLoaded();
   const entry = store.entries[itemId];
-  if (!entry || !entry.fileName) return null;
+  if (!entry?.fileName) return null;
 
   const expectedMtime = Number(scanMtime) || 0;
   if (entry.relIcon !== String(relIcon) || Number(entry.scanMtime || 0) !== expectedMtime) {

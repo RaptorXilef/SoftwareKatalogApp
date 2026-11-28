@@ -109,7 +109,8 @@ export function renderBundleRunnerModal(bundleId, { onRescanPc = null } = {}) {
 
     const selectedEntries = items.filter((it) => selectedKeys.has(it.key) && !it.archiveMissing && !it.policyBlocked);
     const plan = planBundleExecution(selectedEntries, { allowSilent, silentWinget, t });
-    const planByKey = new Map(plan.orderedQueue.map((entry) => [entry.key, entry]));
+    const orderedQueue = /** @type {Array<Record<string, any>>} */ (plan.orderedQueue);
+    const planByKey = new Map(orderedQueue.map((entry) => [entry.key, entry]));
     const saveMode = state.settings.archiveSaveMode || 'ask';
     const runnerIconCandidates = [];
 

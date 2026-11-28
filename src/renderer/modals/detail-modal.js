@@ -15,6 +15,29 @@ import { executeArchiveLink, resolveArchiveSaveTarget, savePackageToArchive } fr
 import { closeModal, openEditModal, resetModalContent, triggerCatalogReload } from './index.js';
 import { ensureAdminAuthenticated } from './login-modal.js';
 
+/**
+ * @typedef {{
+ *   key: string,
+ *   kind: 'archive',
+ *   label: string,
+ *   badgeClass: string,
+ *   version: string,
+ *   files: string[],
+ *   archiveItem: Record<string, any>,
+ * }} ArchiveInstallSource
+ * @typedef {{
+ *   key: string,
+ *   kind: 'provider',
+ *   providerId: string,
+ *   packageId: string,
+ *   label: string,
+ *   badgeClass: string,
+ *   version: string,
+ *   provMeta: ReturnType<typeof getProviderMeta>,
+ * }} ProviderInstallSource
+ * @typedef {ArchiveInstallSource | ProviderInstallSource} DetailInstallSource
+ */
+
 function getSourceLabel(sourceType) {
   if (sourceType === 'winget') return t('detail.sourceWinget');
   if (sourceType === 'provider') return t('detail.sourceProvider');
@@ -89,10 +112,24 @@ function normalizeCompareName(raw) {
     .trim();
 }
 
+/**
+ * @param {Record<string, any>} item
+ * @param {{
+ *   sortedLastFiles: string[],
+ *   st: Record<string, any>,
+ *   effectivePm: string,
+ *   effectivePkgId: string,
+ *   provMeta: ReturnType<typeof getProviderMeta>,
+ *   matchedArchive: Record<string, any> | null,
+ *   discoveredSources?: Array<{ providerId: string, packageId: string, version?: string }>,
+ * }} opts
+ * @returns {DetailInstallSource[]}
+ */
 function buildAvailableInstallSources(
   item,
   { sortedLastFiles, st, effectivePm, effectivePkgId, provMeta, matchedArchive, discoveredSources = [] }
 ) {
+  /** @type {DetailInstallSource[]} */
   const sources = [];
   const seenKeys = new Set();
 
@@ -110,7 +147,7 @@ function buildAvailableInstallSources(
       kind: 'archive',
       label: t('providers.names.archive'),
       badgeClass: 'is-archive',
-      version: firstArchiveVer,
+      version: String(firstArchiveVer || ''),
       files: archiveFiles,
       archiveItem: archiveTarget,
     });
@@ -260,6 +297,18 @@ function buildNvmUseButtonHtml(item, { large = false } = {}) {
   return `<button type="button" class="btn ${sizeCls}btn-local" data-detail-action="nvm-use">✅ ${escapeHTML(t('detail.heroNvmUse', { version: pkgVer }))}</button>`;
 }
 
+/**
+ * @param {Record<string, any>} item
+ * @param {Record<string, any>} st
+ * @param {{
+ *   provMeta: ReturnType<typeof getProviderMeta>,
+ *   canUninstall: boolean,
+ *   matchedArchive: Record<string, any> | null,
+ *   policyEval?: Record<string, any> | null,
+ *   activeSource?: DetailInstallSource | null,
+ *   hasSourceChoice?: boolean,
+ * }} opts
+ */
 function buildHeroBarHtml(
   item,
   st,
@@ -424,6 +473,13 @@ function buildHeroBarHtml(
   return `<div class="detail-hero-bar">${buttons.join('')}</div>`;
 }
 
+/**
+ * @param {{
+ *   availableSources: DetailInstallSource[],
+ *   selectedSourceKey: string | null,
+ *   canDiscoverMoreSources: boolean,
+ * }} opts
+ */
 function buildSourceSelectorBarHtml({ availableSources, selectedSourceKey, canDiscoverMoreSources }) {
   if (availableSources.length <= 1 && !canDiscoverMoreSources) return '';
 
@@ -1079,7 +1135,13 @@ function renderDetailModalCore(
   const effectivePkgId = activeSource?.kind === 'provider' ? activeSource.packageId : basePkgId;
   const provMeta = activeSource?.kind === 'provider' ? activeSource.provMeta : baseProvMeta;
 
-  const presentProviderIds = new Set(availableSources.filter((s) => s.kind === 'provider').map((s) => s.providerId));
+  /** @type {Set<string>} */
+  const presentProviderIds = new Set();
+  for (const src of availableSources) {
+    if (src.kind === 'provider') {
+      presentProviderIds.add(src.providerId);
+    }
+  }
   const otherSearchableProviders = filterUsableProviders(state.providers, {
     capability: 'search',
     excludeIds: ['archive'],
