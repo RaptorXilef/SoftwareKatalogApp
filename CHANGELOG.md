@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.33.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.32.0...v1.33.0) (2026-11-28)
+
+### 🚀 Features
+
+* **ignore-list:** Split ignored updates into personal (%APPDATA%) and global Admin (data/) lists ([a455d0c](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/a455d0c9839bb577a92eaa1ff84fe2789d4dab49))
+* **startup,settings:** Add scanOnStartup toggle and restore cached PC update snapshot on startup ([d0ba99d](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/d0ba99d6f9806f803678e5b09e10b7efb33167ba))
+* **startup,storage:** Persist PC-specific installed/update snapshot in AppData and add scanOnStartup setting ([98f9c3f](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/98f9c3f7e9f3ca3f21f4d951feedbc0ba18a62b5))
+* **storage,cache:** Move user-specific data to AppData and add resized local archive icon cache ([f7c1b09](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/f7c1b09a8f216277224b7861e8ddb094e28156f2))
+
+### 🐛 Bug Fixes
+
+* **tests,types,lint:** Fix mock-electron nativeImage import, Biome optional chain warning, and JSDoc type narrowing ([60b86ea](https://github.com/RaptorXilef/SoftwareKatalogApp/commit/60b86ead41813839186738e5d74f37bcb45ac0a5))
+
 ## [1.32.0](https://github.com/RaptorXilef/SoftwareKatalogApp/compare/v1.31.3...v1.32.0) (2026-11-27)
 
 ### 🚀 Features
