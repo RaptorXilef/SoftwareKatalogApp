@@ -1514,7 +1514,10 @@
       "statusUpToDate": "Up to date",
       "upToDateToast": "App is up to date.",
       "downloadingBgToast": "Downloading app update in the background...",
-      "updateFailedToast": "App update failed: {error}"
+      "updateFailedToast": "App update failed: {error}",
+      "startupScanTitle": "Startup Update Check",
+      "scanOnStartupLabel": "Automatically check for program updates on startup",
+      "scanOnStartupHint": "When disabled, the app immediately loads the last saved PC and update status from your local user folder (%APPDATA%) for a much faster startup. You can still run a manual check anytime via \"Check PC\" or \"Online Updates\"."
     },
     "background": {
       "title": "Background Operation, System Tray & Auto-Update",

@@ -61,6 +61,20 @@ import {
 import { applyTranslationsToDom, getI18nLocale, initRendererI18n, onI18nChange, t } from './utils/i18n.js';
 import { escapeHTML } from './utils/sanitize.js';
 
+let hasCheckedProviderAvailability = false;
+
+async function ensureProviderAvailabilityChecked() {
+  if (hasCheckedProviderAvailability) return;
+  state.isCheckingProviders = true;
+  renderScanProgressBanner();
+  try {
+    await refreshProviders({ checkAvailability: true });
+    hasCheckedProviderAvailability = true;
+  } finally {
+    state.isCheckingProviders = false;
+  }
+}
+
 function renderHeaderUpdateNotice() {
   const notice = document.getElementById('headerUpdateNotice');
   if (!notice) return;
@@ -885,6 +899,7 @@ async function bootstrap() {
     onSnapshotFromPc: async () => {
       if (!state.hasScannedInstalled) {
         showToast(t('toasts.bundleSnapshotScanning'), { type: 'info' });
+        await ensureProviderAvailabilityChecked();
         await runInstalledScan({ silent: false });
       }
       const snapshot = buildBundleDraftFromInstalled(state.packages, {
@@ -903,7 +918,10 @@ async function bootstrap() {
     onEditBundle: (bundle) => openBundleEditorModal({ bundle }),
     onRunBundle: (bundleId) =>
       openBundleRunnerModal(bundleId, {
-        onRescanPc: () => runInstalledScan({ silent: false }),
+        onRescanPc: async () => {
+          await ensureProviderAvailabilityChecked();
+          await runInstalledScan({ silent: false });
+        },
       }),
     onDuplicateBundle: async (bundleId) => {
       const ok = await ensureAdminAuthenticated({
@@ -1035,6 +1053,7 @@ async function bootstrap() {
       }
     },
     onCheckOnline: async () => {
+      await ensureProviderAvailabilityChecked();
       const [res, pcRes] = await Promise.all([
         window.electronAPI.checkWebVersions(),
         runInstalledScan({ silent: true }),
@@ -1063,6 +1082,7 @@ async function bootstrap() {
       }
     },
     onCheckLocal: async () => {
+      await ensureProviderAvailabilityChecked();
       const [pcRes, localRes] = await Promise.all([
         runInstalledScan({ silent: false }),
         window.electronAPI.scanLocalVersions({ silent: true }),
@@ -1141,7 +1161,19 @@ async function bootstrap() {
         if (!bgStatus || bgStatus.isChecking) return;
         if (bgStatus.lastCheckAt && bgStatus.lastCheckAt !== lastBgCheckAt) {
           lastBgCheckAt = bgStatus.lastCheckAt;
-          void reloadUI({ preserveScroll: true });
+          void (async () => {
+            if (typeof window.electronAPI?.loadInstalledSnapshot === 'function') {
+              try {
+                const snap = await window.electronAPI.loadInstalledSnapshot();
+                if (snap?.success && snap.hasSnapshot && Array.isArray(snap.programs)) {
+                  setInstalledApps(snap.programs);
+                }
+              } catch {
+                // Ignorieren
+              }
+            }
+            await reloadUI({ preserveScroll: true });
+          })();
         }
       });
     }
@@ -1170,19 +1202,28 @@ async function bootstrap() {
       });
     }
 
+    // Gespeicherten PC-Snapshot aus %APPDATA%\SoftwareKatalog sofort vorladen (sofortige Anzeige der Tabs Updates & Installiert)
+    if (typeof window.electronAPI?.loadInstalledSnapshot === 'function') {
+      try {
+        const snap = await window.electronAPI.loadInstalledSnapshot();
+        if (snap?.success && snap.hasSnapshot && Array.isArray(snap.programs)) {
+          setInstalledApps(snap.programs);
+        }
+      } catch (snapErr) {
+        console.warn('Konnte gespeicherten PC-Snapshot nicht laden:', snapErr);
+      }
+    }
+
     await reloadUI({ preserveScroll: false, applyStartTab: true });
     checkAppUpdateInBackground();
-    void (async () => {
-      state.isCheckingProviders = true;
-      renderScanProgressBanner();
-      try {
-        await refreshProviders({ checkAvailability: true });
-      } finally {
-        state.isCheckingProviders = false;
-      }
-      renderActiveView();
-      await runInstalledScan({ silent: true });
-    })();
+
+    if (state.settings.scanOnStartup !== false) {
+      void (async () => {
+        await ensureProviderAvailabilityChecked();
+        renderActiveView();
+        await runInstalledScan({ silent: true });
+      })();
+    }
   } catch (err) {
     console.error('Fehler beim Starten:', err);
     showToast(t('app.loadFailed', { error: err.message }), { type: 'error', duration: 0 });

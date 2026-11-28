@@ -1599,6 +1599,15 @@ export async function renderSettingsModal(initialTab = 'general') {
           </div>
         </section>
 
+        <section class="settings-section">
+          <h3>🔄 ${escapeHTML(t('settings.updates.startupScanTitle'))}</h3>
+          <label class="check-row">
+            <input type="checkbox" id="cfgScanOnStartup" ${draftSettings.scanOnStartup ? 'checked' : ''}>
+            <span>${escapeHTML(t('settings.updates.scanOnStartupLabel'))}</span>
+          </label>
+          <p class="panel-hint">${escapeHTML(t('settings.updates.scanOnStartupHint'))}</p>
+        </section>
+
         <section class="settings-section" id="settingsBackgroundSection">
           ${renderBackgroundSectionHtml()}
         </section>
@@ -1763,6 +1772,7 @@ export async function renderSettingsModal(initialTab = 'general') {
       enabledProviders: draftSettings.enabledProviders,
       vcpkgRoot: vcpkgInput ? vcpkgInput.value.trim() : draftSettings.vcpkgRoot,
       updateInterval: Number.isFinite(parsedUpdateInterval) ? parsedUpdateInterval : draftSettings.updateInterval,
+      scanOnStartup: Boolean(getInputEl(modal, '#cfgScanOnStartup')?.checked),
       autoRequestAdminForBatch: Boolean(getInputEl(modal, '#cfgAutoRequestAdminForBatch')?.checked),
       minimizeToTrayOnClose: Boolean(getInputEl(modal, '#cfgMinimizeToTrayOnClose')?.checked),
       autostartEnabled: Boolean(getInputEl(modal, '#cfgAutostartEnabled')?.checked),

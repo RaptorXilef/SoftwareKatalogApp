@@ -1514,7 +1514,10 @@
       "statusUpToDate": "Aktuell",
       "upToDateToast": "App ist auf dem neuesten Stand.",
       "downloadingBgToast": "App-Update wird im Hintergrund geladen...",
-      "updateFailedToast": "App-Update fehlgeschlagen: {error}"
+      "updateFailedToast": "App-Update fehlgeschlagen: {error}",
+      "startupScanTitle": "Update-Suche beim Start",
+      "scanOnStartupLabel": "Beim Programmstart automatisch nach Programm-Updates suchen",
+      "scanOnStartupHint": "Wenn deaktiviert, lädt die App beim Start sofort den zuletzt auf diesem PC gespeicherten Programm- und Update-Stand aus deinem lokalen Benutzerordner (%APPDATA%) für einen deutlich schnelleren Start. Manuelle Prüfungen sind jederzeit über \"PC prüfen\" oder \"Online-Updates\" möglich."
     },
     "background": {
       "title": "Hintergrundbetrieb, System-Tray & Auto-Update",

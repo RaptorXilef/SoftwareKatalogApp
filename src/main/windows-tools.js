@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, net, shell } from 'electron';
 import { buildPersistentIconIndexKeys, createIconCacheIndex } from '../shared/icon-cache-store.js';
-import { clearArchiveIconCache, getArchiveIconCacheStats, invalidateArchiveIcon } from './archive-icon-cache.js';
 import {
   buildIconCacheKey,
   deriveGitHubAvatarUrl,
@@ -40,6 +39,7 @@ import {
   markScanSourceDone,
 } from '../shared/scan-progress-logic.js';
 import { compareVersions, extractVersion } from '../shared/version.js';
+import { clearArchiveIconCache, getArchiveIconCacheStats, invalidateArchiveIcon } from './archive-icon-cache.js';
 import { evaluatePackageAccess } from './auth-service.js';
 import { loadCatalogWithLiveStatus, saveMetaJson } from './catalog-service.js';
 import { getConfig, getIconCacheDir, isInsideTargetDir, saveConfig } from './config.js';
